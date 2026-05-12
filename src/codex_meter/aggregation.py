@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from codex_meter.models import Aggregate, LoadResult, RuntimeOptions, UsageEvent
+from codex_meter.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions, UsageEvent
 from codex_meter.pricing import RateCard
 from codex_meter.timeutil import day_key, load_timezone, month_key, week_key
 
@@ -99,7 +99,7 @@ def aggregate_projects(
     result: LoadResult, options: RuntimeOptions, rate_card: RateCard | None = None
 ) -> list[Aggregate]:
     def key(event: UsageEvent) -> tuple[str, str]:
-        project = event.thread.cwd or "Unknown Project"
+        project = event.thread.cwd or UNKNOWN_PROJECT
         return project, project
 
     return sorted(

@@ -72,6 +72,7 @@ def test_daily_json_pins_schema(tmp_path) -> None:
         "window",
         "totals",
         "breakdowns",
+        "projects",
         "model_mode",
         "pricing",
         "metadata",
@@ -93,7 +94,24 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["pricing"]["mode"] == "model"
     assert payload["metadata"]["tier_sources"] == {"logged": 1}
     assert payload["metadata"]["plan_types"] == ["pro"]
+    assert payload["metadata"]["workspace_coverage"] == {
+        "events": 1,
+        "events_with_project": 1,
+        "event_coverage": 1.0,
+        "sessions": 1,
+        "sessions_with_project": 1,
+        "session_coverage": 1.0,
+        "project_count": 1,
+    }
     assert len(payload["breakdowns"]) == 1
+    assert len(payload["projects"]) == 1
+    assert payload["projects"][0]["session_count"] == 1
+    assert payload["projects"][0]["project_paths"] == ["/tmp/project-alpha"]
+    assert payload["projects"][0]["project_names"] == ["project-alpha"]
+    assert payload["projects"][0]["git_origins"] == ["https://github.com/example/project-alpha"]
+    assert payload["projects"][0]["git_branches"] == ["main"]
+    assert payload["projects"][0]["first_seen"]
+    assert payload["projects"][0]["last_seen"]
 
 
 def test_table_warns_when_model_has_unpriced_costs(tmp_path) -> None:
@@ -336,6 +354,38 @@ def test_project_table_uses_short_path_label(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert "project-alpha" in result.output
     assert "/tmp/project-alpha" not in result.output
+
+
+def test_project_json_exposes_workspace_provenance(tmp_path) -> None:
+    session_root, state_db, until, missing_cfg = _fixture(tmp_path)
+    result = _invoke(
+        [
+            "project",
+            "--days",
+            "1",
+            "--until",
+            until,
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+            "--format",
+            "json",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    project = payload["breakdowns"][0]
+
+    assert project["label"] == "/tmp/project-alpha"
+    assert project["session_count"] == 1
+    assert project["sessions"]
+    assert project["project_paths"] == ["/tmp/project-alpha"]
+    assert project["project_names"] == ["project-alpha"]
+    assert project["git_origins"] == ["https://github.com/example/project-alpha"]
+    assert project["first_seen"] == project["last_seen"]
 
 
 def test_daily_json_long_context_pricing(tmp_path) -> None:

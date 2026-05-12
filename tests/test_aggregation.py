@@ -29,6 +29,9 @@ def _event(
     service_tier: str = "standard",
     cwd: str = "/repo/a",
     session_id: str = "sess-a",
+    git_origin_url: str = "https://github.com/example/repo-a",
+    git_branch: str = "main",
+    git_sha: str = "abc123",
 ) -> UsageEvent:
     return UsageEvent(
         timestamp=timestamp,
@@ -44,7 +47,15 @@ def _event(
         model=model,
         service_tier=service_tier,
         tier_source="logged",
-        thread=ThreadMeta(cwd=cwd, model=model),
+        thread=ThreadMeta(
+            cwd=cwd,
+            git_origin_url=git_origin_url,
+            git_branch=git_branch,
+            git_sha=git_sha,
+            model=model,
+            source="cli",
+            agent_role="worker",
+        ),
         plan_type="pro",
     )
 
@@ -131,6 +142,32 @@ def test_aggregate_projects_groups_by_cwd(tmp_path) -> None:
     assert set(labels) == {"/repo/a", "/repo/b"}
     a_row = next(row for row in rows if row.label == "/repo/a")
     assert a_row.totals.events == 2
+
+
+def test_aggregate_rows_keep_project_provenance(tmp_path) -> None:
+    base = dt.datetime(2026, 5, 12, 12, 0, tzinfo=dt.UTC)
+    events = [
+        _event(base, cwd="/repo/a", session_id="sess-a", git_branch="main"),
+        _event(
+            base + dt.timedelta(minutes=5),
+            cwd="/repo/a",
+            session_id="sess-b",
+            git_branch="feature/granular",
+        ),
+    ]
+
+    row = aggregate_projects(_result(events), _options(tmp_path))[0]
+
+    assert row.session_ids == {"sess-a", "sess-b"}
+    assert row.project_paths == {"/repo/a"}
+    assert row.project_names == {"a"}
+    assert row.git_origins == {"https://github.com/example/repo-a"}
+    assert row.git_branches == {"main", "feature/granular"}
+    assert row.git_shas == {"abc123"}
+    assert row.agent_roles == {"worker"}
+    assert row.sources == {"cli"}
+    assert row.first_seen == base
+    assert row.last_seen == base + dt.timedelta(minutes=5)
 
 
 def test_aggregate_model_mode_keys_combine_model_and_tier(tmp_path) -> None:

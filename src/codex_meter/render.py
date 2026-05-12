@@ -12,7 +12,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from codex_meter.aggregation import aggregate_model_mode, aggregate_total
+from codex_meter.aggregation import aggregate_model_mode, aggregate_projects, aggregate_total
 from codex_meter.humanize import compact_number, format_int, redact, short_table_label
 from codex_meter.models import (
     Aggregate,
@@ -69,6 +69,17 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "service_tiers": sorted(item.service_tiers),
         "plan_types": sorted(item.plan_types),
         "usage_sources": sorted(item.usage_sources),
+        "session_count": len(item.session_ids),
+        "sessions": sorted(item.session_ids),
+        "project_paths": sorted(item.project_paths),
+        "project_names": sorted(item.project_names),
+        "git_origins": sorted(item.git_origins),
+        "git_branches": sorted(item.git_branches),
+        "git_shas": sorted(item.git_shas),
+        "agent_roles": sorted(item.agent_roles),
+        "sources": sorted(item.sources),
+        "first_seen": iso_z(item.first_seen) if item.first_seen else None,
+        "last_seen": iso_z(item.last_seen) if item.last_seen else None,
         "model_context_window": item.model_context_window,
         "long_context_events": item.long_context_events,
         "unknown_model_events": item.unknown_model_events,
@@ -150,6 +161,10 @@ def report_payload(
         "totals": aggregate_to_dict(total, options.show_prompts)
         | {"duplicates": result.duplicates},
         "breakdowns": [aggregate_to_dict(row, options.show_prompts) for row in rows],
+        "projects": [
+            aggregate_to_dict(row, options.show_prompts)
+            for row in aggregate_projects(result, options, rate_card=card)
+        ],
         "model_mode": [
             aggregate_to_dict(row, options.show_prompts)
             for row in aggregate_model_mode(result, options, rate_card=card)
@@ -167,12 +182,32 @@ def report_payload(
             "tier_sources": result.tier_sources,
             "plan_types": sorted(result.plan_types),
             "warning_count": len(result.warnings),
+            "workspace_coverage": workspace_coverage(result),
         },
         "rate_limit_samples": [
             rate_limit_sample_to_dict(sample)
             for sample in _recent_samples(result.credit_samples, options.top_threads)
         ],
         "warnings": result.warnings,
+    }
+
+
+def workspace_coverage(result: LoadResult) -> dict:
+    sessions = {event.session_id for event in result.events if event.session_id}
+    sessions_with_project = {
+        event.session_id for event in result.events if event.session_id and event.thread.cwd
+    }
+    project_paths = {event.thread.cwd for event in result.events if event.thread.cwd}
+    events = len(result.events)
+    events_with_project = sum(1 for event in result.events if event.thread.cwd)
+    return {
+        "events": events,
+        "events_with_project": events_with_project,
+        "event_coverage": events_with_project / events if events else 0.0,
+        "sessions": len(sessions),
+        "sessions_with_project": len(sessions_with_project),
+        "session_coverage": len(sessions_with_project) / len(sessions) if sessions else 0.0,
+        "project_count": len(project_paths),
     }
 
 
