@@ -511,6 +511,183 @@ def limits(
     render_limits(result, options, output_format, output)
 
 
+@app.command()
+def insights(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 10,
+) -> None:
+    """Surface actionable usage patterns and cost-saving opportunities."""
+    if output_format not in {"table", "json", "markdown"}:
+        raise _exit_error("--format must be one of: table, json, markdown")
+    options = _options(locals())
+    result = load_usage(options)
+    card = RateCard.load(options.rates_file, options.pricing_mode)
+    items = build_insights(result, options, rate_card=card)[: options.top_threads]
+    if output_format == "json":
+        text = json.dumps(insights_payload(items), indent=2) + "\n"
+    elif output_format == "markdown":
+        text = render_insights_markdown(items)
+    else:
+        text = _render_insights_table(items)
+    if output:
+        output.expanduser().write_text(text)
+    else:
+        typer.echo(text, nl=False)
+
+
+def _render_insights_table(items) -> str:
+    buffer = io.StringIO()
+    local_console = Console(file=buffer, width=120, _environ={})
+    local_console.print("[bold]Codex Meter - Insights[/bold]")
+    if not items:
+        local_console.print("No insights for this window.")
+        return buffer.getvalue()
+    table = Table(show_lines=False, expand=True)
+    table.add_column("Severity")
+    table.add_column("Insight")
+    table.add_column("Detail")
+    table.add_column("Action")
+    for item in items:
+        table.add_row(item.severity, item.title, item.detail, item.action)
+    local_console.print(table)
+    return buffer.getvalue()
+
+
+@app.command()
+def tail(
+    n: Annotated[int, typer.Option("--n", min=1, help="Number of recent records.")] = 20,
+    by: Annotated[str, typer.Option("--by", help="event or session.")] = "event",
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 10,
+) -> None:
+    """Show the most recent usage events or sessions."""
+    del top_threads
+    if by not in {"event", "session"}:
+        raise _exit_error("--by must be one of: event, session")
+    if output_format not in {"table", "json", "csv"}:
+        raise _exit_error("--format must be one of: table, json, csv")
+    options = _options(locals() | {"top_threads": n})
+    result = load_usage(options)
+    rows = _recent_tail_rows(result, n, by)
+    if output_format == "json":
+        text = json.dumps({"by": by, f"{by}s": rows}, indent=2) + "\n"
+    elif output_format == "csv":
+        text = _tail_csv(rows)
+    else:
+        text = _tail_table(rows, by, options)
+    if output:
+        output.expanduser().write_text(text)
+    else:
+        typer.echo(text, nl=False)
+
+
+def _recent_tail_rows(result: LoadResult, n: int, by: str) -> list[dict]:
+    events = sorted(result.events, key=lambda event: event.timestamp, reverse=True)
+    if by == "event":
+        return [_tail_event_dict(event) for event in events[:n]]
+    seen: set[str] = set()
+    rows: list[dict] = []
+    for event in events:
+        if event.session_id in seen:
+            continue
+        seen.add(event.session_id)
+        item = _tail_event_dict(event)
+        item["label"] = event.thread.title or event.thread.first_user_message or event.session_id
+        rows.append(item)
+        if len(rows) >= n:
+            break
+    return rows
+
+
+def _tail_event_dict(event) -> dict:
+    return {
+        "timestamp": iso_z(event.timestamp),
+        "session_id": event.session_id,
+        "model": event.model,
+        "service_tier": event.service_tier,
+        "input_tokens": event.usage.input_tokens,
+        "cached_input_tokens": event.usage.cached_input_tokens,
+        "output_tokens": event.usage.output_tokens,
+        "reasoning_output_tokens": event.usage.reasoning_output_tokens,
+        "total_tokens": event.usage.total_tokens,
+        "project": event.thread.cwd,
+    }
+
+
+def _tail_csv(rows: list[dict]) -> str:
+    if not rows:
+        return ""
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    return out.getvalue()
+
+
+def _tail_table(rows: list[dict], by: str, options: RuntimeOptions) -> str:
+    buffer = io.StringIO()
+    local_console = Console(file=buffer, width=options.width or 120, _environ={})
+    local_console.print(f"[bold]Codex Meter - Recent {by.title()}s[/bold]")
+    table = Table(show_lines=False, expand=True)
+    table.add_column("Time")
+    table.add_column("Model")
+    table.add_column("Tier")
+    table.add_column("Tokens", justify="right")
+    table.add_column("Project")
+    for row in rows:
+        table.add_row(
+            row["timestamp"],
+            row["model"],
+            row["service_tier"],
+            format_int(row["total_tokens"]),
+            row.get("project") or "-",
+        )
+    local_console.print(table)
+    return buffer.getvalue()
+
+
 _DOCTOR_STATUS_STYLES = {"ok": "green", "warn": "yellow", "fail": "red"}
 _DOCTOR_EXIT_CODES = {"ok": 0, "warn": 1, "fail": 2}
 
