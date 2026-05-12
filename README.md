@@ -115,6 +115,11 @@ Most report commands support:
 --top 20
 ```
 
+JSON reports also include a `projects` inventory for the selected window. That
+inventory keeps project paths, session counts, first/last seen timestamps,
+models, tiers, git branches/remotes when Codex recorded them, and the same token
+and cost fields as the primary breakdown.
+
 ## Live View
 
 ```bash
@@ -188,6 +193,13 @@ long-context event count, and tokens by model/tier/kind.
 - `~/.codex/state_5.sqlite`
 - `~/.codex/config.toml`
 
+Workspace attribution is local and evidence-based. For each usage event,
+`codex-meter` uses:
+
+1. JSONL `turn_context.cwd`
+2. SQLite `threads.cwd`
+3. `Unknown Project`
+
 Normal reports do not touch the network. The only networked command is explicit:
 
 ```bash
@@ -245,7 +257,8 @@ The default posture is local and conservative.
 - Reports read local files.
 - Prompt and session labels are redacted unless requested.
 - Receipts hide full session IDs and project paths by default.
-- JSON, CSV, Markdown, and HTML exports may still contain local metadata.
+- JSON, CSV, Markdown, and HTML exports may still contain local metadata,
+  including local paths and git remotes when those fields are available.
 
 Treat exports as sensitive unless you made them for sharing.
 
