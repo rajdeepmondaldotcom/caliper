@@ -4,10 +4,8 @@ import calendar
 import csv
 import datetime as dt
 import io
-import sqlite3
 import subprocess
 from collections.abc import Callable
-from contextlib import closing
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
@@ -47,6 +45,13 @@ from codex_meter.exporters import (
     render_receipt_markdown,
 )
 from codex_meter.forecasts import project as project_forecast
+from codex_meter.health import (
+    HEALTH_EXIT_CODES,
+    HEALTH_STATUS_STYLES,
+    build_health_report,
+    rate_card_age_days,
+    worst_health_status,
+)
 from codex_meter.humanize import short_table_label
 from codex_meter.insights import build_insights, insights_payload, render_insights_markdown
 from codex_meter.intervals import Interval, parse_interval
@@ -64,7 +69,6 @@ from codex_meter.output import (
     records_to_csv,
     records_to_markdown,
 )
-from codex_meter.parse_cache import default_cache_path
 from codex_meter.parser import load_usage
 from codex_meter.pricing import (
     MODEL_CARDS,
@@ -677,103 +681,6 @@ def _tail_table(rows: list[dict], by: str, options: RuntimeOptions) -> str:
     return buffer.getvalue()
 
 
-_DOCTOR_STATUS_STYLES = {"ok": "green", "warn": "yellow", "fail": "red"}
-_DOCTOR_EXIT_CODES = {"ok": 0, "warn": 1, "fail": 2}
-
-
-def _doctor_check(label: str, status: str, detail: str) -> tuple[str, str, str]:
-    return label, status, detail
-
-
-def _check_codex_cli_version() -> tuple[str, str, str]:
-    import subprocess
-
-    try:
-        completed = subprocess.run(  # noqa: S603 — codex on PATH, no shell.
-            ["codex", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-    except FileNotFoundError:
-        return _doctor_check("Codex CLI", "warn", "not found on PATH; install Codex for live data.")
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return _doctor_check("Codex CLI", "warn", f"could not invoke (`{exc}`)")
-    version = (completed.stdout or completed.stderr or "").strip().splitlines()[0:1]
-    return _doctor_check("Codex CLI", "ok", version[0] if version else "found")
-
-
-def _check_clock_skew(events) -> tuple[str, str, str]:
-    if not events:
-        return _doctor_check("Clock", "ok", "no events to compare")
-    latest = max(event.timestamp for event in events)
-    now = dt.datetime.now(tz=dt.UTC)
-    skew = (latest - now).total_seconds()
-    detail = _clock_skew_detail(skew)
-    if abs(skew) <= 300:
-        return _doctor_check("Clock", "ok", f"latest event {detail}")
-    if abs(skew) <= 86400:
-        return _doctor_check("Clock", "warn", f"latest event {detail}")
-    return _doctor_check("Clock", "fail", f"latest event {detail}")
-
-
-def _clock_skew_detail(skew_seconds: float) -> str:
-    seconds = int(abs(skew_seconds))
-    if seconds < 60:
-        amount = f"{seconds}s"
-    else:
-        minutes, rem_seconds = divmod(seconds, 60)
-        hours, minutes = divmod(minutes, 60)
-        amount = f"{hours}h {minutes}m" if hours else f"{minutes}m {rem_seconds}s"
-    if skew_seconds > 0:
-        return f"{amount} in the future"
-    return f"{amount} ago"
-
-
-def _check_rate_card_age() -> tuple[str, str, str]:
-    age = _rate_card_age_days()
-    if age <= 30:
-        return _doctor_check("Rate card", "ok", f"checked {age} days ago")
-    if age <= 90:
-        return _doctor_check("Rate card", "warn", f"checked {age} days ago")
-    return _doctor_check(
-        "Rate card",
-        "fail",
-        f"checked {age} days ago — run `codex-meter rates show` and consider updating.",
-    )
-
-
-def _check_state_db_readable(path: Path) -> tuple[str, str, str]:
-    if not path.exists():
-        return _doctor_check("State DB readable", "warn", "state DB is missing")
-    try:
-        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
-            conn.execute("select count(*) from sqlite_master").fetchone()
-    except sqlite3.Error as exc:
-        return _doctor_check("State DB readable", "warn", f"could not open read-only: {exc}")
-    return _doctor_check("State DB readable", "ok", "read-only open succeeded")
-
-
-def _check_rates_file(path: Path | None) -> tuple[str, str, str]:
-    if path is None:
-        return _doctor_check("Rates file", "ok", "using embedded rate card")
-    try:
-        RateCard.load(path)
-    except ValueError as exc:
-        return _doctor_check("Rates file", "fail", str(exc))
-    return _doctor_check("Rates file", "ok", str(path))
-
-
-def _check_python_version() -> tuple[str, str, str]:
-    import sys
-
-    info = sys.version_info
-    if info < (3, 11):
-        return _doctor_check("Python", "fail", f"{info.major}.{info.minor} — requires >= 3.11")
-    return _doctor_check("Python", "ok", f"{info.major}.{info.minor}.{info.micro}")
-
-
 @app.command()
 def doctor(
     session_root: SessionRootOpt = None,
@@ -802,109 +709,52 @@ def doctor(
 
     files = list(options.session_root.glob("**/*.jsonl")) if options.session_root.exists() else []
     result = load_usage(options) if files else None
-    checks: list[tuple[str, str, str]] = []
-    checks.append(_check_python_version())
-    checks.append(
-        _doctor_check(
-            "Session root",
-            "ok" if options.session_root.exists() else "fail",
-            f"{options.session_root} ({format_int(len(files))} JSONL files)",
-        )
+    checks = build_health_report(
+        options=options,
+        session_file_count=len(files),
+        result=result,
     )
-    checks.append(
-        _doctor_check(
-            "State DB",
-            "ok" if options.state_db.exists() else "warn",
-            str(options.state_db),
-        )
-    )
-    checks.append(_check_state_db_readable(options.state_db))
-    checks.append(
-        _doctor_check(
-            "Codex config",
-            "ok" if options.config_path.exists() else "warn",
-            str(options.config_path),
-        )
-    )
-    checks.append(_check_codex_cli_version())
-    checks.append(_check_rate_card_age())
-    checks.append(_check_rates_file(options.rates_file))
-    checks.append(_doctor_check("Parse cache", "ok", str(default_cache_path())))
-    checks.append(_check_clock_skew(result.events if result else []))
-    if result:
-        checks.append(
-            _doctor_check("Events loaded", "ok", f"{len(result.events):,} in last 7 days")
-        )
-        if result.events:
-            inferred = result.tier_sources.get("assumed", 0) + result.tier_sources.get(
-                "current-config", 0
-            )
-            if inferred == len(result.events):
-                checks.append(
-                    _doctor_check(
-                        "Tier coverage",
-                        "warn",
-                        "No events recorded a tier; pin one with --service-tier "
-                        "or --tier-overrides.",
-                    )
-                )
-        if result.warnings:
-            for warning in result.warnings:
-                checks.append(_doctor_check("Parser warning", "warn", warning))
-
-    worst = "ok"
-    severity_rank = {"ok": 0, "warn": 1, "fail": 2}
-    for _, status, _detail in checks:
-        if severity_rank[status] > severity_rank[worst]:
-            worst = status
+    worst = worst_health_status(checks)
+    check_records = [check.to_record() for check in checks]
 
     if output_format == "json":
         typer.echo(
             json_dumps(
                 {
-                    "checks": [
-                        {"label": label, "status": status, "detail": detail}
-                        for label, status, detail in checks
-                    ],
+                    "checks": check_records,
                     "worst": worst,
                 }
             )
         )
-        raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
+        raise typer.Exit(HEALTH_EXIT_CODES[worst])
 
     if output_format == "csv":
-        check_records = [
-            {"label": label, "status": status, "detail": detail} for label, status, detail in checks
-        ]
         typer.echo(
             records_to_csv(check_records),
             nl=False,
         )
-        raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
+        raise typer.Exit(HEALTH_EXIT_CODES[worst])
 
     if output_format == "markdown":
-        check_records = [
-            {"label": label, "status": status, "detail": detail} for label, status, detail in checks
-        ]
         typer.echo(
             records_to_markdown(check_records),
             nl=False,
         )
-        raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
+        raise typer.Exit(HEALTH_EXIT_CODES[worst])
 
     console.print("[bold]Codex Meter - Doctor[/bold]")
     table = Table(show_lines=False)
     table.add_column("Check")
     table.add_column("Status")
     table.add_column("Detail")
-    for label, status, detail in checks:
-        style = _DOCTOR_STATUS_STYLES[status]
-        table.add_row(label, f"[{style}]{status.upper()}[/{style}]", detail)
+    for check in checks:
+        style = HEALTH_STATUS_STYLES[check.status]
+        table.add_row(check.label, f"[{style}]{check.status.upper()}[/{style}]", check.detail)
     console.print(table)
     console.print(
-        f"Overall: [{_DOCTOR_STATUS_STYLES[worst]}]{worst.upper()}[/{_DOCTOR_STATUS_STYLES[worst]}]"
+        f"Overall: [{HEALTH_STATUS_STYLES[worst]}]{worst.upper()}[/{HEALTH_STATUS_STYLES[worst]}]"
     )
-    raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
+    raise typer.Exit(HEALTH_EXIT_CODES[worst])
 
 
 @app.command()
@@ -977,18 +827,6 @@ rates_app = typer.Typer(help="Inspect and manage the embedded Codex rate card.")
 app.add_typer(rates_app, name="rates")
 
 
-def _rate_card_age_days() -> int:
-    today = dt.date.today()
-    ages: list[int] = []
-    for source in PRICING_SOURCES:
-        try:
-            checked = dt.date.fromisoformat(source.checked)
-        except ValueError:
-            continue
-        ages.append((today - checked).days)
-    return max(ages) if ages else 0
-
-
 def _format_rates_label(rates: object) -> str:
     if rates is None:
         return "—"
@@ -1008,7 +846,7 @@ def rates_show(
     """Show the active rate card, sources, and age."""
     _validate_format(output_format)
 
-    age = _rate_card_age_days()
+    age = rate_card_age_days()
     stale = age > 90
 
     payload = {

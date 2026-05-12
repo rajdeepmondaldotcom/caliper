@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from codex_meter import cli, rate_audit
 from codex_meter.config import build_options
+from codex_meter.health import check_rates_file, check_state_db_readable
 from codex_meter.models import LoadResult, RateLimitSample, ThreadMeta, Usage, UsageEvent
 from codex_meter.output import records_to_csv, records_to_markdown
 from codex_meter.rate_audit import dedupe_models, extract_models_from_text, fetch_rate_sources
@@ -145,19 +146,19 @@ def test_extract_and_dedupe_models() -> None:
 
 
 def test_check_state_db_readable_reports_missing(tmp_path) -> None:
-    label, status, detail = cli._check_state_db_readable(tmp_path / "missing.sqlite")
-    assert label == "State DB readable"
-    assert status == "warn"
-    assert "missing" in detail
+    check = check_state_db_readable(tmp_path / "missing.sqlite")
+    assert check.label == "State DB readable"
+    assert check.status == "warn"
+    assert "missing" in check.detail
 
 
 def test_check_rates_file_reports_invalid(tmp_path) -> None:
     path = tmp_path / "rates.json"
     path.write_text("{")
-    label, status, detail = cli._check_rates_file(path)
-    assert label == "Rates file"
-    assert status == "fail"
-    assert "Could not read rates file" in detail
+    check = check_rates_file(path)
+    assert check.label == "Rates file"
+    assert check.status == "fail"
+    assert "Could not read rates file" in check.detail
 
 
 def test_options_wraps_value_error() -> None:
