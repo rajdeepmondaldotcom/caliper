@@ -35,9 +35,9 @@ dependencies = [
 prom = ["prometheus-client>=0.20"]
 
 [project.urls]
-Homepage = "https://github.com/rajdeepmondal/codex-meter"
-Repository = "https://github.com/rajdeepmondal/codex-meter"
-Issues = "https://github.com/rajdeepmondal/codex-meter/issues"
+Homepage = "https://github.com/rajdeepmondaldotcom/codex-meter"
+Repository = "https://github.com/rajdeepmondaldotcom/codex-meter"
+Issues = "https://github.com/rajdeepmondaldotcom/codex-meter/issues"
 
 [project.scripts]
 codex-meter = "codex_meter.cli:app"

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/rajdeepmondal/codex-meter/schemas/tier-overrides.schema.json",
+  "$id": "https://github.com/rajdeepmondaldotcom/codex-meter/schemas/tier-overrides.schema.json",
   "title": "codex-meter service-tier overrides",
   "description": "Per-session or per-window assertions of the service tier that applied during a Codex log range. Used when historical logs do not record the tier.",
   "oneOf": [

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/rajdeepmondal/codex-meter/schemas/rates.schema.json",
+  "$id": "https://github.com/rajdeepmondaldotcom/codex-meter/schemas/rates.schema.json",
   "title": "codex-meter rates override file",
   "description": "Local override of the embedded Codex rate card. Each model entry overrides the embedded values for that model only. Unlisted models keep the embedded rates.",
   "type": "object",
