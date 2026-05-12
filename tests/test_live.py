@@ -3,9 +3,15 @@ from __future__ import annotations
 import datetime as dt
 
 from rich.console import Console
+from typer.testing import CliRunner
 
+from codex_meter.cli import app
 from codex_meter.live import LiveFrame, render_frame
 from codex_meter.windows import WindowState
+
+from .conftest import make_state_db, token_event, turn_context, write_session
+
+runner = CliRunner()
 
 
 def _make_state(
@@ -47,11 +53,20 @@ def _render(frame: LiveFrame) -> str:
     return console.export_text()
 
 
+def _render_width(frame: LiveFrame, width: int) -> str:
+    console = Console(record=True, width=width, color_system=None)
+    console.print(render_frame(frame, width=width))
+    return console.export_text()
+
+
 def test_render_frame_shows_usage_and_windows() -> None:
     text = _render(_frame())
     assert "Codex Meter" in text
+    assert "q quit" in text
+    assert "? help" in text
     assert "Today" in text
-    assert "1,234.50 credits" in text
+    assert "1,234.50" in text
+    assert "credits" in text
     assert "$12.34" in text
     assert "Last 7d" in text
     assert "Primary 5h" in text
@@ -88,3 +103,41 @@ def test_render_frame_eta_line_appears_when_present() -> None:
     )
     text = _render(_frame(primary=primary))
     assert "Hits 100% by" in text
+
+
+def test_render_frame_stacks_panels_in_narrow_terminals() -> None:
+    text = _render_width(_frame(), 80)
+    assert "Codex Meter" in text
+    assert text.index("Usage") < text.index("Primary 5h") < text.index("Secondary weekly")
+
+
+def test_live_cli_accepts_max_ticks(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-live.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(now, {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}),
+        ],
+    )
+    state_db = tmp_path / "state.sqlite"
+    make_state_db(state_db, session_path)
+    result = runner.invoke(
+        app,
+        [
+            "live",
+            "--max-ticks",
+            "1",
+            "--interval",
+            "0.5",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+        ],
+    )
+    assert result.exit_code == 0, result.output

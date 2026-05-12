@@ -2319,10 +2319,15 @@ def live(
     service_tier: ServiceTierOpt = "auto",
     unknown_service_tier: UnknownTierOpt = "current-config",
     default_model: DefaultModelOpt = "gpt-5.5",
+    no_parse_cache: NoParseCacheOpt = False,
     interval: Annotated[
         float,
         typer.Option("--interval", "-i", min=0.5, help="Refresh seconds. Default 2."),
     ] = 2.0,
+    max_ticks: Annotated[
+        int | None,
+        typer.Option("--max-ticks", help="Stop after N ticks."),
+    ] = None,
 ) -> None:
     """Live TUI: today's usage, 5h + weekly window countdowns, burn rate."""
     try:
@@ -2337,7 +2342,8 @@ def live(
             service_tier=service_tier,
             unknown_service_tier=unknown_service_tier,
             default_model=default_model,
+            no_parse_cache=no_parse_cache,
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
-    run_live(options, interval=interval)
+    run_live(options, interval=interval, max_ticks=max_ticks)
