@@ -61,6 +61,7 @@ brew install rajdeepmondaldotcom/tap/codex-meter
 codex-meter                         # 7 / 30 / 90 day overview
 codex-meter doctor                  # check local data and assumptions
 codex-meter live                    # watch usage while you work
+codex-meter statusline              # compact one-line usage snapshot
 codex-meter project --days 30       # see project activity
 codex-meter models --days 30        # inspect model and tier mix
 ```
@@ -96,6 +97,7 @@ This is not an OpenAI billing ledger. It is local usage intelligence.
 | Models and tiers | `codex-meter models --days 30` |
 | Recent events | `codex-meter tail --n 20` |
 | Rate limits | `codex-meter limits` |
+| Statusline | `codex-meter statusline` |
 | Insights | `codex-meter insights` |
 | Forecast | `codex-meter forecast --days 14` |
 | Compare windows | `codex-meter compare --a "last 7 days" --b "previous 7 days"` |
@@ -137,6 +139,17 @@ Hotkeys:
 | `?` | Help |
 | `r` | Refresh |
 | `p` | Pause |
+
+## Statusline
+
+```bash
+codex-meter statusline
+codex-meter statusline --format json
+```
+
+Prints one compact snapshot for prompts, editor hooks, and scripts: latest
+model/tier, top project, today's credits and API-equivalent dollars, trailing
+7-day credits, 5-hour and weekly reset windows, cache ratio, and pricing status.
 
 ## Budgets
 
@@ -219,6 +232,14 @@ rules, uses exact decimal math internally, and reports whether service tiers
 came from logs, config, overrides, or assumptions. If a model or credit rate is
 not source-verified, reports mark pricing as partial instead of silently using a
 fallback as exact.
+
+Codex subscription plans are treated as limit metadata, not as hidden pricing
+multipliers. Reports preserve the raw `plan_type`, add normalized subscription
+plan details for Free, Go, Plus, Pro, Business, Enterprise, Edu, Health, Gov,
+and ChatGPT for Teachers, and use the logged `codex` rate-limit bucket for
+remaining-window math when multiple buckets are present. Free/Go promotional
+access and Enterprise-family legacy-rate-card ambiguity are surfaced as
+warnings instead of being guessed.
 
 Reasoning tokens are only billed separately when the Codex token log shows they
 are not already included in output tokens. This prevents double-counting on

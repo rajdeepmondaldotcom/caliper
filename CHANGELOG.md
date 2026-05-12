@@ -17,11 +17,16 @@
 - Release automation now builds checked wheel/sdist artifacts, publishes through
   PyPI Trusted Publishing, and attaches release assets on GitHub.
 - Dependabot configuration now covers `uv` dependencies and GitHub Actions.
+- Reports now expose normalized Codex subscription-plan metadata while preserving
+  the raw plan strings seen in local logs.
+- Added `statusline` for a compact prompt/hook-friendly usage snapshot.
 
 ### Changed
 - Cost reporting now uses exact decimal arithmetic internally, exposes exact
   decimal strings in JSON output, and marks partial or estimated pricing when
   rates or service tiers are not source-verified.
+- Rate-limit window math now prefers the main `codex` subscription bucket when
+  logs also include model-specific preview buckets.
 - `rates refresh --allow-network` audits fast-mode multipliers and long-context
   rules in addition to per-token rates.
 - GPT-5.4 now carries the official `>272K` long-context rule.
