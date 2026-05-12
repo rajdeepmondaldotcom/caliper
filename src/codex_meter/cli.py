@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -18,9 +19,10 @@ from codex_meter.aggregation import (
     aggregate_weekly,
 )
 from codex_meter.config import build_options
-from codex_meter.models import LoadResult
+from codex_meter.models import Aggregate, LoadResult, RuntimeOptions
 from codex_meter.parser import load_usage
-from codex_meter.render import format_int, render
+from codex_meter.pricing import MODEL_CARDS, PRICING_SOURCES, RateCard
+from codex_meter.render import format_int, render, render_limits
 from codex_meter.timeutil import iso_z, local_timezone
 
 app = typer.Typer(
@@ -29,9 +31,90 @@ app = typer.Typer(
 )
 console = Console()
 
+OUTPUT_FORMATS = ("table", "json", "csv", "markdown")
 
+SinceOpt = Annotated[
+    str | None,
+    typer.Option("--since", "-s", help="Start date/time. Supports YYYY-MM-DD, YYYYMMDD, or ISO."),
+]
+UntilOpt = Annotated[
+    str | None, typer.Option("--until", "-u", help="End date/time. Defaults to now.")
+]
+DaysOpt = Annotated[float | None, typer.Option("--days", help="Rolling day window before --until.")]
+TimezoneOpt = Annotated[
+    str, typer.Option("--timezone", "-z", help="Timezone for grouping. Use local or an IANA name.")
+]
+SessionRootOpt = Annotated[
+    Path | None, typer.Option("--session-root", help="Codex session JSONL root.")
+]
+StateDbOpt = Annotated[Path | None, typer.Option("--state-db", help="Codex state_5.sqlite path.")]
+CodexConfigOpt = Annotated[
+    Path | None, typer.Option("--codex-config", help="Codex config.toml path.")
+]
+ConfigOpt = Annotated[Path | None, typer.Option("--config", help="codex-meter config TOML path.")]
+PricingModeOpt = Annotated[str, typer.Option("--pricing-mode")]
+ServiceTierOpt = Annotated[str, typer.Option("--service-tier")]
+UnknownTierOpt = Annotated[str, typer.Option("--unknown-service-tier")]
+TierOverridesOpt = Annotated[Path | None, typer.Option("--tier-overrides")]
+RatesFileOpt = Annotated[Path | None, typer.Option("--rates-file")]
+NoDedupeOpt = Annotated[bool, typer.Option("--no-dedupe")]
+DefaultModelOpt = Annotated[str, typer.Option("--default-model")]
+ShowPromptsOpt = Annotated[bool, typer.Option("--show-prompts")]
+OfflineOpt = Annotated[bool, typer.Option("--offline/--no-offline")]
+CompactOpt = Annotated[bool, typer.Option("--compact")]
+TopThreadsOpt = Annotated[int, typer.Option("--top-threads")]
 FormatOpt = Annotated[str, typer.Option("--format", "-f", help="table, json, csv, or markdown.")]
-PathOpt = Annotated[Path | None, typer.Option()]
+OutputOpt = Annotated[Path | None, typer.Option("--output", help="Write output to a file.")]
+
+RowsFn = Callable[[LoadResult, RuntimeOptions], list[Aggregate]]
+
+OPTION_KEYS = (
+    "since",
+    "until",
+    "days",
+    "timezone",
+    "session_root",
+    "state_db",
+    "codex_config",
+    "config",
+    "pricing_mode",
+    "service_tier",
+    "unknown_service_tier",
+    "tier_overrides",
+    "rates_file",
+    "no_dedupe",
+    "default_model",
+    "show_prompts",
+    "offline",
+    "compact",
+    "top_threads",
+)
+
+
+def _exit_error(message: str) -> typer.Exit:
+    console.print(f"[red]error:[/red] {message}")
+    return typer.Exit(2)
+
+
+def _validate_format(output_format: str) -> None:
+    if output_format not in OUTPUT_FORMATS:
+        raise _exit_error(f"--format must be one of: {', '.join(OUTPUT_FORMATS)}")
+
+
+def _options(values: dict) -> RuntimeOptions:
+    kwargs = {key: values[key] for key in OPTION_KEYS if key in values}
+    try:
+        return build_options(**kwargs)
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+
+def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
+    _validate_format(values["output_format"])
+    options = _options(values)
+    result = load_usage(options)
+    rows = rows_fn(result, options)
+    render(result, options, rows, name, values["output_format"], values["output"])
 
 
 def version_callback(value: bool) -> None:
@@ -49,403 +132,257 @@ def main(
     ] = False,
 ) -> None:
     if ctx.invoked_subcommand is None:
-        run_overview()
+        _run_overview("table", None)
 
 
-def make_options(
-    since: str | None,
-    until: str | None,
-    days: float | None,
-    timezone: str,
-    session_root: Path | None,
-    state_db: Path | None,
-    codex_config: Path | None,
-    config: Path | None,
-    pricing_mode: str,
-    service_tier: str,
-    unknown_service_tier: str,
-    tier_overrides: Path | None,
-    rates_file: Path | None,
-    no_dedupe: bool,
-    default_model: str,
-    show_prompts: bool,
-    offline: bool,
-    compact: bool,
-    top_threads: int,
-):
-    try:
-        return build_options(
-            since=since,
-            until=until,
-            days=days,
-            timezone=timezone,
-            session_root=session_root,
-            state_db=state_db,
-            codex_config=codex_config,
-            config=config,
-            pricing_mode=pricing_mode,
-            service_tier=service_tier,
-            unknown_service_tier=unknown_service_tier,
-            tier_overrides=tier_overrides,
-            rates_file=rates_file,
-            no_dedupe=no_dedupe,
-            default_model=default_model,
-            show_prompts=show_prompts,
-            offline=offline,
-            compact=compact,
-            top_threads=top_threads,
-        )
-    except ValueError as exc:
-        console.print(f"[red]error:[/red] {exc}")
-        raise typer.Exit(2) from exc
-
-
-def command_options(
-    since: str | None = None,
-    until: str | None = None,
-    days: float | None = None,
-    timezone: str = "local",
-    session_root: Path | None = None,
-    state_db: Path | None = None,
-    codex_config: Path | None = None,
-    config: Path | None = None,
-    pricing_mode: str = "model",
-    service_tier: str = "auto",
-    unknown_service_tier: str = "current-config",
-    tier_overrides: Path | None = None,
-    rates_file: Path | None = None,
-    no_dedupe: bool = False,
-    default_model: str = "gpt-5.5",
-    show_prompts: bool = False,
-    offline: bool = True,
-    compact: bool = False,
-    top_threads: int = 10,
-):
-    return make_options(
-        since,
-        until,
-        days,
-        timezone,
-        session_root,
-        state_db,
-        codex_config,
-        config,
-        pricing_mode,
-        service_tier,
-        unknown_service_tier,
-        tier_overrides,
-        rates_file,
-        no_dedupe,
-        default_model,
-        show_prompts,
-        offline,
-        compact,
-        top_threads,
-    )
-
-
-def usage_kwargs(values: dict) -> dict:
-    ignored = {"output_format", "output"}
-    return {key: value for key, value in values.items() if key not in ignored}
-
-
-def run_overview(output_format: str = "table", output: Path | None = None) -> None:
+def _run_overview(output_format: str, output: Path | None) -> None:
+    _validate_format(output_format)
     now = dt.datetime.now(tz=local_timezone())
-    longest_options = build_options(days=90, until=iso_z(now))
+    try:
+        longest_options = build_options(days=90, until=iso_z(now))
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
     longest_result = load_usage(longest_options)
-    rows = []
+    rate_card = RateCard.load(longest_options.rates_file, longest_options.pricing_mode)
+    rows: list[Aggregate] = []
     for days in (7, 30, 90):
         start = now - dt.timedelta(days=days)
-        period_events = [event for event in longest_result.events if start <= event.timestamp < now]
-        period_result = LoadResult(
-            events=period_events,
+        events = [event for event in longest_result.events if start <= event.timestamp < now]
+        window = LoadResult(
+            events=events,
             duplicates=0,
             tier_sources=longest_result.tier_sources,
             plan_types=longest_result.plan_types,
             credit_samples=[],
             warnings=longest_result.warnings,
         )
-        total = aggregate_total(period_result, longest_options, label=f"Last {days} days")
-        rows.append(total)
+        rows.append(
+            aggregate_total(window, longest_options, label=f"Last {days} days", rate_card=rate_card)
+        )
     render(longest_result, longest_options, rows, "overview", output_format, output)
 
 
-def run_grouped(command: str, rows_fn, output_format: str, output: Path | None, **kwargs) -> None:
-    options = command_options(**kwargs)
-    result = load_usage(options)
-    rows = rows_fn(result, options)
-    render(result, options, rows, command, output_format, output)
-
-
-COMMON_HELP = {
-    "since": "Start date/time. Supports YYYY-MM-DD, YYYYMMDD, or ISO datetimes.",
-    "until": "End date/time. Defaults to now.",
-    "days": "Rolling day window before --until.",
-    "timezone": "Timezone for grouping. Use local or an IANA name.",
-    "session_root": "Codex session JSONL root.",
-    "state_db": "Codex state_5.sqlite path.",
-    "codex_config": "Codex config.toml path.",
-    "config": "codex-meter config TOML path.",
-    "output": "Write output to a file.",
-}
-
-
-def common_command_params(**kwargs):
-    return kwargs
-
-
 @app.command()
-def overview(
-    output_format: FormatOpt = "table",
-    output: PathOpt = None,
-) -> None:
+def overview(output_format: FormatOpt = "table", output: OutputOpt = None) -> None:
     """Show rolling 7/30/90 day usage."""
-    run_overview(output_format, output)
+    _run_overview(output_format, output)
 
 
 @app.command()
 def daily(
-    since: Annotated[str | None, typer.Option("--since", "-s", help=COMMON_HELP["since"])] = None,
-    until: Annotated[str | None, typer.Option("--until", "-u", help=COMMON_HELP["until"])] = None,
-    days: Annotated[float | None, typer.Option("--days", help=COMMON_HELP["days"])] = None,
-    timezone: Annotated[
-        str, typer.Option("--timezone", "-z", help=COMMON_HELP["timezone"])
-    ] = "local",
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
     output_format: FormatOpt = "table",
-    output: PathOpt = None,
-    session_root: Annotated[
-        Path | None, typer.Option("--session-root", help=COMMON_HELP["session_root"])
-    ] = None,
-    state_db: Annotated[
-        Path | None, typer.Option("--state-db", help=COMMON_HELP["state_db"])
-    ] = None,
-    codex_config: Annotated[
-        Path | None, typer.Option("--codex-config", help=COMMON_HELP["codex_config"])
-    ] = None,
-    config: Annotated[Path | None, typer.Option("--config", help=COMMON_HELP["config"])] = None,
-    pricing_mode: Annotated[str, typer.Option("--pricing-mode")] = "model",
-    service_tier: Annotated[str, typer.Option("--service-tier")] = "auto",
-    unknown_service_tier: Annotated[str, typer.Option("--unknown-service-tier")] = "current-config",
-    tier_overrides: Annotated[Path | None, typer.Option("--tier-overrides")] = None,
-    rates_file: Annotated[Path | None, typer.Option("--rates-file")] = None,
-    no_dedupe: Annotated[bool, typer.Option("--no-dedupe")] = False,
-    default_model: Annotated[str, typer.Option("--default-model")] = "gpt-5.5",
-    show_prompts: Annotated[bool, typer.Option("--show-prompts")] = False,
-    offline: Annotated[bool, typer.Option("--offline/--no-offline")] = True,
-    compact: Annotated[bool, typer.Option("--compact")] = False,
-    top_threads: Annotated[int, typer.Option("--top-threads")] = 10,
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by day."""
-    run_grouped("daily", aggregate_daily, output_format, output, **usage_kwargs(locals()))
+    _run_grouped("daily", aggregate_daily, locals())
 
 
 @app.command()
 def weekly(
-    since: Annotated[str | None, typer.Option("--since", "-s", help=COMMON_HELP["since"])] = None,
-    until: Annotated[str | None, typer.Option("--until", "-u", help=COMMON_HELP["until"])] = None,
-    days: Annotated[float | None, typer.Option("--days", help=COMMON_HELP["days"])] = None,
-    timezone: Annotated[
-        str, typer.Option("--timezone", "-z", help=COMMON_HELP["timezone"])
-    ] = "local",
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
     output_format: FormatOpt = "table",
-    output: PathOpt = None,
-    session_root: Annotated[
-        Path | None, typer.Option("--session-root", help=COMMON_HELP["session_root"])
-    ] = None,
-    state_db: Annotated[
-        Path | None, typer.Option("--state-db", help=COMMON_HELP["state_db"])
-    ] = None,
-    codex_config: Annotated[
-        Path | None, typer.Option("--codex-config", help=COMMON_HELP["codex_config"])
-    ] = None,
-    config: Annotated[Path | None, typer.Option("--config", help=COMMON_HELP["config"])] = None,
-    pricing_mode: Annotated[str, typer.Option("--pricing-mode")] = "model",
-    service_tier: Annotated[str, typer.Option("--service-tier")] = "auto",
-    unknown_service_tier: Annotated[str, typer.Option("--unknown-service-tier")] = "current-config",
-    tier_overrides: Annotated[Path | None, typer.Option("--tier-overrides")] = None,
-    rates_file: Annotated[Path | None, typer.Option("--rates-file")] = None,
-    no_dedupe: Annotated[bool, typer.Option("--no-dedupe")] = False,
-    default_model: Annotated[str, typer.Option("--default-model")] = "gpt-5.5",
-    show_prompts: Annotated[bool, typer.Option("--show-prompts")] = False,
-    offline: Annotated[bool, typer.Option("--offline/--no-offline")] = True,
-    compact: Annotated[bool, typer.Option("--compact")] = False,
-    top_threads: Annotated[int, typer.Option("--top-threads")] = 10,
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by ISO week."""
-    run_grouped("weekly", aggregate_weekly, output_format, output, **usage_kwargs(locals()))
+    _run_grouped("weekly", aggregate_weekly, locals())
 
 
 @app.command()
 def monthly(
-    since: Annotated[str | None, typer.Option("--since", "-s", help=COMMON_HELP["since"])] = None,
-    until: Annotated[str | None, typer.Option("--until", "-u", help=COMMON_HELP["until"])] = None,
-    days: Annotated[float | None, typer.Option("--days", help=COMMON_HELP["days"])] = None,
-    timezone: Annotated[
-        str, typer.Option("--timezone", "-z", help=COMMON_HELP["timezone"])
-    ] = "local",
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
     output_format: FormatOpt = "table",
-    output: PathOpt = None,
-    session_root: Annotated[
-        Path | None, typer.Option("--session-root", help=COMMON_HELP["session_root"])
-    ] = None,
-    state_db: Annotated[
-        Path | None, typer.Option("--state-db", help=COMMON_HELP["state_db"])
-    ] = None,
-    codex_config: Annotated[
-        Path | None, typer.Option("--codex-config", help=COMMON_HELP["codex_config"])
-    ] = None,
-    config: Annotated[Path | None, typer.Option("--config", help=COMMON_HELP["config"])] = None,
-    pricing_mode: Annotated[str, typer.Option("--pricing-mode")] = "model",
-    service_tier: Annotated[str, typer.Option("--service-tier")] = "auto",
-    unknown_service_tier: Annotated[str, typer.Option("--unknown-service-tier")] = "current-config",
-    tier_overrides: Annotated[Path | None, typer.Option("--tier-overrides")] = None,
-    rates_file: Annotated[Path | None, typer.Option("--rates-file")] = None,
-    no_dedupe: Annotated[bool, typer.Option("--no-dedupe")] = False,
-    default_model: Annotated[str, typer.Option("--default-model")] = "gpt-5.5",
-    show_prompts: Annotated[bool, typer.Option("--show-prompts")] = False,
-    offline: Annotated[bool, typer.Option("--offline/--no-offline")] = True,
-    compact: Annotated[bool, typer.Option("--compact")] = False,
-    top_threads: Annotated[int, typer.Option("--top-threads")] = 10,
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by month."""
-    run_grouped("monthly", aggregate_monthly, output_format, output, **usage_kwargs(locals()))
+    _run_grouped("monthly", aggregate_monthly, locals())
 
 
 @app.command(name="session")
 def session_command(
-    since: Annotated[str | None, typer.Option("--since", "-s", help=COMMON_HELP["since"])] = None,
-    until: Annotated[str | None, typer.Option("--until", "-u", help=COMMON_HELP["until"])] = None,
-    days: Annotated[float | None, typer.Option("--days", help=COMMON_HELP["days"])] = None,
-    timezone: Annotated[
-        str, typer.Option("--timezone", "-z", help=COMMON_HELP["timezone"])
-    ] = "local",
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
     output_format: FormatOpt = "table",
-    output: PathOpt = None,
-    session_root: Annotated[
-        Path | None, typer.Option("--session-root", help=COMMON_HELP["session_root"])
-    ] = None,
-    state_db: Annotated[
-        Path | None, typer.Option("--state-db", help=COMMON_HELP["state_db"])
-    ] = None,
-    codex_config: Annotated[
-        Path | None, typer.Option("--codex-config", help=COMMON_HELP["codex_config"])
-    ] = None,
-    config: Annotated[Path | None, typer.Option("--config", help=COMMON_HELP["config"])] = None,
-    pricing_mode: Annotated[str, typer.Option("--pricing-mode")] = "model",
-    service_tier: Annotated[str, typer.Option("--service-tier")] = "auto",
-    unknown_service_tier: Annotated[str, typer.Option("--unknown-service-tier")] = "current-config",
-    tier_overrides: Annotated[Path | None, typer.Option("--tier-overrides")] = None,
-    rates_file: Annotated[Path | None, typer.Option("--rates-file")] = None,
-    no_dedupe: Annotated[bool, typer.Option("--no-dedupe")] = False,
-    default_model: Annotated[str, typer.Option("--default-model")] = "gpt-5.5",
-    show_prompts: Annotated[bool, typer.Option("--show-prompts")] = False,
-    offline: Annotated[bool, typer.Option("--offline/--no-offline")] = True,
-    compact: Annotated[bool, typer.Option("--compact")] = False,
-    top_threads: Annotated[int, typer.Option("--top-threads")] = 10,
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by Codex session."""
-    run_grouped("session", aggregate_sessions, output_format, output, **usage_kwargs(locals()))
+    _run_grouped("session", aggregate_sessions, locals())
 
 
 @app.command()
 def project(
-    since: Annotated[str | None, typer.Option("--since", "-s", help=COMMON_HELP["since"])] = None,
-    until: Annotated[str | None, typer.Option("--until", "-u", help=COMMON_HELP["until"])] = None,
-    days: Annotated[float | None, typer.Option("--days", help=COMMON_HELP["days"])] = None,
-    timezone: Annotated[
-        str, typer.Option("--timezone", "-z", help=COMMON_HELP["timezone"])
-    ] = "local",
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
     output_format: FormatOpt = "table",
-    output: PathOpt = None,
-    session_root: Annotated[
-        Path | None, typer.Option("--session-root", help=COMMON_HELP["session_root"])
-    ] = None,
-    state_db: Annotated[
-        Path | None, typer.Option("--state-db", help=COMMON_HELP["state_db"])
-    ] = None,
-    codex_config: Annotated[
-        Path | None, typer.Option("--codex-config", help=COMMON_HELP["codex_config"])
-    ] = None,
-    config: Annotated[Path | None, typer.Option("--config", help=COMMON_HELP["config"])] = None,
-    pricing_mode: Annotated[str, typer.Option("--pricing-mode")] = "model",
-    service_tier: Annotated[str, typer.Option("--service-tier")] = "auto",
-    unknown_service_tier: Annotated[str, typer.Option("--unknown-service-tier")] = "current-config",
-    tier_overrides: Annotated[Path | None, typer.Option("--tier-overrides")] = None,
-    rates_file: Annotated[Path | None, typer.Option("--rates-file")] = None,
-    no_dedupe: Annotated[bool, typer.Option("--no-dedupe")] = False,
-    default_model: Annotated[str, typer.Option("--default-model")] = "gpt-5.5",
-    show_prompts: Annotated[bool, typer.Option("--show-prompts")] = False,
-    offline: Annotated[bool, typer.Option("--offline/--no-offline")] = True,
-    compact: Annotated[bool, typer.Option("--compact")] = False,
-    top_threads: Annotated[int, typer.Option("--top-threads")] = 10,
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by project/cwd."""
-    run_grouped("project", aggregate_projects, output_format, output, **usage_kwargs(locals()))
+    _run_grouped("project", aggregate_projects, locals())
+
+
+@app.command()
+def models(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    top_threads: TopThreadsOpt = 10,
+) -> None:
+    """Show usage grouped by model and service tier."""
+    _run_grouped("models", aggregate_model_mode, locals())
 
 
 @app.command()
 def limits(
-    since: Annotated[str | None, typer.Option("--since", "-s", help=COMMON_HELP["since"])] = None,
-    until: Annotated[str | None, typer.Option("--until", "-u", help=COMMON_HELP["until"])] = None,
-    days: Annotated[float | None, typer.Option("--days", help=COMMON_HELP["days"])] = 7,
-    timezone: Annotated[
-        str, typer.Option("--timezone", "-z", help=COMMON_HELP["timezone"])
-    ] = "local",
-    session_root: Annotated[
-        Path | None, typer.Option("--session-root", help=COMMON_HELP["session_root"])
-    ] = None,
-    state_db: Annotated[
-        Path | None, typer.Option("--state-db", help=COMMON_HELP["state_db"])
-    ] = None,
-    codex_config: Annotated[
-        Path | None, typer.Option("--codex-config", help=COMMON_HELP["codex_config"])
-    ] = None,
-    config: Annotated[Path | None, typer.Option("--config", help=COMMON_HELP["config"])] = None,
-    pricing_mode: Annotated[str, typer.Option("--pricing-mode")] = "model",
-    service_tier: Annotated[str, typer.Option("--service-tier")] = "auto",
-    unknown_service_tier: Annotated[str, typer.Option("--unknown-service-tier")] = "current-config",
-    tier_overrides: Annotated[Path | None, typer.Option("--tier-overrides")] = None,
-    rates_file: Annotated[Path | None, typer.Option("--rates-file")] = None,
-    no_dedupe: Annotated[bool, typer.Option("--no-dedupe")] = False,
-    default_model: Annotated[str, typer.Option("--default-model")] = "gpt-5.5",
-    show_prompts: Annotated[bool, typer.Option("--show-prompts")] = False,
-    offline: Annotated[bool, typer.Option("--offline/--no-offline")] = True,
-    compact: Annotated[bool, typer.Option("--compact")] = False,
-    top_threads: Annotated[int, typer.Option("--top-threads")] = 10,
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = 7,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show recent rate-limit and credit samples."""
-    options = command_options(**locals())
+    _validate_format(output_format)
+    options = _options(locals())
     result = load_usage(options)
-    console.print("[bold]Codex Meter - Limits[/bold]")
-    if not result.credit_samples:
-        console.print("No rate-limit samples with credits fields found.")
-        return
-    for event in result.credit_samples:
-        console.print(
-            f"- {iso_z(event.timestamp)} | credits={event.credits} | "
-            f"primary={event.primary_used_percent}% | secondary={event.secondary_used_percent}%"
-        )
+    render_limits(result, options, output_format, output)
 
 
 @app.command()
 def doctor(
-    session_root: Annotated[
-        Path | None, typer.Option("--session-root", help=COMMON_HELP["session_root"])
-    ] = None,
-    state_db: Annotated[
-        Path | None, typer.Option("--state-db", help=COMMON_HELP["state_db"])
-    ] = None,
-    codex_config: Annotated[
-        Path | None, typer.Option("--codex-config", help=COMMON_HELP["codex_config"])
-    ] = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
 ) -> None:
     """Check local Codex data paths."""
-    options = build_options(
-        days=1,
-        session_root=session_root,
-        state_db=state_db,
-        codex_config=codex_config,
-    )
+    try:
+        options = build_options(
+            days=1,
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
     files = list(options.session_root.glob("**/*.jsonl")) if options.session_root.exists() else []
     session_status = "OK" if options.session_root.exists() else "MISSING"
     state_status = "OK" if options.state_db.exists() else "MISSING"
@@ -458,37 +395,126 @@ def doctor(
     console.print("Pricing: embedded offline rate card")
 
 
-@app.command()
-def models(
-    since: Annotated[str | None, typer.Option("--since", "-s", help=COMMON_HELP["since"])] = None,
-    until: Annotated[str | None, typer.Option("--until", "-u", help=COMMON_HELP["until"])] = None,
-    days: Annotated[float | None, typer.Option("--days", help=COMMON_HELP["days"])] = None,
-    timezone: Annotated[
-        str, typer.Option("--timezone", "-z", help=COMMON_HELP["timezone"])
-    ] = "local",
-    output_format: FormatOpt = "table",
-    output: PathOpt = None,
-    session_root: Annotated[
-        Path | None, typer.Option("--session-root", help=COMMON_HELP["session_root"])
-    ] = None,
-    state_db: Annotated[
-        Path | None, typer.Option("--state-db", help=COMMON_HELP["state_db"])
-    ] = None,
-    codex_config: Annotated[
-        Path | None, typer.Option("--codex-config", help=COMMON_HELP["codex_config"])
-    ] = None,
-    config: Annotated[Path | None, typer.Option("--config", help=COMMON_HELP["config"])] = None,
-    pricing_mode: Annotated[str, typer.Option("--pricing-mode")] = "model",
-    service_tier: Annotated[str, typer.Option("--service-tier")] = "auto",
-    unknown_service_tier: Annotated[str, typer.Option("--unknown-service-tier")] = "current-config",
-    tier_overrides: Annotated[Path | None, typer.Option("--tier-overrides")] = None,
-    rates_file: Annotated[Path | None, typer.Option("--rates-file")] = None,
-    no_dedupe: Annotated[bool, typer.Option("--no-dedupe")] = False,
-    default_model: Annotated[str, typer.Option("--default-model")] = "gpt-5.5",
-    show_prompts: Annotated[bool, typer.Option("--show-prompts")] = False,
-    offline: Annotated[bool, typer.Option("--offline/--no-offline")] = True,
-    compact: Annotated[bool, typer.Option("--compact")] = False,
-    top_threads: Annotated[int, typer.Option("--top-threads")] = 10,
+rates_app = typer.Typer(help="Inspect and manage the embedded Codex rate card.")
+app.add_typer(rates_app, name="rates")
+
+
+def _rate_card_age_days() -> int:
+    today = dt.date.today()
+    ages: list[int] = []
+    for source in PRICING_SOURCES:
+        try:
+            checked = dt.date.fromisoformat(source.checked)
+        except ValueError:
+            continue
+        ages.append((today - checked).days)
+    return max(ages) if ages else 0
+
+
+def _format_rates_label(rates: object) -> str:
+    if rates is None:
+        return "—"
+    return (
+        f"in={rates.input:g} cached={rates.cached_input:g} "
+        f"out={rates.output:g} reason={rates.effective_reasoning_output:g}"
+    )
+
+
+@rates_app.command("show")
+def rates_show(
+    output_format: Annotated[
+        str,
+        typer.Option("--format", "-f", help="table or json."),
+    ] = "table",
 ) -> None:
-    """Show usage grouped by model and service tier."""
-    run_grouped("models", aggregate_model_mode, output_format, output, **usage_kwargs(locals()))
+    """Show the active rate card, sources, and age."""
+    if output_format not in {"table", "json"}:
+        raise _exit_error("--format must be one of: table, json")
+
+    age = _rate_card_age_days()
+    stale = age > 90
+
+    if output_format == "json":
+        import json as _json
+
+        payload = {
+            "checked": [
+                {"name": source.name, "url": source.url, "checked": source.checked}
+                for source in PRICING_SOURCES
+            ],
+            "age_days": age,
+            "stale": stale,
+            "models": [
+                {
+                    "name": card.name,
+                    "api": (
+                        {
+                            "input": card.api_rates.input,
+                            "cached_input": card.api_rates.cached_input,
+                            "output": card.api_rates.output,
+                            "reasoning_output": card.api_rates.effective_reasoning_output,
+                        }
+                        if card.api_rates
+                        else None
+                    ),
+                    "credits": {
+                        "input": card.credit_rates.input,
+                        "cached_input": card.credit_rates.cached_input,
+                        "output": card.credit_rates.output,
+                        "reasoning_output": card.credit_rates.effective_reasoning_output,
+                    },
+                    "fast_multiplier": card.fast_multiplier,
+                    "long_context": (
+                        {
+                            "threshold": card.long_context.threshold,
+                            "input_mult": card.long_context.input_mult,
+                            "output_mult": card.long_context.output_mult,
+                        }
+                        if card.long_context
+                        else None
+                    ),
+                }
+                for card in MODEL_CARDS
+            ],
+        }
+        typer.echo(_json.dumps(payload, indent=2))
+        return
+
+    from rich.table import Table
+
+    console.print("[bold]Codex Meter - Rate Card[/bold]")
+    console.print(f"Age: {age} days{'  [red](stale; consider refreshing)[/red]' if stale else ''}")
+    for source in PRICING_SOURCES:
+        console.print(f"- {source.name} (checked {source.checked}) — {source.url}")
+    console.print()
+
+    table = Table(title="Models")
+    table.add_column("Model")
+    table.add_column("Fast×", justify="right")
+    table.add_column("Long context")
+    table.add_column("API ($/M)")
+    table.add_column("Credits (/M)")
+    for card in MODEL_CARDS:
+        long_ctx = (
+            f">{format_int(card.long_context.threshold)} → "
+            f"in×{card.long_context.input_mult:g}, out×{card.long_context.output_mult:g}"
+            if card.long_context
+            else "—"
+        )
+        table.add_row(
+            card.name,
+            f"{card.fast_multiplier:g}",
+            long_ctx,
+            _format_rates_label(card.api_rates),
+            _format_rates_label(card.credit_rates),
+        )
+    console.print(table)
+
+
+@rates_app.command("refresh")
+def rates_refresh() -> None:
+    """Refresh the embedded rate card from a URL (not yet implemented)."""
+    raise _exit_error(
+        "rates refresh is not yet implemented. Use --rates-file to override locally, "
+        "or open an issue to request live refresh."
+    )

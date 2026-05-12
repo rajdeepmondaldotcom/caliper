@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rajdeepmondal/codex-meter/schemas/rates.schema.json",
+  "title": "codex-meter rates override file",
+  "description": "Local override of the embedded Codex rate card. Each model entry overrides the embedded values for that model only. Unlisted models keep the embedded rates.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "api": {
+      "type": "object",
+      "description": "API-equivalent dollar rates ($ per million tokens).",
+      "additionalProperties": { "$ref": "#/$defs/rates" }
+    },
+    "credits": {
+      "type": "object",
+      "description": "Codex credit rates (credits per million tokens).",
+      "additionalProperties": { "$ref": "#/$defs/rates" }
+    }
+  },
+  "$defs": {
+    "rates": {
+      "type": "object",
+      "required": ["input", "cached_input", "output"],
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Rate per million uncached input tokens."
+        },
+        "cached_input": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Rate per million cached input tokens."
+        },
+        "output": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Rate per million output tokens."
+        },
+        "reasoning_output": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Rate per million reasoning output tokens. Defaults to `output` when omitted or null."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "api": {
+        "gpt-5.5": {
+          "input": 5.0,
+          "cached_input": 0.5,
+          "output": 30.0,
+          "reasoning_output": 30.0
+        }
+      },
+      "credits": {
+        "gpt-5.5": {
+          "input": 125.0,
+          "cached_input": 12.5,
+          "output": 750.0
+        }
+      }
+    }
+  ]
+}

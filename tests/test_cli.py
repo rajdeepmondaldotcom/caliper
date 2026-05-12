@@ -57,7 +57,10 @@ def test_daily_json_cli_with_fixture_logs(tmp_path) -> None:
     payload = json.loads(result.output)
     assert payload["command"] == "daily"
     assert payload["totals"]["total_tokens"] == 1100
+    assert payload["totals"]["usage_sources"] == ["last_token_usage"]
     assert payload["metadata"]["tier_sources"] == {"logged": 1}
+    assert payload["metadata"]["warning_count"] == 0
+    assert payload["rate_limit_samples"][0]["primary_used_percent"] == 25.0
 
 
 def test_doctor_cli_reports_paths(tmp_path) -> None:
@@ -84,3 +87,57 @@ def test_doctor_cli_reports_paths(tmp_path) -> None:
     assert result.exit_code == 0
     assert "Session root:" in result.output
     assert "State DB:" in result.output
+
+
+def test_session_json_hides_prompt_labels_by_default(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-private.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(
+                now,
+                {
+                    "input_tokens": 1000,
+                    "cached_input_tokens": 500,
+                    "output_tokens": 100,
+                    "total_tokens": 1100,
+                },
+            ),
+        ],
+    )
+    state_db = tmp_path / "state.sqlite"
+    make_state_db(state_db, session_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "session",
+            "--days",
+            "1",
+            "--until",
+            (now + dt.timedelta(seconds=1)).isoformat(),
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Synthetic private prompt" not in result.output
+    payload = json.loads(result.output)
+    assert payload["breakdowns"][0]["label"].endswith("private")
+
+
+def test_invalid_format_exits_with_usage_error() -> None:
+    result = runner.invoke(app, ["daily", "--format", "xml"])
+
+    assert result.exit_code == 2
+    assert "--format must be one of" in result.output

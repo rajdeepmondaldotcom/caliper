@@ -43,6 +43,7 @@ codex-meter = "codex_meter.cli:app"
 dev = [
   "build>=1.2",
   "pytest>=8.2",
+  "pytest-cov>=5.0",
   "ruff>=0.6",
   "typer>=0.12"
 ]
@@ -61,3 +62,15 @@ ignore = ["B008"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["src/codex_meter"]
+branch = true
+
+[tool.coverage.report]
+exclude_also = [
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+  "pragma: no cover",
+]
+show_missing = true

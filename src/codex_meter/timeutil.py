@@ -66,3 +66,10 @@ def week_key(value: dt.datetime, tz: dt.tzinfo) -> str:
     local = value.astimezone(tz)
     year, week, _ = local.isocalendar()
     return f"{year}-W{week:02d}"
+
+
+def window_label(start: dt.datetime, end: dt.datetime, tzname: str) -> str:
+    tz = load_timezone(tzname)
+    start_label = start.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+    end_label = end.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+    return f"{start_label} to {end_label}"

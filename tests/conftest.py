@@ -30,6 +30,49 @@ def token_event(timestamp: dt.datetime, usage: dict, *, plan_type: str = "pro") 
     }
 
 
+def total_token_event(timestamp: dt.datetime, total_usage: dict, *, plan_type: str = "pro") -> dict:
+    return {
+        "type": "event_msg",
+        "timestamp": timestamp.astimezone(dt.UTC).isoformat().replace("+00:00", "Z"),
+        "payload": {
+            "type": "token_count",
+            "info": {"total_token_usage": total_usage, "model_context_window": 258400},
+            "rate_limits": {
+                "plan_type": plan_type,
+                "credits": None,
+                "primary": {"used_percent": 25.0, "window_minutes": 300, "resets_at": 1},
+                "secondary": {"used_percent": 75.0, "window_minutes": 10080, "resets_at": 2},
+            },
+        },
+    }
+
+
+def rate_limit_only_event(timestamp: dt.datetime, *, plan_type: str = "pro") -> dict:
+    return {
+        "type": "event_msg",
+        "timestamp": timestamp.astimezone(dt.UTC).isoformat().replace("+00:00", "Z"),
+        "payload": {
+            "type": "token_count",
+            "info": None,
+            "rate_limits": {
+                "plan_type": plan_type,
+                "credits": None,
+                "primary": {"used_percent": 34.0, "window_minutes": 300, "resets_at": 1},
+                "secondary": {"used_percent": 91.0, "window_minutes": 10080, "resets_at": 2},
+                "rate_limit_reached_type": None,
+            },
+        },
+    }
+
+
+def user_message(message: str) -> dict:
+    return {
+        "type": "event_msg",
+        "timestamp": "2026-05-12T00:00:00Z",
+        "payload": {"type": "user_message", "message": message},
+    }
+
+
 def turn_context(*, model: str = "gpt-5.5", service_tier: str = "fast") -> dict:
     return {
         "type": "turn_context",

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rajdeepmondal/codex-meter/schemas/tier-overrides.schema.json",
+  "title": "codex-meter service-tier overrides",
+  "description": "Per-session or per-window assertions of the service tier that applied during a Codex log range. Used when historical logs do not record the tier.",
+  "oneOf": [
+    { "type": "array", "items": { "$ref": "#/$defs/override" } },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overrides"],
+      "properties": {
+        "overrides": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/override" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "override": {
+      "type": "object",
+      "required": ["service_tier"],
+      "additionalProperties": false,
+      "properties": {
+        "service_tier": {
+          "type": "string",
+          "enum": ["standard", "fast", "priority", "default", "regular"],
+          "description": "The tier that applied. `priority` is treated as `fast`; `default` and `regular` as `standard`."
+        },
+        "tier": {
+          "type": "string",
+          "description": "Alias of service_tier."
+        },
+        "session": {
+          "type": "string",
+          "description": "Session file name (e.g. rollout-2026-05-12T18-36-01-example.jsonl) or full path. Applies the override to this session only."
+        },
+        "start": {
+          "type": "string",
+          "description": "ISO datetime (YYYY-MM-DD or full ISO). Override applies from this time onward."
+        },
+        "end": {
+          "type": "string",
+          "description": "ISO datetime. Override applies up to (exclusive) this time."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "overrides": [
+        {
+          "start": "2026-05-12 09:00:00",
+          "end": "2026-05-12 13:30:00",
+          "service_tier": "standard"
+        },
+        {
+          "session": "rollout-2026-05-12T18-36-01-example.jsonl",
+          "service_tier": "fast"
+        }
+      ]
+    }
+  ]
+}
