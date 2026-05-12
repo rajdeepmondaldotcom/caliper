@@ -6,7 +6,6 @@ import datetime as dt
 import io
 import subprocess
 from collections.abc import Callable
-from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
@@ -54,14 +53,13 @@ from codex_meter.health import (
 )
 from codex_meter.humanize import short_table_label
 from codex_meter.insights import build_insights, insights_payload, render_insights_markdown
-from codex_meter.intervals import Interval, parse_interval
+from codex_meter.intervals import parse_interval
 from codex_meter.live import run_live
 from codex_meter.models import (
     Aggregate,
     LoadResult,
     RuntimeOptions,
     decimal_string,
-    decimal_value,
 )
 from codex_meter.output import (
     amount_fields,
@@ -79,6 +77,14 @@ from codex_meter.pricing import (
 from codex_meter.prom_snapshot import build_prometheus_snapshot
 from codex_meter.rate_audit import fetch_rate_sources, fetched_rates_path, rates_payload
 from codex_meter.render import format_int, pricing_status, pricing_warnings, render, render_limits
+from codex_meter.scenarios import (
+    aggregate_interval,
+    amount_delta,
+    calculate_whatif_totals,
+    interval_summary,
+    is_whatif_noop,
+    sparse_comparison_warning,
+)
 from codex_meter.statusline import (
     build_statusline_snapshot,
     render_statusline_text,
@@ -1121,10 +1127,6 @@ def forecast(
     console.print(table)
 
 
-def _events_in_interval(events, interval: Interval):
-    return [event for event in events if interval.start <= event.timestamp < interval.end]
-
-
 def _safe_receipt_rows(
     rows: list[Aggregate], *, kind: str, show_sensitive: bool
 ) -> list[Aggregate]:
@@ -1152,27 +1154,6 @@ def _safe_receipt_rows(
         safe_rows[-1].unknown_model_events = row.unknown_model_events
         safe_rows[-1].unknown_tier_events = row.unknown_tier_events
     return safe_rows
-
-
-def _aggregate_interval(
-    events,
-    options: RuntimeOptions,
-    rate_card: RateCard,
-    interval: Interval,
-    label: str,
-) -> Aggregate:
-    from codex_meter.aggregation import aggregate_total
-
-    filtered = _events_in_interval(events, interval)
-    result = LoadResult(
-        events=filtered,
-        duplicates=0,
-        tier_sources={},
-        plan_types=set(),
-        credit_samples=[],
-        warnings=[],
-    )
-    return aggregate_total(result, options, label=label, rate_card=rate_card)
 
 
 @app.command()
@@ -1225,33 +1206,22 @@ def compare(
 
     result = load_usage(options)
     rate_card = RateCard.load(options.rates_file, options.pricing_mode)
-    agg_a = _aggregate_interval(result.events, options, rate_card, interval_a, "A")
-    agg_b = _aggregate_interval(result.events, options, rate_card, interval_b, "B")
+    agg_a = aggregate_interval(result.events, options, rate_card, interval_a, "A")
+    agg_b = aggregate_interval(result.events, options, rate_card, interval_b, "B")
 
-    def _delta(left: float, right: float) -> tuple[float, float]:
-        diff = left - right
-        pct = float(decimal_value(diff) / decimal_value(right) * Decimal("100")) if right else 0.0
-        return diff, pct
-
-    credits_delta, credits_pct = _delta(agg_a.costs.adjusted_credits, agg_b.costs.adjusted_credits)
-    dollars_delta, dollars_pct = _delta(agg_a.costs.api_dollars, agg_b.costs.api_dollars)
-    tokens_delta, tokens_pct = _delta(agg_a.totals.total_tokens, agg_b.totals.total_tokens)
-    max_events = max(agg_a.totals.events, agg_b.totals.events)
-    min_events = min(agg_a.totals.events, agg_b.totals.events)
-    sparse_warning = ""
-    if max_events and min_events < max_events * 0.05:
-        sparse_side = "A" if agg_a.totals.events == min_events else "B"
-        sparse_warning = (
-            f"warning: window {sparse_side} has {min_events:,} events; "
-            "comparison is not representative"
-        )
+    credits_delta, credits_pct = amount_delta(
+        agg_a.costs.adjusted_credits, agg_b.costs.adjusted_credits
+    )
+    dollars_delta, dollars_pct = amount_delta(agg_a.costs.api_dollars, agg_b.costs.api_dollars)
+    tokens_delta, tokens_pct = amount_delta(agg_a.totals.total_tokens, agg_b.totals.total_tokens)
+    sparse_warning = sparse_comparison_warning(agg_a, agg_b)
 
     if output_format == "json":
         typer.echo(
             json_dumps(
                 {
-                    "a": _interval_summary(interval_a, agg_a),
-                    "b": _interval_summary(interval_b, agg_b),
+                    "a": interval_summary(interval_a, agg_a),
+                    "b": interval_summary(interval_b, agg_b),
                     "delta": {
                         **amount_fields("credits", credits_delta),
                         "credits_pct": credits_pct,
@@ -1347,22 +1317,6 @@ def compare(
         console.print(f"[yellow]{sparse_warning}[/yellow]")
 
 
-def _interval_summary(interval: Interval, agg: Aggregate) -> dict:
-    return {
-        "label": interval.label,
-        "start": iso_z(interval.start),
-        "end": iso_z(interval.end),
-        **amount_fields("credits", agg.costs.adjusted_credits),
-        **amount_fields("standard_credits", agg.costs.standard_credits),
-        **amount_fields("api_dollars", agg.costs.api_dollars),
-        "events": agg.totals.events,
-        "tokens": agg.totals.total_tokens,
-        "models": sorted(agg.models),
-        "pricing_status": pricing_status(agg),
-        "pricing_warnings": pricing_warnings(agg),
-    }
-
-
 @app.command()
 def whatif(
     days: Annotated[
@@ -1419,10 +1373,7 @@ def whatif(
     actual_total = aggregate_total(result, options, rate_card=rate_card)
     actual_pricing_status = pricing_status(actual_total)
     actual_pricing_warnings = pricing_warnings(actual_total)
-    if result.events and all(
-        (tier is None or event.service_tier == tier) and (model is None or event.model == model)
-        for event in result.events
-    ):
+    if is_whatif_noop(result.events, tier=tier, model=model):
         label_parts = []
         if tier:
             label_parts.append(f"tier={tier}")
@@ -1462,24 +1413,7 @@ def whatif(
             return
         console.print(message)
         return
-    actual_credits = Decimal("0")
-    actual_dollars = Decimal("0")
-    hypothetical_credits = Decimal("0")
-    hypothetical_dollars = Decimal("0")
-    for event in result.events:
-        actual, _, _ = rate_card.cost_for(event.usage, event.model, event.service_tier)
-        actual_credits += actual.adjusted_credits
-        actual_dollars += actual.api_dollars
-        hyp_model = model or event.model
-        hyp_tier = tier or event.service_tier
-        hypothetical, _, _ = rate_card.cost_for(event.usage, hyp_model, hyp_tier)
-        hypothetical_credits += hypothetical.adjusted_credits
-        hypothetical_dollars += hypothetical.api_dollars
-
-    credit_delta = hypothetical_credits - actual_credits
-    dollar_delta = hypothetical_dollars - actual_dollars
-    credit_pct = float(credit_delta / actual_credits * Decimal("100")) if actual_credits else 0.0
-    dollar_pct = float(dollar_delta / actual_dollars * Decimal("100")) if actual_dollars else 0.0
+    totals = calculate_whatif_totals(result.events, rate_card, tier=tier, model=model)
 
     if output_format == "json":
         typer.echo(
@@ -1488,18 +1422,18 @@ def whatif(
                     "days": days,
                     "hypothetical": {"tier": tier, "model": model},
                     "actual": {
-                        **amount_fields("credits", actual_credits),
-                        **amount_fields("api_dollars", actual_dollars),
+                        **amount_fields("credits", totals.actual_credits),
+                        **amount_fields("api_dollars", totals.actual_dollars),
                     },
                     "projected": {
-                        **amount_fields("credits", hypothetical_credits),
-                        **amount_fields("api_dollars", hypothetical_dollars),
+                        **amount_fields("credits", totals.hypothetical_credits),
+                        **amount_fields("api_dollars", totals.hypothetical_dollars),
                     },
                     "delta": {
-                        **amount_fields("credits", credit_delta),
-                        "credits_pct": credit_pct,
-                        **amount_fields("api_dollars", dollar_delta),
-                        "api_dollars_pct": dollar_pct,
+                        **amount_fields("credits", totals.credit_delta),
+                        "credits_pct": totals.credit_pct,
+                        **amount_fields("api_dollars", totals.dollar_delta),
+                        "api_dollars_pct": totals.dollar_pct,
                     },
                     "events_evaluated": len(result.events),
                     "pricing_status": actual_pricing_status,
@@ -1512,18 +1446,18 @@ def whatif(
     whatif_records = [
         {
             "metric": "credits",
-            "actual": actual_credits,
-            "projected": hypothetical_credits,
-            "delta": credit_delta,
-            "pct": credit_pct,
+            "actual": totals.actual_credits,
+            "projected": totals.hypothetical_credits,
+            "delta": totals.credit_delta,
+            "pct": totals.credit_pct,
             "pricing_status": actual_pricing_status,
         },
         {
             "metric": "api_dollars",
-            "actual": actual_dollars,
-            "projected": hypothetical_dollars,
-            "delta": dollar_delta,
-            "pct": dollar_pct,
+            "actual": totals.actual_dollars,
+            "projected": totals.hypothetical_dollars,
+            "delta": totals.dollar_delta,
+            "pct": totals.dollar_pct,
             "pricing_status": actual_pricing_status,
         },
     ]
@@ -1552,17 +1486,17 @@ def whatif(
     table.add_column("%", justify="right")
     table.add_row(
         "Credits",
-        f"{actual_credits:,.2f}",
-        f"{hypothetical_credits:,.2f}",
-        f"{credit_delta:+,.2f}",
-        f"{credit_pct:+.1f}%",
+        f"{totals.actual_credits:,.2f}",
+        f"{totals.hypothetical_credits:,.2f}",
+        f"{totals.credit_delta:+,.2f}",
+        f"{totals.credit_pct:+.1f}%",
     )
     table.add_row(
         "API $",
-        f"${actual_dollars:,.2f}",
-        f"${hypothetical_dollars:,.2f}",
-        f"{dollar_delta:+,.2f}",
-        f"{dollar_pct:+.1f}%",
+        f"${totals.actual_dollars:,.2f}",
+        f"${totals.hypothetical_dollars:,.2f}",
+        f"{totals.dollar_delta:+,.2f}",
+        f"{totals.dollar_pct:+.1f}%",
     )
     console.print(table)
 
