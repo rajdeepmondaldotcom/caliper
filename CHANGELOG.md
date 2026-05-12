@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `insights` command for cache-savings, service-tier confidence, spend concentration,
+  and usage acceleration hints.
+- `tail` command for recent usage events/sessions.
+- Sidecar parse cache with `--no-parse-cache` bypass for parser debugging.
+- Live TUI hotkeys (`q`, `?`, `r`, `p`) and `--max-ticks` for headless tests.
+- Forecast API-dollar projection and sparkline output.
+- Default `overview` invocation now accepts data-source, tier, rate-card, cache,
+  format, output, compact, and width options.
+- `rates refresh --allow-network` now writes a pricing-source audit snapshot
+  with embedded rates, observed rates, and discrepancies instead of an empty
+  placeholder.
+
+### Changed
+- Table rendering now honors terminal/`--width` instead of collapsing to 80 columns.
+- Grouped reports accept `--top` as an alias for `--top-threads`.
+- Doctor, rates, forecast, compare, what-if, and budgets now support CSV/Markdown
+  alongside table/JSON.
+- GPT-5.1-Codex-Max now has API-equivalent rates in the embedded card.
+- Receipts include cache savings, tier-source breakdowns, warning counts, and top
+  insights, and redact full local labels by default. Use `--show-sensitive` for
+  private/local receipts with full session/project labels.
+- `init` scaffolds the full config surface.
+- Parse-cache entries are independent of the requested report window, so normal
+  rolling `now` invocations can reuse parsed sessions. Cache payloads now use
+  JSON instead of pickle.
+- Source distributions are trimmed to release-relevant files.
+
+### Fixed
+- Literal `[budgets]` text no longer disappears in Rich output.
+- Doctor clock-skew output uses directional wording instead of signed seconds.
+- What-if no-op scenarios now say there is no change.
+- Compare warns when one window is too sparse to be representative.
+- GPT-5.3-Codex-Spark stays fallback-priced instead of being normalized to
+  GPT-5.3-Codex.
+- Rate-limit samples are retained for burn-rate math and only truncated at
+  render/report time.
+- SQLite connections are closed explicitly, making warning-as-error test runs
+  clean on Python 3.13.
+- Monthly receipts include events through the final sub-second before the next
+  month starts.
+
 ## 0.2.0
 
 ### Added

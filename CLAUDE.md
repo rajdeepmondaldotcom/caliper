@@ -16,7 +16,7 @@ making changes.
 ## Top-level commands
 
 `overview` (default) · `daily` · `weekly` · `monthly` · `session` · `project` ·
-`models` · `limits` · `live` · `forecast` · `compare` · `whatif` ·
+`models` · `limits` · `insights` · `tail` · `live` · `forecast` · `compare` · `whatif` ·
 `rates show|refresh` · `budgets check` · `export prometheus|grafana|receipt` ·
 `doctor` · `init`
 
@@ -31,6 +31,8 @@ Every grouped command supports `--format table|json|csv|markdown`.
 | `parser.py` | JSONL streaming + SQLite (`state_5.sqlite`) join. Emits `LoadResult` (events + duplicates + tier_sources + rate-limit samples + warnings). |
 | `models.py` | All dataclasses. `Usage` is **frozen**; `Rates` has `effective_reasoning_output`; `ModelCard` may carry a `LongContextRule`. |
 | `pricing.py` | Embedded rate card + `RateCard.cost_for(usage, model, tier)`. Long-context rule is per-model. |
+| `insights.py` | Pure insight heuristics for cache savings, tier confidence, spend concentration, and trend acceleration. |
+| `parse_cache.py` | Sidecar SQLite cache for parsed JSONL sessions, keyed by file stat + parser signature independent of report windows. |
 | `aggregation.py` | Daily/weekly/monthly/session/project/model+tier rollups. Accepts an optional pre-built `RateCard` to avoid re-parsing per call. |
 | `render.py` | Output formatters (table/json/csv/markdown) including the limits decoder. |
 | `windows.py` | Pure functions over rate-limit samples: `WindowState`, burn rate (3+ samples, 6h lookback), ETA-to-100, epoch decode. |
@@ -75,7 +77,7 @@ Every grouped command supports `--format table|json|csv|markdown`.
 uv sync --dev
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest                                # 130 tests
+uv run pytest                                # 140+ tests
 uv run pytest --cov=src/codex_meter          # coverage report
 uv run python -m build                       # build sdist + wheel
 ```
@@ -137,13 +139,11 @@ When OpenAI updates published pricing:
 
 ## Deferred work
 
-- **Parse cache** (sidecar SQLite) — keyed by file path + mtime + size; warm
-  reads <100ms. Plan exists; collisions on `parser.py` blocked the first
-  pass.
 - **Coverage to 85%+** — currently ~82%. Big gaps: `live.run_live`,
   `prom_export.serve_forever`, several CLI command bodies. Likely needs
   mocked HTTP server + `max_ticks` plumbed through.
-- **`rates refresh` network path** — stub exits 2 today; design pending.
+- **`rates refresh` network path** — opt-in audit snapshot exists; automatic
+  embedded-card updates are intentionally still manual.
 - **PyPI Trusted Publisher CI + Homebrew tap** — needs maintainer OIDC setup.
 
 ## Tone for commits and PRs
