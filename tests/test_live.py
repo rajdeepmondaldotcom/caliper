@@ -6,7 +6,8 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from codex_meter.cli import app
-from codex_meter.live import LiveFrame, render_frame
+from codex_meter.config import build_options
+from codex_meter.live import LiveFrame, collect_frame, render_frame
 from codex_meter.windows import WindowState
 
 from .conftest import make_state_db, token_event, turn_context, write_session
@@ -141,3 +142,43 @@ def test_live_cli_accepts_max_ticks(tmp_path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
+
+
+def test_live_frame_uses_main_subscription_limit_bucket(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    preview_event = token_event(
+        now + dt.timedelta(seconds=1),
+        {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+        limit_id="codex_bengalfox",
+        limit_name="GPT-5.3-Codex-Spark",
+    )
+    preview_event["payload"]["rate_limits"]["primary"]["used_percent"] = 0.0
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-live-buckets.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(
+                now,
+                {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+                limit_id="codex",
+            ),
+            preview_event,
+        ],
+    )
+    state_db = tmp_path / "state.sqlite"
+    make_state_db(state_db, session_path)
+    options = build_options(
+        days=1,
+        until=(now + dt.timedelta(seconds=2)).isoformat(),
+        session_root=session_root,
+        state_db=state_db,
+        codex_config=tmp_path / "missing.toml",
+        no_parse_cache=True,
+    )
+
+    frame = collect_frame(options, now=now + dt.timedelta(seconds=2))
+
+    assert frame.primary.limit_id == "codex"
+    assert frame.primary.used_percent == 25.0

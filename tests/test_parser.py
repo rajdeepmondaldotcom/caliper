@@ -53,6 +53,7 @@ def test_load_usage_streams_events_dedupes_and_joins_state(tmp_path) -> None:
     assert result.events[0].service_tier == "fast"
     assert result.tier_sources == {"logged": 1}
     assert result.plan_types == {"pro"}
+    assert result.events[0].limit_id == "codex"
 
 
 def test_current_config_tier_is_labeled_as_inferred(tmp_path) -> None:
@@ -228,7 +229,36 @@ def test_rate_limit_only_event_is_kept_for_limits_not_totals(tmp_path) -> None:
     assert result.events == []
     assert len(result.credit_samples) == 1
     assert result.credit_samples[0].primary_window_minutes == 300
+    assert result.credit_samples[0].limit_id == "codex"
     assert result.plan_types == {"pro"}
+
+
+def test_rate_limit_samples_preserve_model_specific_limit_bucket(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-limits-buckets.jsonl",
+        [
+            rate_limit_only_event(
+                now,
+                limit_id="codex_bengalfox",
+                limit_name="GPT-5.3-Codex-Spark",
+            )
+        ],
+    )
+
+    options = build_options(
+        days=1,
+        until=(now + dt.timedelta(seconds=1)).isoformat(),
+        session_root=session_root,
+        state_db=tmp_path / "missing.sqlite",
+        codex_config=tmp_path / "missing.toml",
+    )
+    result = load_usage(options)
+
+    assert result.credit_samples[0].limit_id == "codex_bengalfox"
+    assert result.credit_samples[0].limit_name == "GPT-5.3-Codex-Spark"
 
 
 def test_dedupe_keeps_identical_usage_from_different_sessions(tmp_path) -> None:

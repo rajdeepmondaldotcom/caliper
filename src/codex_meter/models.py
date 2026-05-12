@@ -168,6 +168,8 @@ class UsageEvent:
     usage_source: str = "last_token_usage"
     model_context_window: int = 0
     plan_type: str = ""
+    limit_id: str = ""
+    limit_name: str = ""
     credits: object = None
     primary_used_percent: object = None
     primary_window_minutes: object = None
@@ -184,6 +186,8 @@ class RateLimitSample:
     path: Path
     session_id: str
     plan_type: str = ""
+    limit_id: str = ""
+    limit_name: str = ""
     credits: object = None
     primary_used_percent: object = None
     primary_window_minutes: object = None

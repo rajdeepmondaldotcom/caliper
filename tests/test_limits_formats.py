@@ -78,6 +78,7 @@ def test_limits_json(tmp_path) -> None:
     assert payload["command"] == "limits"
     assert isinstance(payload["rate_limit_samples"], list)
     assert payload["rate_limit_samples"][0]["primary_used_percent"] == 25.0
+    assert payload["rate_limit_samples"][0]["limit_id"] == "codex"
 
 
 def test_limits_csv(tmp_path) -> None:
@@ -87,7 +88,9 @@ def test_limits_csv(tmp_path) -> None:
     rows = list(reader)
     assert rows
     assert "primary_used_percent" in (reader.fieldnames or [])
+    assert "limit_id" in (reader.fieldnames or [])
     assert rows[0]["plan_type"] == "pro"
+    assert rows[0]["limit_id"] == "codex"
 
 
 def test_limits_markdown(tmp_path) -> None:

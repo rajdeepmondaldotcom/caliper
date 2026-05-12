@@ -14,7 +14,14 @@ def write_session(root: Path, name: str, events: list[dict]) -> Path:
     return path
 
 
-def token_event(timestamp: dt.datetime, usage: dict, *, plan_type: str = "pro") -> dict:
+def token_event(
+    timestamp: dt.datetime,
+    usage: dict,
+    *,
+    plan_type: str = "pro",
+    limit_id: str = "codex",
+    limit_name: str | None = None,
+) -> dict:
     return {
         "type": "event_msg",
         "timestamp": timestamp.astimezone(dt.UTC).isoformat().replace("+00:00", "Z"),
@@ -23,6 +30,8 @@ def token_event(timestamp: dt.datetime, usage: dict, *, plan_type: str = "pro") 
             "info": {"last_token_usage": usage},
             "rate_limits": {
                 "plan_type": plan_type,
+                "limit_id": limit_id,
+                "limit_name": limit_name,
                 "credits": None,
                 "primary": {"used_percent": 25.0},
                 "secondary": {"used_percent": 75.0},
@@ -31,7 +40,14 @@ def token_event(timestamp: dt.datetime, usage: dict, *, plan_type: str = "pro") 
     }
 
 
-def total_token_event(timestamp: dt.datetime, total_usage: dict, *, plan_type: str = "pro") -> dict:
+def total_token_event(
+    timestamp: dt.datetime,
+    total_usage: dict,
+    *,
+    plan_type: str = "pro",
+    limit_id: str = "codex",
+    limit_name: str | None = None,
+) -> dict:
     return {
         "type": "event_msg",
         "timestamp": timestamp.astimezone(dt.UTC).isoformat().replace("+00:00", "Z"),
@@ -40,6 +56,8 @@ def total_token_event(timestamp: dt.datetime, total_usage: dict, *, plan_type: s
             "info": {"total_token_usage": total_usage, "model_context_window": 258400},
             "rate_limits": {
                 "plan_type": plan_type,
+                "limit_id": limit_id,
+                "limit_name": limit_name,
                 "credits": None,
                 "primary": {"used_percent": 25.0, "window_minutes": 300, "resets_at": 1},
                 "secondary": {"used_percent": 75.0, "window_minutes": 10080, "resets_at": 2},
@@ -48,7 +66,13 @@ def total_token_event(timestamp: dt.datetime, total_usage: dict, *, plan_type: s
     }
 
 
-def rate_limit_only_event(timestamp: dt.datetime, *, plan_type: str = "pro") -> dict:
+def rate_limit_only_event(
+    timestamp: dt.datetime,
+    *,
+    plan_type: str = "pro",
+    limit_id: str = "codex",
+    limit_name: str | None = None,
+) -> dict:
     return {
         "type": "event_msg",
         "timestamp": timestamp.astimezone(dt.UTC).isoformat().replace("+00:00", "Z"),
@@ -57,6 +81,8 @@ def rate_limit_only_event(timestamp: dt.datetime, *, plan_type: str = "pro") -> 
             "info": None,
             "rate_limits": {
                 "plan_type": plan_type,
+                "limit_id": limit_id,
+                "limit_name": limit_name,
                 "credits": None,
                 "primary": {"used_percent": 34.0, "window_minutes": 300, "resets_at": 1},
                 "secondary": {"used_percent": 91.0, "window_minutes": 10080, "resets_at": 2},

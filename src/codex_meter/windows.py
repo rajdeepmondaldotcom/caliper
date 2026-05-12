@@ -9,6 +9,7 @@ from codex_meter.models import RateLimitSample
 
 BURN_RATE_LOOKBACK_HOURS = 6
 MIN_BURN_RATE_SAMPLES = 3
+DEFAULT_LIMIT_ID = "codex"
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,8 @@ class WindowState:
     burn_rate_per_hour: float | None  # percent points per hour
     eta_to_100: dt.datetime | None
     samples: int
+    limit_id: str = ""
+    limit_name: str = ""
 
 
 def _coerce_float(value: object) -> float | None:
@@ -62,12 +65,16 @@ def _reset_at(sample: RateLimitSample, which: str) -> dt.datetime | None:
 
 
 def compute_window_state(
-    samples: list[RateLimitSample], now: dt.datetime, which: str
+    samples: list[RateLimitSample],
+    now: dt.datetime,
+    which: str,
+    limit_id: str | None = DEFAULT_LIMIT_ID,
 ) -> WindowState:
     """Compute a WindowState from raw RateLimitSamples. `which` is 'primary' or 'secondary'."""
     if which not in {"primary", "secondary"}:
         raise ValueError(f"window must be 'primary' or 'secondary', got {which!r}")
-    if not samples:
+    selected = _select_limit_samples(samples, limit_id)
+    if not selected:
         return WindowState(
             window=which,
             used_percent=None,
@@ -79,7 +86,7 @@ def compute_window_state(
             samples=0,
         )
 
-    ordered = sorted(samples, key=lambda sample: sample.timestamp)
+    ordered = sorted(selected, key=lambda sample: sample.timestamp)
     latest = ordered[-1]
     used = _percent(latest, which)
     window_minutes = _window_minutes(latest, which)
@@ -101,7 +108,24 @@ def compute_window_state(
         burn_rate_per_hour=burn_rate,
         eta_to_100=eta_to_100,
         samples=len(ordered),
+        limit_id=latest.limit_id,
+        limit_name=latest.limit_name,
     )
+
+
+def _select_limit_samples(
+    samples: list[RateLimitSample], limit_id: str | None
+) -> list[RateLimitSample]:
+    """Prefer the main Codex subscription bucket when it is present.
+
+    Codex logs can include multiple limit buckets, such as `codex` plus
+    model-specific preview buckets. Mixing them makes the latest preview sample
+    mask the actual subscription window.
+    """
+    if limit_id is None:
+        return list(samples)
+    selected = [sample for sample in samples if sample.limit_id == limit_id]
+    return selected or list(samples)
 
 
 def _compute_burn_rate(

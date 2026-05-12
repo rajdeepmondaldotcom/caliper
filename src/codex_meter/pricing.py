@@ -99,6 +99,16 @@ PRICING_SOURCES = [
         checked="2026-05-13",
     ),
     PricingSource(
+        name="Codex subscription access and limits",
+        url="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan",
+        checked="2026-05-13",
+    ),
+    PricingSource(
+        name="Codex pricing and usage-limit dashboard",
+        url="https://developers.openai.com/codex/pricing",
+        checked="2026-05-13",
+    ),
+    PricingSource(
         name="Codex fast mode multipliers",
         url="https://developers.openai.com/codex/speed",
         checked="2026-05-13",

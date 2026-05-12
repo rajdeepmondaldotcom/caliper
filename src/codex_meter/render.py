@@ -23,6 +23,7 @@ from codex_meter.models import (
     decimal_string,
 )
 from codex_meter.pricing import PRICING_SOURCES, RateCard
+from codex_meter.subscriptions import subscription_plan_payload, subscription_warnings
 from codex_meter.timeutil import iso_z, window_label
 
 __all__ = ["format_int", "redact", "render", "render_limits"]
@@ -68,6 +69,7 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "models": sorted(item.models),
         "service_tiers": sorted(item.service_tiers),
         "plan_types": sorted(item.plan_types),
+        "subscription_plans": subscription_plan_payload(item.plan_types),
         "usage_sources": sorted(item.usage_sources),
         "session_count": len(item.session_ids),
         "sessions": sorted(item.session_ids),
@@ -176,6 +178,10 @@ def report_payload(
             "warnings": pricing_warnings(total),
             "sources": [asdict(source) for source in PRICING_SOURCES],
         },
+        "subscription": {
+            "plans": subscription_plan_payload(total.plan_types),
+            "warnings": subscription_warnings(total.plan_types),
+        },
         "metadata": {
             "session_root": str(options.session_root),
             "state_db": str(options.state_db),
@@ -238,6 +244,8 @@ def render_table(
         console.print(
             f"[yellow]Warning:[/yellow] {warning} Reported costs are {pricing_status(total)}."
         )
+    for warning in subscription_warnings(total.plan_types):
+        console.print(f"[yellow]Subscription:[/yellow] {warning}")
     console.print()
 
     table = Table(show_lines=False, expand=not options.compact)
@@ -449,6 +457,8 @@ def render(
 LIMITS_CSV_FIELDS = (
     "timestamp",
     "session_id",
+    "limit_id",
+    "limit_name",
     "plan_type",
     "credits",
     "primary_used_percent",
@@ -472,8 +482,9 @@ def render_limits_table(result: LoadResult, options: RuntimeOptions) -> str:
         return buffer.getvalue()
     if options.compact:
         for sample in samples:
+            limit = sample.limit_name or sample.limit_id or "-"
             console.print(
-                f"- {iso_z(sample.timestamp)} | credits={sample.credits} | "
+                f"- {iso_z(sample.timestamp)} | limit={limit} | credits={sample.credits} | "
                 f"primary={sample.primary_used_percent}%/"
                 f"{sample.primary_window_minutes}m reset={sample.primary_resets_at} | "
                 f"secondary={sample.secondary_used_percent}%/"
@@ -482,6 +493,7 @@ def render_limits_table(result: LoadResult, options: RuntimeOptions) -> str:
         return buffer.getvalue()
     table = Table(show_lines=False, expand=not options.compact)
     table.add_column("Time")
+    table.add_column("Limit")
     table.add_column("Plan")
     table.add_column("Credits", justify="right")
     table.add_column("Primary %", justify="right")
@@ -491,6 +503,7 @@ def render_limits_table(result: LoadResult, options: RuntimeOptions) -> str:
     for sample in samples:
         table.add_row(
             iso_z(sample.timestamp),
+            sample.limit_name or sample.limit_id or "-",
             str(sample.plan_type or "-"),
             str(sample.credits if sample.credits is not None else "-"),
             _percent(sample.primary_used_percent),
@@ -539,7 +552,7 @@ def render_limits_csv(result: LoadResult, options: RuntimeOptions) -> str:
 
 
 def render_limits_markdown(result: LoadResult, options: RuntimeOptions) -> str:
-    headers = ["Timestamp", "Plan", "Credits", "Primary %", "Secondary %"]
+    headers = ["Timestamp", "Limit", "Plan", "Credits", "Primary %", "Secondary %"]
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
@@ -552,6 +565,7 @@ def render_limits_markdown(result: LoadResult, options: RuntimeOptions) -> str:
             + " | ".join(
                 [
                     iso_z(sample.timestamp),
+                    sample.limit_name or sample.limit_id or "",
                     str(sample.plan_type or ""),
                     str(sample.credits if sample.credits is not None else ""),
                     str(primary if primary is not None else ""),

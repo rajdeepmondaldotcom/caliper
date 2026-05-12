@@ -75,6 +75,7 @@ def test_daily_json_pins_schema(tmp_path) -> None:
         "projects",
         "model_mode",
         "pricing",
+        "subscription",
         "metadata",
         "rate_limit_samples",
         "warnings",
@@ -91,7 +92,9 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["totals"]["events"] == 1
     assert payload["totals"]["models"] == ["gpt-5.5"]
     assert payload["totals"]["service_tiers"] == ["standard"]
+    assert payload["totals"]["subscription_plans"][0]["slug"] == "pro"
     assert payload["pricing"]["mode"] == "model"
+    assert payload["subscription"]["plans"][0]["slug"] == "pro"
     assert payload["metadata"]["tier_sources"] == {"logged": 1}
     assert payload["metadata"]["plan_types"] == ["pro"]
     assert payload["metadata"]["workspace_coverage"] == {
