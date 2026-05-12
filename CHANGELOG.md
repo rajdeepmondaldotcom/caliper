@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0
+## 0.2.0
 
 ### Added
 - **Live TUI** (`codex-meter live`): full-window dashboard with today's credits, 7-day
