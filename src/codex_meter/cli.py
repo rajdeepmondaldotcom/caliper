@@ -56,7 +56,13 @@ from codex_meter.humanize import short_table_label
 from codex_meter.insights import build_insights, insights_payload, render_insights_markdown
 from codex_meter.intervals import Interval, parse_interval
 from codex_meter.live import run_live
-from codex_meter.models import Aggregate, LoadResult, RuntimeOptions, decimal_value
+from codex_meter.models import (
+    Aggregate,
+    LoadResult,
+    RuntimeOptions,
+    decimal_string,
+    decimal_value,
+)
 from codex_meter.parse_cache import default_cache_path
 from codex_meter.parser import load_usage
 from codex_meter.pricing import (
@@ -155,6 +161,10 @@ def _json_default(value: object) -> float:
 
 def _json_dumps(payload: object) -> str:
     return json.dumps(payload, indent=2, default=_json_default)
+
+
+def _amount_fields(name: str, value: object) -> dict[str, object]:
+    return {name: value, f"{name}_exact": decimal_string(value)}
 
 
 def _validate_format(output_format: str) -> None:
@@ -1698,9 +1708,9 @@ def compare(
                     "a": _interval_summary(interval_a, agg_a),
                     "b": _interval_summary(interval_b, agg_b),
                     "delta": {
-                        "credits": credits_delta,
+                        **_amount_fields("credits", credits_delta),
                         "credits_pct": credits_pct,
-                        "api_dollars": dollars_delta,
+                        **_amount_fields("api_dollars", dollars_delta),
                         "api_dollars_pct": dollars_pct,
                         "tokens": tokens_delta,
                         "tokens_pct": tokens_pct,
@@ -1797,9 +1807,9 @@ def _interval_summary(interval: Interval, agg: Aggregate) -> dict:
         "label": interval.label,
         "start": iso_z(interval.start),
         "end": iso_z(interval.end),
-        "credits": agg.costs.adjusted_credits,
-        "standard_credits": agg.costs.standard_credits,
-        "api_dollars": agg.costs.api_dollars,
+        **_amount_fields("credits", agg.costs.adjusted_credits),
+        **_amount_fields("standard_credits", agg.costs.standard_credits),
+        **_amount_fields("api_dollars", agg.costs.api_dollars),
         "events": agg.totals.events,
         "tokens": agg.totals.total_tokens,
         "models": sorted(agg.models),
@@ -1933,17 +1943,17 @@ def whatif(
                     "days": days,
                     "hypothetical": {"tier": tier, "model": model},
                     "actual": {
-                        "credits": actual_credits,
-                        "api_dollars": actual_dollars,
+                        **_amount_fields("credits", actual_credits),
+                        **_amount_fields("api_dollars", actual_dollars),
                     },
                     "projected": {
-                        "credits": hypothetical_credits,
-                        "api_dollars": hypothetical_dollars,
+                        **_amount_fields("credits", hypothetical_credits),
+                        **_amount_fields("api_dollars", hypothetical_dollars),
                     },
                     "delta": {
-                        "credits": credit_delta,
+                        **_amount_fields("credits", credit_delta),
                         "credits_pct": credit_pct,
-                        "api_dollars": dollar_delta,
+                        **_amount_fields("api_dollars", dollar_delta),
                         "api_dollars_pct": dollar_pct,
                     },
                     "events_evaluated": len(result.events),
@@ -2351,6 +2361,7 @@ def budgets_check(
             "limit": alert.budget.limit,
             "warn_at": alert.budget.warn_at,
             "used": alert.used,
+            "used_exact": decimal_string(usage.get(alert.budget.key(), alert.used)),
             "used_percent": alert.used_percent,
             "severity": alert.severity,
             "pricing_status": status,
