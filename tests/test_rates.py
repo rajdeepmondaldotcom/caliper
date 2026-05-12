@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 
 from typer.testing import CliRunner
 
@@ -32,7 +33,15 @@ def test_rates_show_json_schema() -> None:
     gpt54 = next(model for model in payload["models"] if model["name"] == "gpt-5.4")
     assert gpt54["long_context"] is None
     max_card = next(model for model in payload["models"] if model["name"] == "gpt-5.1-codex-max")
-    assert max_card["api"] is None
+    assert max_card["api"]["input"] == 1.25
+    assert max_card["api"]["cached_input"] == 0.125
+    assert max_card["api"]["output"] == 10.0
+
+
+def test_rates_show_markdown() -> None:
+    result = runner.invoke(app, ["rates", "show", "--format", "markdown"])
+    assert result.exit_code == 0, result.output
+    assert "| model | fast_multiplier | api_input | credits_input |" in result.output
 
 
 def test_rates_show_bad_format_reports_choices() -> None:
@@ -41,10 +50,37 @@ def test_rates_show_bad_format_reports_choices() -> None:
     assert "table, json" in result.output
 
 
-def test_rates_refresh_is_not_implemented() -> None:
+def test_rates_refresh_requires_explicit_network_opt_in() -> None:
     result = runner.invoke(app, ["rates", "refresh"])
     assert result.exit_code == 2
-    assert "not yet implemented" in result.output
+    assert "needs --allow-network" in result.output
+
+
+def test_rates_refresh_allow_network_writes_sidecar(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CODEX_METER_DATA_DIR", str(tmp_path))
+
+    class Response(BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_urlopen(_request, timeout):
+        assert timeout == 5
+        return Response(b'{"models":[{"name":"gpt-5.5","input":5}]}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    result = runner.invoke(app, ["rates", "refresh", "--allow-network"])
+    assert result.exit_code == 0, result.output
+    target = tmp_path / "rates-fetched.json"
+    assert target.exists()
+    payload = json.loads(target.read_text())
+    assert payload["models"][0]["name"] == "gpt-5.5"
+    assert payload["observed_models"][0]["name"] == "gpt-5.5"
+    assert any(model["name"] == "gpt-5.1-codex-max" for model in payload["embedded_models"])
+    assert "discrepancies" in payload
+    assert len(payload["sources"]) >= 1
 
 
 def test_rates_file_override_with_reasoning_field(tmp_path) -> None:

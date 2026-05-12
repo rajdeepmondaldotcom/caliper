@@ -721,11 +721,25 @@ def _check_clock_skew(events) -> tuple[str, str, str]:
     latest = max(event.timestamp for event in events)
     now = dt.datetime.now(tz=dt.UTC)
     skew = (latest - now).total_seconds()
+    detail = _clock_skew_detail(skew)
     if abs(skew) <= 300:
-        return _doctor_check("Clock", "ok", f"latest event within {abs(skew):.0f}s of now")
+        return _doctor_check("Clock", "ok", f"latest event {detail}")
     if abs(skew) <= 86400:
-        return _doctor_check("Clock", "warn", f"latest event {skew:+.0f}s from now")
-    return _doctor_check("Clock", "fail", f"latest event {skew:+.0f}s from now")
+        return _doctor_check("Clock", "warn", f"latest event {detail}")
+    return _doctor_check("Clock", "fail", f"latest event {detail}")
+
+
+def _clock_skew_detail(skew_seconds: float) -> str:
+    seconds = int(abs(skew_seconds))
+    if seconds < 60:
+        amount = f"{seconds}s"
+    else:
+        minutes, rem_seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        amount = f"{hours}h {minutes}m" if hours else f"{minutes}m {rem_seconds}s"
+    if skew_seconds > 0:
+        return f"{amount} in the future"
+    return f"{amount} ago"
 
 
 def _check_rate_card_age() -> tuple[str, str, str]:
@@ -739,6 +753,27 @@ def _check_rate_card_age() -> tuple[str, str, str]:
         "fail",
         f"checked {age} days ago — run `codex-meter rates show` and consider updating.",
     )
+
+
+def _check_state_db_readable(path: Path) -> tuple[str, str, str]:
+    if not path.exists():
+        return _doctor_check("State DB readable", "warn", "state DB is missing")
+    try:
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
+            conn.execute("select count(*) from sqlite_master").fetchone()
+    except sqlite3.Error as exc:
+        return _doctor_check("State DB readable", "warn", f"could not open read-only: {exc}")
+    return _doctor_check("State DB readable", "ok", "read-only open succeeded")
+
+
+def _check_rates_file(path: Path | None) -> tuple[str, str, str]:
+    if path is None:
+        return _doctor_check("Rates file", "ok", "using embedded rate card")
+    try:
+        RateCard.load(path)
+    except ValueError as exc:
+        return _doctor_check("Rates file", "fail", str(exc))
+    return _doctor_check("Rates file", "ok", str(path))
 
 
 def _check_python_version() -> tuple[str, str, str]:
@@ -756,14 +791,14 @@ def doctor(
     state_db: StateDbOpt = None,
     codex_config: CodexConfigOpt = None,
     config: ConfigOpt = None,
+    rates_file: RatesFileOpt = None,
     output_format: Annotated[
         str,
-        typer.Option("--format", "-f", help="table or json."),
+        typer.Option("--format", "-f", help="table, json, csv, or markdown."),
     ] = "table",
 ) -> None:
     """Check local Codex data paths, rate-card age, clock skew, and tooling."""
-    if output_format not in {"table", "json"}:
-        raise _exit_error("--format must be one of: table, json")
+    _validate_format(output_format)
     try:
         options = build_options(
             days=7.0,
@@ -771,6 +806,7 @@ def doctor(
             state_db=state_db,
             codex_config=codex_config,
             config=config,
+            rates_file=rates_file,
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
@@ -793,6 +829,7 @@ def doctor(
             str(options.state_db),
         )
     )
+    checks.append(_check_state_db_readable(options.state_db))
     checks.append(
         _doctor_check(
             "Codex config",
@@ -802,11 +839,26 @@ def doctor(
     )
     checks.append(_check_codex_cli_version())
     checks.append(_check_rate_card_age())
+    checks.append(_check_rates_file(options.rates_file))
+    checks.append(_doctor_check("Parse cache", "ok", str(default_cache_path())))
     checks.append(_check_clock_skew(result.events if result else []))
     if result:
         checks.append(
             _doctor_check("Events loaded", "ok", f"{len(result.events):,} in last 7 days")
         )
+        if result.events:
+            inferred = result.tier_sources.get("assumed", 0) + result.tier_sources.get(
+                "current-config", 0
+            )
+            if inferred == len(result.events):
+                checks.append(
+                    _doctor_check(
+                        "Tier coverage",
+                        "warn",
+                        "No events recorded a tier; pin one with --service-tier "
+                        "or --tier-overrides.",
+                    )
+                )
         if result.warnings:
             for warning in result.warnings:
                 checks.append(_doctor_check("Parser warning", "warn", warning))
@@ -818,10 +870,8 @@ def doctor(
             worst = status
 
     if output_format == "json":
-        import json as _json
-
         typer.echo(
-            _json.dumps(
+            json.dumps(
                 {
                     "checks": [
                         {"label": label, "status": status, "detail": detail}
@@ -834,7 +884,25 @@ def doctor(
         )
         raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
 
-    from rich.table import Table
+    if output_format == "csv":
+        check_records = [
+            {"label": label, "status": status, "detail": detail} for label, status, detail in checks
+        ]
+        typer.echo(
+            _records_to_csv(check_records),
+            nl=False,
+        )
+        raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
+
+    if output_format == "markdown":
+        check_records = [
+            {"label": label, "status": status, "detail": detail} for label, status, detail in checks
+        ]
+        typer.echo(
+            _records_to_markdown(check_records),
+            nl=False,
+        )
+        raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
 
     console.print("[bold]Codex Meter - Doctor[/bold]")
     table = Table(show_lines=False)
@@ -871,13 +939,33 @@ def init(
         "\n"
         "# Default rolling window for `codex-meter` (days).\n"
         "default_days = 30\n"
+        '# timezone = "local"\n'
+        "\n"
+        "# Local Codex data paths.\n"
+        '# session_root = "~/.codex/sessions"\n'
+        '# state_db = "~/.codex/state_5.sqlite"\n'
+        '# codex_config = "~/.codex/config.toml"\n'
+        "\n"
+        "# Pricing behavior. model = per-model card; flat = default fallback rates.\n"
+        '# pricing_mode = "model"\n'
+        '# rates_file = "./rates.json"\n'
         "\n"
         "# Service-tier inference. auto = use precedence chain.\n"
         'service_tier = "auto"\n'
         'unknown_service_tier = "current-config"\n'
+        '# tier_overrides = "./tier-overrides.json"\n'
         "\n"
         "# Default model when none is recorded.\n"
         'default_model = "gpt-5.5"\n'
+        "\n"
+        "# Output and privacy defaults.\n"
+        "# show_prompts = false\n"
+        "# offline = true\n"
+        "# compact = false\n"
+        "# width = 140\n"
+        "# top_threads = 10\n"
+        "# no_dedupe = false\n"
+        "# no_parse_cache = false\n"
         "\n"
         "# Optional budgets — used by `codex-meter budgets check`.\n"
         "# Severity: ok < 80%, warn at 80%, breach at 100%.\n"
@@ -926,63 +1014,71 @@ def _format_rates_label(rates: object) -> str:
 def rates_show(
     output_format: Annotated[
         str,
-        typer.Option("--format", "-f", help="table or json."),
+        typer.Option("--format", "-f", help="table, json, csv, or markdown."),
     ] = "table",
 ) -> None:
     """Show the active rate card, sources, and age."""
-    if output_format not in {"table", "json"}:
-        raise _exit_error("--format must be one of: table, json")
+    _validate_format(output_format)
 
     age = _rate_card_age_days()
     stale = age > 90
 
+    payload = {
+        "checked": [
+            {"name": source.name, "url": source.url, "checked": source.checked}
+            for source in PRICING_SOURCES
+        ],
+        "age_days": age,
+        "stale": stale,
+        "models": [
+            {
+                "name": card.name,
+                "api": (
+                    {
+                        "input": card.api_rates.input,
+                        "cached_input": card.api_rates.cached_input,
+                        "output": card.api_rates.output,
+                        "reasoning_output": card.api_rates.effective_reasoning_output,
+                    }
+                    if card.api_rates
+                    else None
+                ),
+                "credits": {
+                    "input": card.credit_rates.input,
+                    "cached_input": card.credit_rates.cached_input,
+                    "output": card.credit_rates.output,
+                    "reasoning_output": card.credit_rates.effective_reasoning_output,
+                },
+                "fast_multiplier": card.fast_multiplier,
+                "long_context": (
+                    {
+                        "threshold": card.long_context.threshold,
+                        "input_mult": card.long_context.input_mult,
+                        "output_mult": card.long_context.output_mult,
+                    }
+                    if card.long_context
+                    else None
+                ),
+            }
+            for card in MODEL_CARDS
+        ],
+    }
     if output_format == "json":
-        import json as _json
-
-        payload = {
-            "checked": [
-                {"name": source.name, "url": source.url, "checked": source.checked}
-                for source in PRICING_SOURCES
-            ],
-            "age_days": age,
-            "stale": stale,
-            "models": [
-                {
-                    "name": card.name,
-                    "api": (
-                        {
-                            "input": card.api_rates.input,
-                            "cached_input": card.api_rates.cached_input,
-                            "output": card.api_rates.output,
-                            "reasoning_output": card.api_rates.effective_reasoning_output,
-                        }
-                        if card.api_rates
-                        else None
-                    ),
-                    "credits": {
-                        "input": card.credit_rates.input,
-                        "cached_input": card.credit_rates.cached_input,
-                        "output": card.credit_rates.output,
-                        "reasoning_output": card.credit_rates.effective_reasoning_output,
-                    },
-                    "fast_multiplier": card.fast_multiplier,
-                    "long_context": (
-                        {
-                            "threshold": card.long_context.threshold,
-                            "input_mult": card.long_context.input_mult,
-                            "output_mult": card.long_context.output_mult,
-                        }
-                        if card.long_context
-                        else None
-                    ),
-                }
-                for card in MODEL_CARDS
-            ],
-        }
-        typer.echo(_json.dumps(payload, indent=2))
+        typer.echo(json.dumps(payload, indent=2))
         return
-
-    from rich.table import Table
+    if output_format in {"csv", "markdown"}:
+        records = [
+            {
+                "model": card["name"],
+                "fast_multiplier": card["fast_multiplier"],
+                "api_input": (card["api"] or {}).get("input", ""),
+                "credits_input": card["credits"]["input"],
+            }
+            for card in payload["models"]
+        ]
+        text = _records_to_csv(records) if output_format == "csv" else _records_to_markdown(records)
+        typer.echo(text, nl=False)
+        return
 
     console.print("[bold]Codex Meter - Rate Card[/bold]")
     console.print(f"Age: {age} days{'  [red](stale; consider refreshing)[/red]' if stale else ''}")
@@ -1014,18 +1110,222 @@ def rates_show(
 
 
 @rates_app.command("refresh")
-def rates_refresh() -> None:
-    """Refresh the embedded rate card from a URL (not yet implemented)."""
-    raise _exit_error(
-        "rates refresh is not yet implemented. Use --rates-file to override locally, "
-        "or open an issue to request live refresh."
+def rates_refresh(
+    allow_network: Annotated[
+        bool,
+        typer.Option("--allow-network", help="Fetch pricing pages over the network."),
+    ] = False,
+    output: OutputOpt = None,
+) -> None:
+    """Refresh a local fetched rate-card snapshot. Offline unless --allow-network is set."""
+    if not allow_network:
+        raise _exit_error(
+            "rates refresh needs --allow-network. The default path stays offline; pass "
+            "--allow-network to fetch an audit snapshot, or use --rates-file to override locally."
+        )
+    target = output or _fetched_rates_path()
+    payload = _fetch_rate_sources()
+    target.expanduser().parent.mkdir(parents=True, exist_ok=True)
+    target.expanduser().write_text(json.dumps(payload, indent=2) + "\n")
+    console.print(f"[green]Wrote[/green] {target}")
+
+
+def _fetched_rates_path() -> Path:
+    override = os.environ.get("CODEX_METER_DATA_DIR")
+    if override:
+        return Path(override).expanduser() / "rates-fetched.json"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg).expanduser() / "codex-meter" / "rates-fetched.json"
+    return Path.home() / ".local" / "share" / "codex-meter" / "rates-fetched.json"
+
+
+def _fetch_rate_sources() -> dict:
+    sources = []
+    observed = []
+    for source in PRICING_SOURCES:
+        request = urllib.request.Request(
+            source.url,
+            headers={"User-Agent": f"codex-meter/{__version__}"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                body = response.read()
+        except OSError as exc:
+            sources.append(
+                {"name": source.name, "url": source.url, "status": "error", "error": str(exc)}
+            )
+            continue
+        text = body.decode("utf-8", errors="replace")
+        extracted = _extract_models_from_text(text)
+        sources.append(
+            {
+                "name": source.name,
+                "url": source.url,
+                "status": "ok",
+                "bytes": len(body),
+                "observed_models": len(extracted),
+            }
+        )
+        observed.extend(item | {"source": source.name} for item in extracted)
+    observed_models = _dedupe_models(observed)
+    return {
+        "fetched_at": iso_z(dt.datetime.now(tz=dt.UTC)),
+        "sources": sources,
+        "embedded_models": _embedded_rate_snapshot(),
+        "observed_models": observed_models,
+        "models": observed_models,
+        "discrepancies": _rate_discrepancies(observed_models),
+    }
+
+
+def _extract_models_from_text(text: str) -> list[dict]:
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError:
+        return _extract_models_from_html(text)
+    if isinstance(raw, dict) and isinstance(raw.get("models"), list):
+        return [item for item in raw["models"] if isinstance(item, dict) and item.get("name")]
+    return []
+
+
+def _extract_models_from_html(text: str) -> list[dict]:
+    normalized = _normal_text(text)
+    found: list[dict] = []
+    for card in MODEL_CARDS:
+        window = _window_for_model(normalized, card.name)
+        if not window:
+            continue
+        api_rates = _extract_api_rates(window)
+        credit_rates = _extract_credit_rates(window, card.name)
+        item: dict = {"name": card.name}
+        if api_rates:
+            item["api"] = api_rates
+        if credit_rates:
+            item["credits"] = credit_rates
+        if len(item) > 1:
+            found.append(item)
+    return found
+
+
+def _normal_text(text: str) -> str:
+    text = html.unescape(text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = text.replace("\u2011", "-").replace("\u2010", "-").replace("\u2013", "-")
+    text = text.replace("\u2014", "-").replace("\xa0", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _window_for_model(text: str, model: str) -> str:
+    candidates = [
+        text[match.start() : match.start() + 3500]
+        for match in re.finditer(re.escape(model), text, flags=re.IGNORECASE)
+    ]
+    for candidate in candidates:
+        lowered = candidate.lower()
+        if "per 1m tokens" in lowered or "credits" in lowered:
+            return candidate
+    return candidates[0] if candidates else ""
+
+
+def _extract_api_rates(window: str) -> dict | None:
+    match = re.search(
+        r"Per 1M tokens\s+Input\s+\$([0-9.]+)\s+Cached input\s+\$([0-9.]+)\s+Output\s+\$([0-9.]+)",
+        window,
+        flags=re.IGNORECASE,
     )
+    if not match:
+        return None
+    return {
+        "input": float(match.group(1)),
+        "cached_input": float(match.group(2)),
+        "output": float(match.group(3)),
+    }
+
+
+def _extract_credit_rates(window: str, model: str) -> dict | None:
+    display = re.escape(model.replace("gpt", "GPT"))
+    match = re.search(
+        rf"{display}\s+([0-9.]+)\s+credits\s+([0-9.]+)\s+credits\s+([0-9.]+)\s+credits",
+        window,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return {
+        "input": float(match.group(1)),
+        "cached_input": float(match.group(2)),
+        "output": float(match.group(3)),
+    }
+
+
+def _dedupe_models(models: list[dict]) -> list[dict]:
+    deduped: dict[str, dict] = {}
+    for model in models:
+        name = str(model["name"])
+        merged = deduped.setdefault(name, {"name": name})
+        for key, value in model.items():
+            if key == "name":
+                continue
+            if key == "source" and merged.get("source") and merged["source"] != value:
+                merged["source"] = f"{merged['source']}; {value}"
+                continue
+            merged[key] = value
+    return [deduped[key] for key in sorted(deduped)]
+
+
+def _rates_payload(rates) -> dict | None:
+    if rates is None:
+        return None
+    return {
+        "input": rates.input,
+        "cached_input": rates.cached_input,
+        "output": rates.output,
+        "reasoning_output": rates.effective_reasoning_output,
+    }
+
+
+def _embedded_rate_snapshot() -> list[dict]:
+    return [
+        {
+            "name": card.name,
+            "api": _rates_payload(card.api_rates),
+            "credits": _rates_payload(card.credit_rates),
+            "fast_multiplier": card.fast_multiplier,
+        }
+        for card in MODEL_CARDS
+    ]
+
+
+def _rate_discrepancies(observed_models: list[dict]) -> list[dict]:
+    discrepancies: list[dict] = []
+    for observed in observed_models:
+        card = MODELS_BY_NAME.get(normalize_model(str(observed.get("name") or "")))
+        if card is None:
+            continue
+        for section, rates in (("api", card.api_rates), ("credits", card.credit_rates)):
+            if not rates or not isinstance(observed.get(section), dict):
+                continue
+            expected = _rates_payload(rates) or {}
+            for field in ("input", "cached_input", "output"):
+                actual = observed[section].get(field)
+                if actual is None:
+                    continue
+                if abs(float(actual) - float(expected[field])) > 1e-9:
+                    discrepancies.append(
+                        {
+                            "model": card.name,
+                            "section": section,
+                            "field": field,
+                            "embedded": expected[field],
+                            "observed": actual,
+                        }
+                    )
+    return discrepancies
 
 
 def _daily_credit_series(events, options: RuntimeOptions, rate_card: RateCard) -> list[float]:
     """Sum adjusted credits per local-tz day across the given events."""
-    from codex_meter.aggregation import aggregate_daily
-
     result = LoadResult(
         events=list(events),
         duplicates=0,
