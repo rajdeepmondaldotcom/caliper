@@ -19,10 +19,12 @@ from codex_meter.aggregation import (
     aggregate_weekly,
 )
 from codex_meter.config import build_options
+from codex_meter.forecasts import project as project_forecast
+from codex_meter.intervals import Interval, parse_interval
 from codex_meter.live import run_live
 from codex_meter.models import Aggregate, LoadResult, RuntimeOptions
 from codex_meter.parser import load_usage
-from codex_meter.pricing import MODEL_CARDS, PRICING_SOURCES, RateCard
+from codex_meter.pricing import MODEL_CARDS, MODELS_BY_NAME, PRICING_SOURCES, RateCard
 from codex_meter.render import format_int, render, render_limits
 from codex_meter.timeutil import iso_z, local_timezone
 
@@ -519,6 +521,422 @@ def rates_refresh() -> None:
         "rates refresh is not yet implemented. Use --rates-file to override locally, "
         "or open an issue to request live refresh."
     )
+
+
+def _daily_credit_series(events, options: RuntimeOptions, rate_card: RateCard) -> list[float]:
+    """Sum adjusted credits per local-tz day across the given events."""
+    from codex_meter.aggregation import aggregate_daily
+
+    result = LoadResult(
+        events=list(events),
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        credit_samples=[],
+        warnings=[],
+    )
+    rows = aggregate_daily(result, options, rate_card=rate_card)
+    return [row.costs.adjusted_credits for row in rows]
+
+
+def _days_remaining_in_month(now: dt.datetime) -> int:
+    import calendar
+
+    last_day = calendar.monthrange(now.year, now.month)[1]
+    return max(0, last_day - now.day)
+
+
+@app.command()
+def forecast(
+    days: Annotated[
+        int,
+        typer.Option("--days", min=1, max=180, help="Trailing day window analyzed."),
+    ] = 14,
+    cap: Annotated[
+        float | None,
+        typer.Option("--cap", help="Plan credit cap. Compute days-to-depletion."),
+    ] = None,
+    output_format: FormatOpt = "table",
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    rates_file: RatesFileOpt = None,
+    tier_overrides: TierOverridesOpt = None,
+    service_tier: ServiceTierOpt = "auto",
+    pricing_mode: PricingModeOpt = "model",
+) -> None:
+    """Project month-end credits + ±1σ band. Optional --cap shows days-to-depletion."""
+    if output_format not in {"table", "json"}:
+        raise _exit_error("--format must be one of: table, json")
+    try:
+        options = build_options(
+            days=float(days),
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+            config=config,
+            rates_file=rates_file,
+            tier_overrides=tier_overrides,
+            service_tier=service_tier,
+            pricing_mode=pricing_mode,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+    result = load_usage(options)
+    rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    daily = _daily_credit_series(result.events, options, rate_card)
+    now = dt.datetime.now(tz=local_timezone())
+    days_remaining = _days_remaining_in_month(now)
+    projection = project_forecast(daily, days_remaining, unit="credits", cap=cap)
+
+    if output_format == "json":
+        import json as _json
+
+        typer.echo(
+            _json.dumps(
+                {
+                    "unit": projection.unit,
+                    "days_analyzed": projection.days_analyzed,
+                    "daily_mean": projection.daily_mean,
+                    "daily_stdev": projection.daily_stdev,
+                    "days_remaining": projection.days_remaining,
+                    "linear_total": projection.linear_total,
+                    "ewma_total": projection.ewma_total,
+                    "linear_low": projection.linear_low,
+                    "linear_high": projection.linear_high,
+                    "cap": projection.cap,
+                    "days_to_cap": projection.days_to_cap,
+                },
+                indent=2,
+            )
+        )
+        return
+
+    from rich.table import Table
+
+    console.print("[bold]Codex Meter - Forecast[/bold]")
+    console.print(
+        f"Window analyzed: trailing {days} days  ({projection.days_analyzed} days with usage)"
+    )
+    console.print(f"Days remaining this month: {projection.days_remaining}")
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column(style="dim", justify="right")
+    table.add_column()
+    table.add_row("Daily mean", f"{projection.daily_mean:,.2f} {projection.unit}")
+    table.add_row("Daily σ", f"{projection.daily_stdev:,.2f} {projection.unit}")
+    table.add_row("Linear projection", f"{projection.linear_total:,.2f} {projection.unit}")
+    table.add_row(
+        "  ±1σ band",
+        f"{projection.linear_low:,.2f} – {projection.linear_high:,.2f}",
+    )
+    table.add_row("EWMA projection", f"{projection.ewma_total:,.2f} {projection.unit}")
+    if projection.cap is not None and projection.days_to_cap is not None:
+        table.add_row("Plan cap", f"{projection.cap:,.2f} {projection.unit}")
+        table.add_row("Days to depletion at mean rate", f"{projection.days_to_cap:,.1f}")
+    console.print(table)
+
+
+def _events_in_interval(events, interval: Interval):
+    return [event for event in events if interval.start <= event.timestamp < interval.end]
+
+
+def _aggregate_interval(
+    events,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    interval: Interval,
+    label: str,
+) -> Aggregate:
+    from codex_meter.aggregation import aggregate_total
+
+    filtered = _events_in_interval(events, interval)
+    result = LoadResult(
+        events=filtered,
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        credit_samples=[],
+        warnings=[],
+    )
+    return aggregate_total(result, options, label=label, rate_card=rate_card)
+
+
+@app.command()
+def compare(
+    a: Annotated[
+        str,
+        typer.Option("--a", help='Window A expression, e.g. "last 7 days".'),
+    ] = "last 7 days",
+    b: Annotated[
+        str,
+        typer.Option("--b", help='Window B expression, e.g. "previous 7 days".'),
+    ] = "previous 7 days",
+    output_format: FormatOpt = "table",
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    rates_file: RatesFileOpt = None,
+    tier_overrides: TierOverridesOpt = None,
+    service_tier: ServiceTierOpt = "auto",
+    pricing_mode: PricingModeOpt = "model",
+) -> None:
+    """Compare two windows side-by-side with credit + dollar deltas."""
+    if output_format not in {"table", "json"}:
+        raise _exit_error("--format must be one of: table, json")
+
+    now = dt.datetime.now(tz=local_timezone())
+    try:
+        interval_a = parse_interval(a, now)
+        interval_b = parse_interval(b, now)
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+    earliest = min(interval_a.start, interval_b.start)
+    span_days = max(1.0, (now - earliest).total_seconds() / 86400.0) + 1
+
+    try:
+        options = build_options(
+            days=span_days,
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+            config=config,
+            rates_file=rates_file,
+            tier_overrides=tier_overrides,
+            service_tier=service_tier,
+            pricing_mode=pricing_mode,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+    result = load_usage(options)
+    rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    agg_a = _aggregate_interval(result.events, options, rate_card, interval_a, "A")
+    agg_b = _aggregate_interval(result.events, options, rate_card, interval_b, "B")
+
+    def _delta(left: float, right: float) -> tuple[float, float]:
+        diff = left - right
+        pct = (diff / right * 100.0) if right else 0.0
+        return diff, pct
+
+    credits_delta, credits_pct = _delta(agg_a.costs.adjusted_credits, agg_b.costs.adjusted_credits)
+    dollars_delta, dollars_pct = _delta(agg_a.costs.api_dollars, agg_b.costs.api_dollars)
+    tokens_delta, tokens_pct = _delta(agg_a.totals.total_tokens, agg_b.totals.total_tokens)
+
+    if output_format == "json":
+        import json as _json
+
+        typer.echo(
+            _json.dumps(
+                {
+                    "a": _interval_summary(interval_a, agg_a),
+                    "b": _interval_summary(interval_b, agg_b),
+                    "delta": {
+                        "credits": credits_delta,
+                        "credits_pct": credits_pct,
+                        "api_dollars": dollars_delta,
+                        "api_dollars_pct": dollars_pct,
+                        "tokens": tokens_delta,
+                        "tokens_pct": tokens_pct,
+                    },
+                },
+                indent=2,
+            )
+        )
+        return
+
+    from rich.table import Table
+
+    console.print("[bold]Codex Meter - Compare[/bold]")
+    console.print(f"A: {interval_a.label}  ({iso_z(interval_a.start)} → {iso_z(interval_a.end)})")
+    console.print(f"B: {interval_b.label}  ({iso_z(interval_b.start)} → {iso_z(interval_b.end)})")
+    table = Table()
+    table.add_column("Metric")
+    table.add_column("A", justify="right")
+    table.add_column("B", justify="right")
+    table.add_column("Δ", justify="right")
+    table.add_column("%", justify="right")
+    table.add_row(
+        "Credits",
+        f"{agg_a.costs.adjusted_credits:,.2f}",
+        f"{agg_b.costs.adjusted_credits:,.2f}",
+        f"{credits_delta:+,.2f}",
+        f"{credits_pct:+.1f}%",
+    )
+    table.add_row(
+        "API $",
+        f"${agg_a.costs.api_dollars:,.2f}",
+        f"${agg_b.costs.api_dollars:,.2f}",
+        f"{dollars_delta:+,.2f}",
+        f"{dollars_pct:+.1f}%",
+    )
+    table.add_row(
+        "Tokens",
+        format_int(agg_a.totals.total_tokens),
+        format_int(agg_b.totals.total_tokens),
+        f"{tokens_delta:+,.0f}",
+        f"{tokens_pct:+.1f}%",
+    )
+    table.add_row(
+        "Events",
+        format_int(agg_a.totals.events),
+        format_int(agg_b.totals.events),
+        "",
+        "",
+    )
+    console.print(table)
+
+
+def _interval_summary(interval: Interval, agg: Aggregate) -> dict:
+    return {
+        "label": interval.label,
+        "start": iso_z(interval.start),
+        "end": iso_z(interval.end),
+        "credits": agg.costs.adjusted_credits,
+        "standard_credits": agg.costs.standard_credits,
+        "api_dollars": agg.costs.api_dollars,
+        "events": agg.totals.events,
+        "tokens": agg.totals.total_tokens,
+        "models": sorted(agg.models),
+    }
+
+
+@app.command()
+def whatif(
+    days: Annotated[
+        int,
+        typer.Option("--days", min=1, max=365, help="Trailing day window."),
+    ] = 7,
+    tier: Annotated[
+        str | None,
+        typer.Option("--tier", help="Hypothetical tier: standard or fast."),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Hypothetical model name (must be in rate card)."),
+    ] = None,
+    output_format: FormatOpt = "table",
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    rates_file: RatesFileOpt = None,
+    tier_overrides: TierOverridesOpt = None,
+    service_tier: ServiceTierOpt = "auto",
+    pricing_mode: PricingModeOpt = "model",
+) -> None:
+    """Re-cost the window under a hypothetical tier or model swap."""
+    if tier is None and model is None:
+        raise _exit_error("Provide --tier and/or --model to evaluate a hypothetical.")
+    if tier is not None and tier not in {"standard", "fast"}:
+        raise _exit_error("--tier must be one of: standard, fast")
+    if model is not None and model not in MODELS_BY_NAME:
+        raise _exit_error(
+            f"--model {model!r} is not in the embedded rate card. "
+            f"Use one of: {', '.join(sorted(MODELS_BY_NAME))}"
+        )
+    if output_format not in {"table", "json"}:
+        raise _exit_error("--format must be one of: table, json")
+
+    try:
+        options = build_options(
+            days=float(days),
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+            config=config,
+            rates_file=rates_file,
+            tier_overrides=tier_overrides,
+            service_tier=service_tier,
+            pricing_mode=pricing_mode,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+    result = load_usage(options)
+    rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    actual_credits = 0.0
+    actual_dollars = 0.0
+    hypothetical_credits = 0.0
+    hypothetical_dollars = 0.0
+    for event in result.events:
+        actual, _, _ = rate_card.cost_for(event.usage, event.model, event.service_tier)
+        actual_credits += actual.adjusted_credits
+        actual_dollars += actual.api_dollars
+        hyp_model = model or event.model
+        hyp_tier = tier or event.service_tier
+        hypothetical, _, _ = rate_card.cost_for(event.usage, hyp_model, hyp_tier)
+        hypothetical_credits += hypothetical.adjusted_credits
+        hypothetical_dollars += hypothetical.api_dollars
+
+    credit_delta = hypothetical_credits - actual_credits
+    dollar_delta = hypothetical_dollars - actual_dollars
+    credit_pct = (credit_delta / actual_credits * 100.0) if actual_credits else 0.0
+    dollar_pct = (dollar_delta / actual_dollars * 100.0) if actual_dollars else 0.0
+
+    if output_format == "json":
+        import json as _json
+
+        typer.echo(
+            _json.dumps(
+                {
+                    "days": days,
+                    "hypothetical": {"tier": tier, "model": model},
+                    "actual": {
+                        "credits": actual_credits,
+                        "api_dollars": actual_dollars,
+                    },
+                    "projected": {
+                        "credits": hypothetical_credits,
+                        "api_dollars": hypothetical_dollars,
+                    },
+                    "delta": {
+                        "credits": credit_delta,
+                        "credits_pct": credit_pct,
+                        "api_dollars": dollar_delta,
+                        "api_dollars_pct": dollar_pct,
+                    },
+                    "events_evaluated": len(result.events),
+                },
+                indent=2,
+            )
+        )
+        return
+
+    from rich.table import Table
+
+    label_parts = []
+    if tier:
+        label_parts.append(f"tier={tier}")
+    if model:
+        label_parts.append(f"model={model}")
+    label = ", ".join(label_parts) or "no-op"
+    console.print(f"[bold]Codex Meter - What If ({label})[/bold]")
+    console.print(f"Trailing {days} days · {len(result.events):,} events")
+    table = Table()
+    table.add_column("Metric")
+    table.add_column("Actual", justify="right")
+    table.add_column("Projected", justify="right")
+    table.add_column("Δ", justify="right")
+    table.add_column("%", justify="right")
+    table.add_row(
+        "Credits",
+        f"{actual_credits:,.2f}",
+        f"{hypothetical_credits:,.2f}",
+        f"{credit_delta:+,.2f}",
+        f"{credit_pct:+.1f}%",
+    )
+    table.add_row(
+        "API $",
+        f"${actual_dollars:,.2f}",
+        f"${hypothetical_dollars:,.2f}",
+        f"{dollar_delta:+,.2f}",
+        f"{dollar_pct:+.1f}%",
+    )
+    console.print(table)
 
 
 @app.command()
