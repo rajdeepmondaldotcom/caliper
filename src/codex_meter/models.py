@@ -86,10 +86,12 @@ class RuntimeOptions:
     tier_overrides: Path | None
     rates_file: Path | None
     dedupe: bool
+    parse_cache: bool
     default_model: str
     show_prompts: bool
     offline: bool
     compact: bool
+    width: int | None
     top_threads: int
 
 
@@ -194,6 +196,7 @@ class Aggregate:
     label: str
     totals: TokenTotals = field(default_factory=TokenTotals)
     costs: CostTotals = field(default_factory=CostTotals)
+    cache_savings: CostTotals = field(default_factory=CostTotals)
     models: set[str] = field(default_factory=set)
     service_tiers: set[str] = field(default_factory=set)
     plan_types: set[str] = field(default_factory=set)
@@ -207,12 +210,14 @@ class Aggregate:
         self,
         event: UsageEvent,
         costs: CostTotals,
+        cache_savings: CostTotals,
         long_context: bool,
         unknown_model: bool,
         unknown_tier: bool,
     ) -> None:
         self.totals.add_usage(event.usage)
         self.costs.add(costs)
+        self.cache_savings.add(cache_savings)
         if event.model:
             self.models.add(event.model)
         if event.service_tier:

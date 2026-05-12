@@ -81,10 +81,12 @@ def build_options(
     tier_overrides: Path | None = None,
     rates_file: Path | None = None,
     no_dedupe: bool = False,
+    no_parse_cache: bool = False,
     default_model: str = "gpt-5.5",
     show_prompts: bool = False,
     offline: bool = True,
     compact: bool = False,
+    width: int | None = None,
     top_threads: int = 10,
 ) -> RuntimeOptions:
     loaded = load_config(config)
@@ -131,7 +133,13 @@ def build_options(
     top_threads_value = int(cfg(loaded, "top_threads", top_threads, 10))
     if top_threads_value <= 0:
         raise ValueError("--top-threads must be greater than 0")
+    width_value = cfg(loaded, "width", width, None)
+    if width_value is not None:
+        width_value = int(width_value)
+        if width_value <= 0:
+            raise ValueError("--width must be greater than 0")
     no_dedupe_value = cfg_bool(loaded, "no_dedupe", no_dedupe, False)
+    no_parse_cache_value = cfg_bool(loaded, "no_parse_cache", no_parse_cache, False)
 
     return RuntimeOptions(
         session_root=cfg_path(loaded, "session_root", session_root, DEFAULT_SESSION_ROOT),
@@ -146,9 +154,11 @@ def build_options(
         tier_overrides=cfg_optional_path(loaded, "tier_overrides", tier_overrides),
         rates_file=cfg_optional_path(loaded, "rates_file", rates_file),
         dedupe=not no_dedupe_value,
+        parse_cache=not no_parse_cache_value,
         default_model=str(cfg(loaded, "default_model", default_model, "gpt-5.5")),
         show_prompts=cfg_bool(loaded, "show_prompts", show_prompts, False),
         offline=cfg_bool(loaded, "offline", offline, True),
         compact=cfg_bool(loaded, "compact", compact, False),
+        width=width_value,
         top_threads=top_threads_value,
     )

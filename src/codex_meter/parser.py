@@ -7,7 +7,8 @@ import json
 import sqlite3
 import tomllib
 from collections.abc import Iterable
-from dataclasses import replace
+from contextlib import closing
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from codex_meter.models import (
@@ -19,8 +20,11 @@ from codex_meter.models import (
     Usage,
     UsageEvent,
 )
+from codex_meter.parse_cache import ParseCache
 from codex_meter.pricing import normalize_model, normalize_service_tier
 from codex_meter.timeutil import parse_datetime, parse_event_timestamp
+
+PARSER_CACHE_VERSION = 3
 
 
 def session_files(session_root: Path) -> Iterable[Path]:
@@ -127,7 +131,7 @@ def load_thread_metadata(state_db: Path) -> dict[str, ThreadMeta]:
     if not state_db.exists():
         return {}
     try:
-        with sqlite3.connect(state_db) as conn:
+        with closing(sqlite3.connect(f"file:{state_db}?mode=ro", uri=True)) as conn:
             columns = {row[1] for row in conn.execute("pragma table_info(threads)").fetchall()}
             if "rollout_path" not in columns:
                 return {}
@@ -327,34 +331,42 @@ def load_usage(options: RuntimeOptions) -> LoadResult:
     credit_samples: list[RateLimitSample] = []
     warnings: list[str] = []
     reset_warnings: set[Path] = set()
+    cache = ParseCache.default() if options.parse_cache else None
 
     if not options.session_root.exists():
         warnings.append(f"Session root does not exist: {options.session_root}")
 
     for path in session_files(options.session_root):
-        if not _file_in_window(path, start_utc):
-            continue
         thread_meta = metadata.get(
             str(path), metadata.get(path.name, ThreadMeta(rollout_path=str(path)))
         )
-        for usage_event, reset, sample in _parse_session(
-            path,
-            thread_meta=thread_meta,
-            options=options,
-            config_tier=config_tier,
-            overrides=overrides,
-            start_utc=start_utc,
-            end_utc=end_utc,
-        ):
-            if sample is not None:
+        signature = _parse_cache_signature(options, config_tier, overrides, thread_meta)
+        parsed = cache.get(path, signature) if cache else None
+        if parsed is None:
+            parsed = list(
+                _parse_session(
+                    path,
+                    thread_meta=thread_meta,
+                    options=options,
+                    config_tier=config_tier,
+                    overrides=overrides,
+                )
+            )
+            if cache:
+                cache.put(path, signature, parsed)
+        for usage_event, reset, sample in parsed:
+            sample_in_window = sample is not None and start_utc <= sample.timestamp < end_utc
+            if sample_in_window:
                 credit_samples.append(sample)
                 if sample.plan_type:
                     plan_types.add(sample.plan_type)
+            if usage_event is None:
+                continue
+            if usage_event.timestamp < start_utc or usage_event.timestamp >= end_utc:
+                continue
             if reset and path not in reset_warnings:
                 warnings.append(f"Token counter reset detected in {path}; used current totals")
                 reset_warnings.add(path)
-            if usage_event is None:
-                continue
             key = usage_key(path, usage_event.timestamp.isoformat(), usage_event.usage)
             if options.dedupe and key in seen:
                 duplicates += 1
@@ -363,7 +375,7 @@ def load_usage(options: RuntimeOptions) -> LoadResult:
             tier_sources[usage_event.tier_source] = tier_sources.get(usage_event.tier_source, 0) + 1
             events.append(usage_event)
 
-    credit_samples = sorted(credit_samples, key=lambda sample: sample.timestamp)[-5:]
+    credit_samples.sort(key=lambda sample: sample.timestamp)
     events.sort(key=lambda event: event.timestamp)
     return LoadResult(
         events=events,
@@ -375,11 +387,30 @@ def load_usage(options: RuntimeOptions) -> LoadResult:
     )
 
 
-def _file_in_window(path: Path, start_utc: dt.datetime) -> bool:
-    try:
-        return path.stat().st_mtime >= start_utc.timestamp()
-    except OSError:
-        return False
+def _parse_cache_signature(
+    options: RuntimeOptions,
+    config_tier: str,
+    overrides: list[TierOverride],
+    thread_meta: ThreadMeta,
+) -> str:
+    payload = {
+        "version": PARSER_CACHE_VERSION,
+        "service_tier": options.service_tier,
+        "unknown_service_tier": options.unknown_service_tier,
+        "default_model": options.default_model,
+        "config_tier": config_tier,
+        "overrides": [
+            {
+                "service_tier": item.service_tier,
+                "session": item.session,
+                "start": item.start.isoformat() if item.start else None,
+                "end": item.end.isoformat() if item.end else None,
+            }
+            for item in overrides
+        ],
+        "thread": asdict(thread_meta),
+    }
+    return json.dumps(payload, sort_keys=True)
 
 
 def _parse_session(
@@ -389,8 +420,6 @@ def _parse_session(
     options: RuntimeOptions,
     config_tier: str,
     overrides: list[TierOverride],
-    start_utc: dt.datetime,
-    end_utc: dt.datetime,
 ):
     try:
         handle = path.open(encoding="utf-8", errors="replace")
@@ -418,8 +447,6 @@ def _parse_session(
             usage, previous_total_usage, usage_source, model_context_window, total_reset = (
                 token_usage_from_info(info if isinstance(info, dict) else {}, previous_total_usage)
             )
-            if event_time < start_utc or event_time >= end_utc:
-                continue
 
             rate_limits = payload.get("rate_limits") or {}
             sample = (

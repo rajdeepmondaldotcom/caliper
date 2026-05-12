@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import calendar
+import csv
 import datetime as dt
+import html
+import io
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import urllib.request
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from codex_meter import __version__
 from codex_meter.aggregation import (
@@ -39,11 +51,20 @@ from codex_meter.exporters import (
     render_receipt_markdown,
 )
 from codex_meter.forecasts import project as project_forecast
+from codex_meter.humanize import short_table_label
+from codex_meter.insights import build_insights, insights_payload, render_insights_markdown
 from codex_meter.intervals import Interval, parse_interval
 from codex_meter.live import run_live
 from codex_meter.models import Aggregate, LoadResult, RuntimeOptions
+from codex_meter.parse_cache import default_cache_path
 from codex_meter.parser import load_usage
-from codex_meter.pricing import MODEL_CARDS, MODELS_BY_NAME, PRICING_SOURCES, RateCard
+from codex_meter.pricing import (
+    MODEL_CARDS,
+    MODELS_BY_NAME,
+    PRICING_SOURCES,
+    RateCard,
+    normalize_model,
+)
 from codex_meter.render import format_int, render, render_limits
 from codex_meter.timeutil import iso_z, local_timezone
 
@@ -80,11 +101,13 @@ UnknownTierOpt = Annotated[str, typer.Option("--unknown-service-tier")]
 TierOverridesOpt = Annotated[Path | None, typer.Option("--tier-overrides")]
 RatesFileOpt = Annotated[Path | None, typer.Option("--rates-file")]
 NoDedupeOpt = Annotated[bool, typer.Option("--no-dedupe")]
+NoParseCacheOpt = Annotated[bool, typer.Option("--no-parse-cache")]
 DefaultModelOpt = Annotated[str, typer.Option("--default-model")]
 ShowPromptsOpt = Annotated[bool, typer.Option("--show-prompts")]
 OfflineOpt = Annotated[bool, typer.Option("--offline/--no-offline")]
 CompactOpt = Annotated[bool, typer.Option("--compact")]
-TopThreadsOpt = Annotated[int, typer.Option("--top-threads")]
+WidthOpt = Annotated[int | None, typer.Option("--width", help="Table width override.")]
+TopThreadsOpt = Annotated[int, typer.Option("--top", "--top-threads", help="Limit grouped rows.")]
 FormatOpt = Annotated[str, typer.Option("--format", "-f", help="table, json, csv, or markdown.")]
 OutputOpt = Annotated[Path | None, typer.Option("--output", help="Write output to a file.")]
 
@@ -105,10 +128,12 @@ OPTION_KEYS = (
     "tier_overrides",
     "rates_file",
     "no_dedupe",
+    "no_parse_cache",
     "default_model",
     "show_prompts",
     "offline",
     "compact",
+    "width",
     "top_threads",
 )
 
@@ -123,6 +148,34 @@ def _validate_format(output_format: str) -> None:
         raise _exit_error(f"--format must be one of: {', '.join(OUTPUT_FORMATS)}")
 
 
+def _records_to_csv(records: list[dict]) -> str:
+    if not records:
+        return ""
+    out = io.StringIO()
+    fields = list(records[0].keys())
+    writer = csv.DictWriter(out, fieldnames=fields)
+    writer.writeheader()
+    writer.writerows(records)
+    return out.getvalue()
+
+
+def _records_to_markdown(records: list[dict]) -> str:
+    if not records:
+        return "_No data._\n"
+    fields = list(records[0].keys())
+    lines = [
+        "| " + " | ".join(fields) + " |",
+        "| " + " | ".join(["---"] * len(fields)) + " |",
+    ]
+    for record in records:
+        lines.append(
+            "| "
+            + " | ".join(str(record.get(field, "")).replace("|", "\\|") for field in fields)
+            + " |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _options(values: dict) -> RuntimeOptions:
     kwargs = {key: values[key] for key in OPTION_KEYS if key in values}
     try:
@@ -135,14 +188,32 @@ def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
     _validate_format(values["output_format"])
     options = _options(values)
     result = load_usage(options)
-    rows = rows_fn(result, options)
+    rows = rows_fn(result, options)[: options.top_threads]
     render(result, options, rows, name, values["output_format"], values["output"])
 
 
 def version_callback(value: bool) -> None:
     if value:
-        console.print(__version__)
+        console.print(_version_label())
         raise typer.Exit()
+
+
+def _version_label() -> str:
+    checked = max(source.checked for source in PRICING_SOURCES)
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=1,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        sha = ""
+    else:
+        sha = completed.stdout.strip()
+    suffix = f", commit {sha}" if sha else ""
+    return f"{__version__} (rates checked {checked}{suffix})"
 
 
 @app.callback(invoke_without_command=True)
@@ -152,16 +223,36 @@ def main(
         bool,
         typer.Option("--version", "-v", callback=version_callback, help="Show version and exit."),
     ] = False,
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
 ) -> None:
     if ctx.invoked_subcommand is None:
-        _run_overview("table", None)
+        _run_overview(locals())
 
 
-def _run_overview(output_format: str, output: Path | None) -> None:
+def _run_overview(values: dict) -> None:
+    output_format = values["output_format"]
     _validate_format(output_format)
     now = dt.datetime.now(tz=local_timezone())
+    option_values = {key: values[key] for key in OPTION_KEYS if key in values}
+    option_values["days"] = 90.0
+    option_values["until"] = iso_z(now)
     try:
-        longest_options = build_options(days=90, until=iso_z(now))
+        longest_options = build_options(**option_values)
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
     longest_result = load_usage(longest_options)
@@ -181,13 +272,30 @@ def _run_overview(output_format: str, output: Path | None) -> None:
         rows.append(
             aggregate_total(window, longest_options, label=f"Last {days} days", rate_card=rate_card)
         )
-    render(longest_result, longest_options, rows, "overview", output_format, output)
+    render(longest_result, longest_options, rows, "overview", output_format, values["output"])
 
 
 @app.command()
-def overview(output_format: FormatOpt = "table", output: OutputOpt = None) -> None:
+def overview(
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+) -> None:
     """Show rolling 7/30/90 day usage."""
-    _run_overview(output_format, output)
+    _run_overview(locals())
 
 
 @app.command()
@@ -208,10 +316,12 @@ def daily(
     tier_overrides: TierOverridesOpt = None,
     rates_file: RatesFileOpt = None,
     no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
+    width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by day."""
@@ -236,10 +346,12 @@ def weekly(
     tier_overrides: TierOverridesOpt = None,
     rates_file: RatesFileOpt = None,
     no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
+    width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by ISO week."""
@@ -264,10 +376,12 @@ def monthly(
     tier_overrides: TierOverridesOpt = None,
     rates_file: RatesFileOpt = None,
     no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
+    width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by month."""
@@ -292,10 +406,12 @@ def session_command(
     tier_overrides: TierOverridesOpt = None,
     rates_file: RatesFileOpt = None,
     no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
+    width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by Codex session."""
@@ -320,10 +436,12 @@ def project(
     tier_overrides: TierOverridesOpt = None,
     rates_file: RatesFileOpt = None,
     no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
+    width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by project/cwd."""
@@ -348,10 +466,12 @@ def models(
     tier_overrides: TierOverridesOpt = None,
     rates_file: RatesFileOpt = None,
     no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
+    width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show usage grouped by model and service tier."""
@@ -376,10 +496,12 @@ def limits(
     tier_overrides: TierOverridesOpt = None,
     rates_file: RatesFileOpt = None,
     no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
+    width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
 ) -> None:
     """Show recent rate-limit and credit samples."""

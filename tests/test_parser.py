@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import sqlite3
+from contextlib import closing
 
 from codex_meter.config import build_options
 from codex_meter.parser import load_usage
@@ -274,7 +275,7 @@ def test_state_db_loader_tolerates_missing_optional_columns(tmp_path) -> None:
         ],
     )
     state_db = tmp_path / "state.sqlite"
-    with sqlite3.connect(state_db) as conn:
+    with closing(sqlite3.connect(state_db)) as conn, conn:
         conn.execute("create table threads (rollout_path text, cwd text)")
         conn.execute("insert into threads values (?, ?)", (str(session_path), "/tmp/project-beta"))
 
