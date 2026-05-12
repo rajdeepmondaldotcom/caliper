@@ -18,7 +18,26 @@ from codex_meter.aggregation import (
     aggregate_total,
     aggregate_weekly,
 )
-from codex_meter.config import build_options
+from codex_meter.budgets import (
+    SEVERITY_BREACH,
+    SEVERITY_EXIT_CODE,
+    SEVERITY_WARN,
+    Budget,
+    BudgetAlert,
+    max_severity,
+    parse_budgets_table,
+)
+from codex_meter.budgets import (
+    evaluate as evaluate_budgets,
+)
+from codex_meter.config import build_options, load_config
+from codex_meter.exporters import (
+    ReceiptInputs,
+    month_bounds,
+    render_grafana_dashboard,
+    render_receipt_html,
+    render_receipt_markdown,
+)
 from codex_meter.forecasts import project as project_forecast
 from codex_meter.intervals import Interval, parse_interval
 from codex_meter.live import run_live
@@ -937,6 +956,365 @@ def whatif(
         f"{dollar_pct:+.1f}%",
     )
     console.print(table)
+
+
+export_app = typer.Typer(help="Generate external artifacts: receipts, Grafana dashboards, etc.")
+app.add_typer(export_app, name="export")
+
+
+def _build_prometheus_snapshot(options: RuntimeOptions):
+    """Construct a Prometheus MetricsSnapshot from a freshly loaded usage window."""
+    from codex_meter.prom_export import MetricsSnapshot
+    from codex_meter.windows import compute_window_state
+
+    result = load_usage(options)
+    rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    now = dt.datetime.now(tz=local_timezone())
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_events = [event for event in result.events if event.timestamp >= today_start]
+    today_result = LoadResult(
+        events=today_events,
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        credit_samples=[],
+        warnings=[],
+    )
+    from codex_meter.aggregation import aggregate_total
+
+    totals = aggregate_total(today_result, options, label="today", rate_card=rate_card)
+    primary = compute_window_state(result.credit_samples, now, "primary")
+    secondary = compute_window_state(result.credit_samples, now, "secondary")
+
+    tokens: dict[tuple[str, str, str], int] = {}
+    for event in today_events:
+        key_input = (event.model or "unknown", event.service_tier or "unknown", "input")
+        tokens[key_input] = tokens.get(key_input, 0) + int(event.usage.input_tokens)
+        key_cached = (event.model or "unknown", event.service_tier or "unknown", "cached")
+        tokens[key_cached] = tokens.get(key_cached, 0) + int(event.usage.cached_input_tokens)
+        key_output = (event.model or "unknown", event.service_tier or "unknown", "output")
+        tokens[key_output] = tokens.get(key_output, 0) + int(event.usage.output_tokens)
+        key_reasoning = (event.model or "unknown", event.service_tier or "unknown", "reasoning")
+        tokens[key_reasoning] = tokens.get(key_reasoning, 0) + int(
+            event.usage.reasoning_output_tokens
+        )
+
+    burn = primary.burn_rate_per_hour
+    return MetricsSnapshot(
+        credits_used=totals.costs.adjusted_credits,
+        burn_per_hour=burn if burn is not None else 0.0,
+        primary_window_percent=primary.used_percent if primary.used_percent is not None else 0.0,
+        secondary_window_percent=(
+            secondary.used_percent if secondary.used_percent is not None else 0.0
+        ),
+        events_total=totals.totals.events,
+        long_context_events_total=totals.long_context_events,
+        tokens_total=tokens,
+    )
+
+
+@export_app.command("prometheus")
+def export_prometheus(
+    host: Annotated[
+        str,
+        typer.Option("--host", help="Bind address. Default 127.0.0.1 to keep metrics local."),
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="TCP port.")] = 9090,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    rates_file: RatesFileOpt = None,
+    tier_overrides: TierOverridesOpt = None,
+    service_tier: ServiceTierOpt = "auto",
+    pricing_mode: PricingModeOpt = "model",
+) -> None:
+    """Serve /metrics for Prometheus. Default bind 127.0.0.1 — pass --host 0.0.0.0 to expose."""
+    try:
+        from codex_meter.prom_export import serve_forever
+    except ImportError as exc:
+        raise _exit_error(
+            "prometheus-client is not installed. Install with: pip install 'codex-meter[prom]'"
+        ) from exc
+    try:
+        options = build_options(
+            days=7.0,
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+            config=config,
+            rates_file=rates_file,
+            tier_overrides=tier_overrides,
+            service_tier=service_tier,
+            pricing_mode=pricing_mode,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+    console.print(f"[green]Prometheus exporter listening on http://{host}:{port}/metrics[/green]")
+    try:
+        serve_forever(host, port, lambda: _build_prometheus_snapshot(options))
+    except OSError as exc:
+        raise _exit_error(
+            f"could not bind {host}:{port}: {exc}. "
+            f"Try a different --port or check that no other exporter is running."
+        ) from exc
+
+
+@export_app.command("grafana")
+def export_grafana(
+    title: Annotated[str, typer.Option("--title", help="Dashboard title.")] = "Codex Meter",
+    output: OutputOpt = None,
+) -> None:
+    """Emit a Grafana dashboard JSON wired to the Prometheus exporter metric names."""
+    text = render_grafana_dashboard(title=title)
+    if output:
+        output.expanduser().write_text(text)
+    else:
+        typer.echo(text)
+
+
+@export_app.command("receipt")
+def export_receipt(
+    month: Annotated[str, typer.Option("--month", help="Month YYYY-MM.")] = "",
+    receipt_format: Annotated[
+        str,
+        typer.Option("--format", "-f", help="markdown or html."),
+    ] = "markdown",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    rates_file: RatesFileOpt = None,
+    tier_overrides: TierOverridesOpt = None,
+    service_tier: ServiceTierOpt = "auto",
+    pricing_mode: PricingModeOpt = "model",
+    top: Annotated[
+        int,
+        typer.Option("--top", min=1, max=50, help="Rows in 'top sessions' / 'top projects'."),
+    ] = 5,
+) -> None:
+    """Generate a monthly receipt (markdown or html)."""
+    if receipt_format not in {"markdown", "html"}:
+        raise _exit_error("--format must be one of: markdown, html")
+
+    now = dt.datetime.now(tz=local_timezone())
+    chosen_month = month or now.strftime("%Y-%m")
+    try:
+        start, end = month_bounds(chosen_month, local_timezone())
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+    span_days = (end - start).total_seconds() / 86400.0 + 1
+    try:
+        options = build_options(
+            days=span_days,
+            until=iso_z(end),
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+            config=config,
+            rates_file=rates_file,
+            tier_overrides=tier_overrides,
+            service_tier=service_tier,
+            pricing_mode=pricing_mode,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+    result = load_usage(options)
+    rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+
+    in_month = [event for event in result.events if start <= event.timestamp < end]
+    scoped = LoadResult(
+        events=in_month,
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        credit_samples=[],
+        warnings=[],
+    )
+
+    from codex_meter.aggregation import (
+        aggregate_model_mode,
+        aggregate_projects,
+        aggregate_sessions,
+        aggregate_total,
+    )
+
+    totals = aggregate_total(scoped, options, label="Month", rate_card=rate_card)
+    by_model = aggregate_model_mode(scoped, options, rate_card=rate_card)
+    top_sessions = aggregate_sessions(scoped, options, rate_card=rate_card)[:top]
+    top_projects = aggregate_projects(scoped, options, rate_card=rate_card)[:top]
+
+    payload = ReceiptInputs(
+        month=chosen_month,
+        totals=totals,
+        by_model=by_model,
+        top_sessions=top_sessions,
+        top_projects=top_projects,
+        generated_at=now,
+    )
+    text = (
+        render_receipt_html(payload)
+        if receipt_format == "html"
+        else render_receipt_markdown(payload)
+    )
+    if output:
+        output.expanduser().write_text(text)
+    else:
+        typer.echo(text)
+
+
+budgets_app = typer.Typer(help="Inspect budget alerts (warn/breach) for the active window.")
+app.add_typer(budgets_app, name="budgets")
+
+
+def _current_period_intervals(now: dt.datetime) -> dict[str, tuple[dt.datetime, dt.datetime]]:
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = day_start - dt.timedelta(days=day_start.weekday())
+    month_start = day_start.replace(day=1)
+    return {
+        "daily": (day_start, now),
+        "weekly": (week_start, now),
+        "monthly": (month_start, now),
+    }
+
+
+def _usage_for_periods(
+    events, options: RuntimeOptions, rate_card: RateCard, now: dt.datetime
+) -> dict[str, float]:
+    from codex_meter.aggregation import aggregate_total
+
+    intervals = _current_period_intervals(now)
+    usage: dict[str, float] = {}
+    for period, (start, end) in intervals.items():
+        scoped = [event for event in events if start <= event.timestamp < end]
+        result = LoadResult(
+            events=scoped,
+            duplicates=0,
+            tier_sources={},
+            plan_types=set(),
+            credit_samples=[],
+            warnings=[],
+        )
+        aggregate = aggregate_total(result, options, label=period, rate_card=rate_card)
+        usage[f"{period}.credits"] = aggregate.costs.adjusted_credits
+        usage[f"{period}.api_dollars"] = aggregate.costs.api_dollars
+        usage[f"{period}.tokens"] = float(aggregate.totals.total_tokens)
+    return usage
+
+
+def _severity_style(severity: str) -> str:
+    if severity == SEVERITY_BREACH:
+        return "[red]breach[/red]"
+    if severity == SEVERITY_WARN:
+        return "[yellow]warn[/yellow]"
+    return "[green]ok[/green]"
+
+
+@budgets_app.command("check")
+def budgets_check(
+    config: ConfigOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    rates_file: RatesFileOpt = None,
+    tier_overrides: TierOverridesOpt = None,
+    service_tier: ServiceTierOpt = "auto",
+    pricing_mode: PricingModeOpt = "model",
+    output_format: FormatOpt = "table",
+) -> None:
+    """Evaluate `[budgets]` from .codex-meter.toml against the current window."""
+    if output_format not in {"table", "json"}:
+        raise _exit_error("--format must be one of: table, json")
+    try:
+        loaded = load_config(config) if config else load_config()
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+    raw = loaded.get("budgets") or {}
+    try:
+        budget_list: list[Budget] = parse_budgets_table(raw if isinstance(raw, dict) else {})
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+    if not budget_list:
+        console.print(
+            "[dim]No budgets defined. Add a [budgets] table to .codex-meter.toml. "
+            "Example: daily_credits = 25000.[/dim]"
+        )
+        raise typer.Exit(0)
+
+    try:
+        options = build_options(
+            days=31.0,
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+            config=config,
+            rates_file=rates_file,
+            tier_overrides=tier_overrides,
+            service_tier=service_tier,
+            pricing_mode=pricing_mode,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+    result = load_usage(options)
+    rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    now = dt.datetime.now(tz=local_timezone())
+    usage = _usage_for_periods(result.events, options, rate_card, now)
+    alerts: list[BudgetAlert] = evaluate_budgets(budget_list, usage)
+    worst = max_severity(alerts)
+
+    if output_format == "json":
+        import json as _json
+
+        typer.echo(
+            _json.dumps(
+                {
+                    "alerts": [
+                        {
+                            "period": alert.budget.period,
+                            "metric": alert.budget.metric,
+                            "limit": alert.budget.limit,
+                            "warn_at": alert.budget.warn_at,
+                            "used": alert.used,
+                            "used_percent": alert.used_percent,
+                            "severity": alert.severity,
+                        }
+                        for alert in alerts
+                    ],
+                    "max_severity": worst,
+                },
+                indent=2,
+            )
+        )
+        raise typer.Exit(SEVERITY_EXIT_CODE[worst])
+
+    from rich.table import Table
+
+    console.print("[bold]Codex Meter - Budgets[/bold]")
+    table = Table()
+    table.add_column("Period")
+    table.add_column("Metric")
+    table.add_column("Used", justify="right")
+    table.add_column("Limit", justify="right")
+    table.add_column("%", justify="right")
+    table.add_column("Status")
+    for alert in alerts:
+        table.add_row(
+            alert.budget.period,
+            alert.budget.metric,
+            f"{alert.used:,.2f}",
+            f"{alert.budget.limit:,.2f}",
+            f"{alert.used_percent:,.1f}%",
+            _severity_style(alert.severity),
+        )
+    console.print(table)
+    console.print(f"Max severity: {_severity_style(worst)}")
+    raise typer.Exit(SEVERITY_EXIT_CODE[worst])
 
 
 @app.command()
