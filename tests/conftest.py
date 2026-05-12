@@ -74,11 +74,17 @@ def user_message(message: str) -> dict:
     }
 
 
-def turn_context(*, model: str = "gpt-5.5", service_tier: str = "fast") -> dict:
+def turn_context(
+    *,
+    model: str = "gpt-5.5",
+    service_tier: str = "fast",
+    cwd: str = "/tmp/project-alpha",
+) -> dict:
     return {
         "type": "turn_context",
         "timestamp": "2026-05-12T00:00:00Z",
         "payload": {
+            "cwd": cwd,
             "model": model,
             "service_tier": service_tier,
             "collaboration_mode": {"settings": {"reasoning_effort": "xhigh"}},

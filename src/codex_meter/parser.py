@@ -24,7 +24,7 @@ from codex_meter.parse_cache import ParseCache
 from codex_meter.pricing import normalize_model, normalize_service_tier
 from codex_meter.timeutil import parse_datetime, parse_event_timestamp
 
-PARSER_CACHE_VERSION = 3
+PARSER_CACHE_VERSION = 4
 
 
 def session_files(session_root: Path) -> Iterable[Path]:
@@ -151,10 +151,18 @@ def load_thread_metadata(state_db: Path) -> dict[str, ThreadMeta]:
                     {text_col("cwd")},
                     {text_col("git_branch")},
                     {text_col("git_origin_url")},
+                    {text_col("git_sha")},
                     {text_col("model")},
                     {text_col("reasoning_effort")},
                     {int_col("created_at")},
-                    {int_col("updated_at")}
+                    {int_col("updated_at")},
+                    {text_col("source")},
+                    {text_col("model_provider")},
+                    {text_col("cli_version")},
+                    {text_col("agent_role")},
+                    {text_col("agent_nickname")},
+                    {text_col("memory_mode")},
+                    {text_col("thread_source")}
                 from threads
                 """
             ).fetchall()
@@ -169,10 +177,18 @@ def load_thread_metadata(state_db: Path) -> dict[str, ThreadMeta]:
             cwd=str(row[3]),
             git_branch=str(row[4]),
             git_origin_url=str(row[5]),
-            model=str(row[6]),
-            reasoning_effort=str(row[7]),
-            created_at=int(row[8] or 0),
-            updated_at=int(row[9] or 0),
+            git_sha=str(row[6]),
+            model=str(row[7]),
+            reasoning_effort=str(row[8]),
+            created_at=int(row[9] or 0),
+            updated_at=int(row[10] or 0),
+            source=str(row[11]),
+            model_provider=str(row[12]),
+            cli_version=str(row[13]),
+            agent_role=str(row[14]),
+            agent_nickname=str(row[15]),
+            memory_mode=str(row[16]),
+            thread_source=str(row[17]),
         )
         metas[str(row[0])] = meta
         metas[Path(str(row[0])).name] = meta
@@ -274,10 +290,19 @@ def update_context_from_event(
     if event_type == "turn_context":
         model = payload.get("model") or current.model
         effort = payload.get("effort") or current.reasoning_effort
+        cwd = payload.get("cwd") or current.cwd
         collaboration = (payload.get("collaboration_mode") or {}).get("settings") or {}
         effort = collaboration.get("reasoning_effort") or effort
         tier = normalize_service_tier(payload.get("service_tier")) or current_tier
-        return replace(current, model=str(model or ""), reasoning_effort=str(effort or "")), tier
+        return (
+            replace(
+                current,
+                cwd=str(cwd or ""),
+                model=str(model or ""),
+                reasoning_effort=str(effort or ""),
+            ),
+            tier,
+        )
 
     if event_type == "session_meta":
         tier = normalize_service_tier(payload.get("service_tier")) or current_tier

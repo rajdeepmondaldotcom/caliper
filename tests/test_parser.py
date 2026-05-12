@@ -292,6 +292,123 @@ def test_state_db_loader_tolerates_missing_optional_columns(tmp_path) -> None:
     assert result.events[0].thread.title == ""
 
 
+def test_turn_context_cwd_tracks_workspace_without_state_db(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-context-cwd.jsonl",
+        [
+            turn_context(cwd="/tmp/workspace-from-jsonl", service_tier="standard"),
+            token_event(
+                now,
+                {
+                    "input_tokens": 1000,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 100,
+                    "total_tokens": 1100,
+                },
+            ),
+        ],
+    )
+
+    options = build_options(
+        days=1,
+        until=(now + dt.timedelta(seconds=1)).isoformat(),
+        session_root=session_root,
+        state_db=tmp_path / "missing.sqlite",
+        codex_config=tmp_path / "missing.toml",
+    )
+    result = load_usage(options)
+
+    assert result.events[0].thread.cwd == "/tmp/workspace-from-jsonl"
+
+
+def test_state_db_loader_reads_extended_thread_metadata(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-extended-state.jsonl",
+        [
+            token_event(
+                now,
+                {
+                    "input_tokens": 1000,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 100,
+                    "total_tokens": 1100,
+                },
+            )
+        ],
+    )
+    state_db = tmp_path / "state.sqlite"
+    with closing(sqlite3.connect(state_db)) as conn, conn:
+        conn.execute(
+            """
+            create table threads (
+                rollout_path text,
+                cwd text,
+                git_branch text,
+                git_origin_url text,
+                git_sha text,
+                model text,
+                reasoning_effort text,
+                source text,
+                model_provider text,
+                cli_version text,
+                agent_role text,
+                agent_nickname text,
+                memory_mode text,
+                thread_source text
+            )
+            """
+        )
+        conn.execute(
+            """
+            insert into threads values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(session_path),
+                "/tmp/project-gamma",
+                "feature/granular",
+                "https://github.com/example/project-gamma",
+                "abc123",
+                "gpt-5.5",
+                "high",
+                "cli",
+                "openai",
+                "0.120.0",
+                "worker",
+                "Builder",
+                "enabled",
+                "local",
+            ),
+        )
+
+    options = build_options(
+        days=1,
+        until=(now + dt.timedelta(seconds=1)).isoformat(),
+        session_root=session_root,
+        state_db=state_db,
+        codex_config=tmp_path / "missing.toml",
+    )
+    result = load_usage(options)
+    thread = result.events[0].thread
+
+    assert thread.cwd == "/tmp/project-gamma"
+    assert thread.git_branch == "feature/granular"
+    assert thread.git_origin_url == "https://github.com/example/project-gamma"
+    assert thread.git_sha == "abc123"
+    assert thread.source == "cli"
+    assert thread.model_provider == "openai"
+    assert thread.cli_version == "0.120.0"
+    assert thread.agent_role == "worker"
+    assert thread.agent_nickname == "Builder"
+    assert thread.memory_mode == "enabled"
+    assert thread.thread_source == "local"
+
+
 def test_slash_fast_commands_update_service_tier(tmp_path) -> None:
     session_root = tmp_path / "sessions"
     now = dt.datetime.now(tz=dt.UTC)

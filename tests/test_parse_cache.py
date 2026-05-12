@@ -8,7 +8,7 @@ import pytest
 
 from codex_meter import parser
 from codex_meter.config import build_options
-from codex_meter.parse_cache import ParseCache, default_cache_path
+from codex_meter.parse_cache import ParseCache, _thread_from_dict, default_cache_path
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 
@@ -140,3 +140,9 @@ def test_parse_cache_ignores_legacy_or_invalid_payload(monkeypatch, tmp_path) ->
 
     assert cache.get(path, signature) is None
     assert cache.stats().misses == 1
+
+
+def test_parse_cache_thread_decode_ignores_future_metadata_keys() -> None:
+    thread = _thread_from_dict({"cwd": "/tmp/project", "future_field": "ignored"})
+
+    assert thread.cwd == "/tmp/project"

@@ -5,7 +5,7 @@ import json
 import os
 import sqlite3
 from contextlib import closing
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from codex_meter.models import RateLimitSample, ThreadMeta, Usage, UsageEvent
@@ -111,7 +111,8 @@ def _thread_to_dict(thread: ThreadMeta) -> dict:
 
 
 def _thread_from_dict(raw: dict) -> ThreadMeta:
-    return ThreadMeta(**raw)
+    names = {field.name for field in fields(ThreadMeta)}
+    return ThreadMeta(**{key: value for key, value in raw.items() if key in names})
 
 
 def _event_to_dict(event: UsageEvent) -> dict:
