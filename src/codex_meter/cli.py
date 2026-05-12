@@ -4,7 +4,7 @@ import calendar
 import csv
 import datetime as dt
 import io
-import subprocess
+import subprocess  # nosec
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
@@ -201,7 +201,7 @@ def version_callback(value: bool) -> None:
 def _version_label() -> str:
     checked = max(source.checked for source in PRICING_SOURCES)
     try:
-        completed = subprocess.run(
+        completed = subprocess.run(  # noqa: S603 # nosec
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,

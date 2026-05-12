@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import sqlite3
-import subprocess
+import subprocess  # nosec
 import sys
 from collections.abc import Iterable
 from contextlib import closing
@@ -94,7 +94,7 @@ def worst_health_status(checks: Iterable[HealthCheck]) -> str:
 
 def check_codex_cli_version() -> HealthCheck:
     try:
-        completed = subprocess.run(  # noqa: S603 # nosec B603,B607
+        completed = subprocess.run(  # noqa: S603 # nosec
             ["codex", "--version"],
             capture_output=True,
             text=True,

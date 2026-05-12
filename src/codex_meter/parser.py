@@ -143,30 +143,28 @@ def load_thread_metadata(state_db: Path) -> dict[str, ThreadMeta]:
             def int_col(name: str) -> str:
                 return f"coalesce({name}, 0)" if name in columns else "0"
 
-            rows = conn.execute(
-                f"""
-                select
-                    rollout_path,
-                    {text_col("title")},
-                    {text_col("first_user_message")},
-                    {text_col("cwd")},
-                    {text_col("git_branch")},
-                    {text_col("git_origin_url")},
-                    {text_col("git_sha")},
-                    {text_col("model")},
-                    {text_col("reasoning_effort")},
-                    {int_col("created_at")},
-                    {int_col("updated_at")},
-                    {text_col("source")},
-                    {text_col("model_provider")},
-                    {text_col("cli_version")},
-                    {text_col("agent_role")},
-                    {text_col("agent_nickname")},
-                    {text_col("memory_mode")},
-                    {text_col("thread_source")}
-                from threads
-                """
-            ).fetchall()
+            select_columns = [
+                "rollout_path",
+                text_col("title"),
+                text_col("first_user_message"),
+                text_col("cwd"),
+                text_col("git_branch"),
+                text_col("git_origin_url"),
+                text_col("git_sha"),
+                text_col("model"),
+                text_col("reasoning_effort"),
+                int_col("created_at"),
+                int_col("updated_at"),
+                text_col("source"),
+                text_col("model_provider"),
+                text_col("cli_version"),
+                text_col("agent_role"),
+                text_col("agent_nickname"),
+                text_col("memory_mode"),
+                text_col("thread_source"),
+            ]
+            query = "select " + ", ".join(select_columns) + " from threads"  # nosec
+            rows = conn.execute(query).fetchall()
     except sqlite3.Error:
         return {}
     metas: dict[str, ThreadMeta] = {}

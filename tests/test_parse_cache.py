@@ -169,9 +169,7 @@ def test_parse_cache_round_trips_named_records() -> None:
         primary_used_percent=12.5,
     )
 
-    payload = _encode_payload(
-        [ParsedSessionRecord(event=event, counter_reset=True, sample=sample)]
-    )
+    payload = _encode_payload([ParsedSessionRecord(event=event, counter_reset=True, sample=sample)])
     decoded = _decode_payload(payload)
 
     assert decoded is not None
