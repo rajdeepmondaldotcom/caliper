@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-meter"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local Codex usage intelligence for sessions, projects, models, cache, and rate-limit windows."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,7 +24,8 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development",
-  "Topic :: Utilities"
+  "Topic :: Utilities",
+  "Typing :: Typed"
 ]
 dependencies = [
   "rich>=13.7",
@@ -38,6 +39,7 @@ prom = ["prometheus-client>=0.20"]
 Homepage = "https://github.com/rajdeepmondaldotcom/codex-meter"
 Repository = "https://github.com/rajdeepmondaldotcom/codex-meter"
 Issues = "https://github.com/rajdeepmondaldotcom/codex-meter/issues"
+Changelog = "https://github.com/rajdeepmondaldotcom/codex-meter/blob/main/CHANGELOG.md"
 
 [project.scripts]
 codex-meter = "codex_meter.cli:app"

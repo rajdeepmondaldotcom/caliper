@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-05-13
 
 ### Added
 - `insights` command for cache-savings, service-tier confidence, spend concentration,
@@ -14,6 +14,9 @@
 - `rates refresh --allow-network` now writes a pricing-source audit snapshot
   with embedded rates, observed rates, and discrepancies instead of an empty
   placeholder.
+- Release automation now builds checked wheel/sdist artifacts, publishes through
+  PyPI Trusted Publishing, and attaches release assets on GitHub.
+- Dependabot configuration now covers `uv` dependencies and GitHub Actions.
 
 ### Changed
 - Table rendering now honors terminal/`--width` instead of collapsing to 80 columns.
@@ -29,6 +32,8 @@
   rolling `now` invocations can reuse parsed sessions. Cache payloads now use
   JSON instead of pickle.
 - Source distributions are trimmed to release-relevant files.
+- Install documentation now leads with public PyPI, `uvx`, `pipx`, and Homebrew
+  paths instead of source-checkout installation.
 
 ### Fixed
 - Literal `[budgets]` text no longer disappears in Rich output.

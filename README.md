@@ -1,6 +1,7 @@
 # codex-meter
 
 [![CI](https://github.com/rajdeepmondaldotcom/codex-meter/actions/workflows/ci.yml/badge.svg)](https://github.com/rajdeepmondaldotcom/codex-meter/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/codex-meter.svg)](https://pypi.org/project/codex-meter/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -18,23 +19,40 @@ inspect, export, and trust.
 Requires Python 3.11+.
 
 ```bash
-git clone https://github.com/rajdeepmondaldotcom/codex-meter.git
-cd codex-meter
-uv tool install .
+uvx codex-meter
+```
+
+Persistent install:
+
+```bash
+uv tool install codex-meter
 codex-meter
 ```
 
 With `pipx`:
 
 ```bash
-pipx install .
+pipx install codex-meter
+codex-meter
+```
+
+With `pip`:
+
+```bash
+python -m pip install codex-meter
 codex-meter
 ```
 
 Prometheus exporter:
 
 ```bash
-uv tool install '.[prom]'
+uv tool install 'codex-meter[prom]'
+```
+
+Homebrew:
+
+```bash
+brew install rajdeepmondaldotcom/tap/codex-meter
 ```
 
 ## Start Here
