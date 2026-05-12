@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 
@@ -86,7 +87,7 @@ def turn_context(*, model: str = "gpt-5.5", service_tier: str = "fast") -> dict:
 
 
 def make_state_db(path: Path, rollout_path: Path) -> None:
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute(
             """
             create table threads (

@@ -59,6 +59,49 @@ def _common_args(tmp_path) -> list:
     ]
 
 
+def test_default_overview_accepts_data_source_options(tmp_path) -> None:
+    session_root, state_db, _until, missing_cfg = _build(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "overview"
+    assert payload["totals"]["total_tokens"] == 1100
+
+
+def test_overview_command_accepts_data_source_options(tmp_path) -> None:
+    session_root, state_db, _until, missing_cfg = _build(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "overview",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "overview"
+    assert payload["totals"]["total_tokens"] == 1100
+
+
 def test_weekly_smoke(tmp_path) -> None:
     result = runner.invoke(app, ["weekly", *_common_args(tmp_path), "--format", "json"])
     assert result.exit_code == 0, result.output
