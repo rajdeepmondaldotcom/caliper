@@ -21,8 +21,9 @@ def aggregate_events(
         costs, long_context, unknown_model = card.cost_for(
             event.usage, event.model, event.service_tier
         )
+        cache_savings = card.cache_savings_for(event.usage, event.model, event.service_tier)
         unknown_tier = event.tier_source in {"current-config", "assumed"}
-        item.add_event(event, costs, long_context, unknown_model, unknown_tier)
+        item.add_event(event, costs, cache_savings, long_context, unknown_model, unknown_tier)
     return sorted(aggregates.values(), key=lambda item: item.key)
 
 

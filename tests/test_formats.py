@@ -85,6 +85,8 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["totals"]["output_tokens"] == 100
     assert payload["totals"]["reasoning_output_tokens"] == 25
     assert payload["totals"]["total_tokens"] == 1100
+    assert payload["totals"]["cache_savings_credits"] > 0
+    assert payload["totals"]["cache_savings_api_dollars"] > 0
     assert payload["totals"]["events"] == 1
     assert payload["totals"]["models"] == ["gpt-5.5"]
     assert payload["totals"]["service_tiers"] == ["standard"]
@@ -92,6 +94,27 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["metadata"]["tier_sources"] == {"logged": 1}
     assert payload["metadata"]["plan_types"] == ["pro"]
     assert len(payload["breakdowns"]) == 1
+
+
+def test_table_warns_when_model_uses_fallback_pricing(tmp_path) -> None:
+    session_root, state_db, until, missing_cfg = _fixture(tmp_path, model="gpt-5.3-codex-spark")
+    result = _invoke(
+        [
+            "daily",
+            "--days",
+            "1",
+            "--until",
+            until,
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    assert "fallback pricing" in result.output
 
 
 def test_daily_csv_has_header_and_data(tmp_path) -> None:
@@ -199,6 +222,116 @@ def test_daily_table_includes_totals_and_window(tmp_path) -> None:
     assert "gpt-5.5" in result.output
     assert "1,100" in result.output
     assert "Total" in result.output
+    assert "Cache savings:" in result.output
+
+
+def test_daily_table_width_option_prevents_truncation(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-wide.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(
+                now,
+                {
+                    "input_tokens": 1_234_567_890,
+                    "cached_input_tokens": 1_000_000_000,
+                    "output_tokens": 987_654,
+                    "total_tokens": 1_235_555_544,
+                },
+            ),
+        ],
+    )
+    state_db = tmp_path / "state.sqlite"
+    make_state_db(state_db, session_path)
+    result = _invoke(
+        [
+            "daily",
+            "--days",
+            "1",
+            "--until",
+            (now + dt.timedelta(seconds=1)).isoformat(),
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+            "--width",
+            "240",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    assert "1,234,567,890" in result.output
+    assert "1,235,555,544" in result.output
+    assert "…" not in result.output
+
+
+def test_daily_accepts_top_alias(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-top.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(
+                now - dt.timedelta(days=1),
+                {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            ),
+            token_event(now, {"input_tokens": 200, "output_tokens": 20, "total_tokens": 220}),
+        ],
+    )
+    state_db = tmp_path / "state.sqlite"
+    make_state_db(state_db, session_path)
+    result = _invoke(
+        [
+            "daily",
+            "--days",
+            "3",
+            "--until",
+            (now + dt.timedelta(seconds=1)).isoformat(),
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+            "--top",
+            "1",
+            "--format",
+            "csv",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    rows = list(csv.DictReader(io.StringIO(result.output)))
+    assert len(rows) == 1
+
+
+def test_project_table_uses_short_path_label(tmp_path) -> None:
+    session_root, state_db, until, missing_cfg = _fixture(tmp_path)
+    result = _invoke(
+        [
+            "project",
+            "--days",
+            "1",
+            "--until",
+            until,
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+            "--width",
+            "140",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    assert "project-alpha" in result.output
+    assert "/tmp/project-alpha" not in result.output
 
 
 def test_daily_json_long_context_pricing(tmp_path) -> None:

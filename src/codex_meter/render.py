@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import io
 import json
+import shutil
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -11,7 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from codex_meter.aggregation import aggregate_model_mode, aggregate_total
-from codex_meter.humanize import format_int, redact
+from codex_meter.humanize import compact_number, format_int, redact, short_table_label
 from codex_meter.models import Aggregate, CostTotals, LoadResult, RuntimeOptions, TokenTotals
 from codex_meter.pricing import PRICING_SOURCES, RateCard
 from codex_meter.timeutil import iso_z, window_label
@@ -21,6 +23,16 @@ __all__ = ["format_int", "redact", "render", "render_limits"]
 
 def _rate_card(options: RuntimeOptions) -> RateCard:
     return RateCard.load(options.rates_file, options.pricing_mode)
+
+
+def _make_console(buffer: io.StringIO, options: RuntimeOptions) -> Console:
+    if options.width is not None:
+        width = options.width
+    elif options.compact:
+        width = 100
+    else:
+        width = shutil.get_terminal_size((140, 24)).columns
+    return Console(file=buffer, width=width, soft_wrap=False, _environ={})
 
 
 def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
@@ -37,6 +49,9 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "credits": item.costs.adjusted_credits,
         "standard_credits": item.costs.standard_credits,
         "api_dollars": item.costs.api_dollars,
+        "cache_savings_credits": item.cache_savings.adjusted_credits,
+        "cache_savings_standard_credits": item.cache_savings.standard_credits,
+        "cache_savings_api_dollars": item.cache_savings.api_dollars,
         "models": sorted(item.models),
         "service_tiers": sorted(item.service_tiers),
         "plan_types": sorted(item.plan_types),
@@ -93,7 +108,8 @@ def report_payload(
             "warning_count": len(result.warnings),
         },
         "rate_limit_samples": [
-            rate_limit_sample_to_dict(sample) for sample in result.credit_samples
+            rate_limit_sample_to_dict(sample)
+            for sample in _recent_samples(result.credit_samples, options.top_threads)
         ],
         "warnings": result.warnings,
     }
@@ -114,7 +130,7 @@ def render_table(
     rate_card: RateCard | None = None,
 ) -> str:
     buffer = io.StringIO()
-    console = Console(file=buffer, width=100 if options.compact else None)
+    console = _make_console(buffer, options)
     total = aggregate_total(result, options, rate_card=rate_card or _rate_card(options))
     console.print(f"[bold]{title}[/bold]")
     console.print(f"Window: {window_label(options.start, options.end, options.timezone)}")
@@ -122,9 +138,15 @@ def render_table(
     if result.warnings:
         for warning in result.warnings:
             console.print(f"[yellow]Warning:[/yellow] {warning}")
+    if total.unknown_model_events:
+        console.print(
+            "[yellow]Warning:[/yellow] "
+            f"{format_int(total.unknown_model_events)} events used fallback pricing "
+            "because their model is not in the embedded rate card."
+        )
     console.print()
 
-    table = Table(show_lines=False)
+    table = Table(show_lines=False, expand=not options.compact)
     table.add_column("Group")
     table.add_column("Models")
     table.add_column("Input", justify="right")
@@ -135,25 +157,25 @@ def render_table(
     table.add_column("API $", justify="right")
     for row in rows:
         table.add_row(
-            redact(row.label, options.show_prompts),
+            short_table_label(redact(row.label, options.show_prompts)),
             "\n".join(sorted(row.models)) or "-",
-            format_int(row.totals.input_tokens),
-            format_int(row.totals.cached_input_tokens),
-            format_int(row.totals.output_tokens),
-            format_int(row.totals.total_tokens),
-            f"{row.costs.adjusted_credits:,.2f}",
-            f"${row.costs.api_dollars:,.2f}",
+            _table_int(row.totals.input_tokens, options),
+            _table_int(row.totals.cached_input_tokens, options),
+            _table_int(row.totals.output_tokens, options),
+            _table_int(row.totals.total_tokens, options),
+            _table_float(row.costs.adjusted_credits, options),
+            _table_float(row.costs.api_dollars, options, prefix="$"),
         )
     table.add_section()
     table.add_row(
         "Total",
         "\n".join(sorted(total.models)) or "-",
-        format_int(total.totals.input_tokens),
-        format_int(total.totals.cached_input_tokens),
-        format_int(total.totals.output_tokens),
-        format_int(total.totals.total_tokens),
-        f"{total.costs.adjusted_credits:,.2f}",
-        f"${total.costs.api_dollars:,.2f}",
+        _table_int(total.totals.input_tokens, options),
+        _table_int(total.totals.cached_input_tokens, options),
+        _table_int(total.totals.output_tokens, options),
+        _table_int(total.totals.total_tokens, options),
+        _table_float(total.costs.adjusted_credits, options),
+        _table_float(total.costs.api_dollars, options, prefix="$"),
     )
     console.print(table)
     console.print()
@@ -162,6 +184,12 @@ def render_table(
     console.print(f"Events: {events_text} | Duplicates skipped: {duplicates_text}")
     if total.costs.adjusted_credits != total.costs.standard_credits:
         console.print(f"Standard-mode baseline: {total.costs.standard_credits:,.2f} credits")
+    if total.cache_savings.adjusted_credits or total.cache_savings.api_dollars:
+        console.print(
+            "Cache savings: "
+            f"{total.cache_savings.adjusted_credits:,.2f} credits | "
+            f"${total.cache_savings.api_dollars:,.2f}"
+        )
     if result.tier_sources:
         sources = ", ".join(
             f"{key}={format_int(value)}" for key, value in sorted(result.tier_sources.items())
@@ -170,6 +198,18 @@ def render_table(
     if result.plan_types:
         console.print(f"Plan types: {', '.join(sorted(result.plan_types))}")
     return buffer.getvalue()
+
+
+def _table_int(value: int, options: RuntimeOptions) -> str:
+    return compact_number(value) if options.compact else format_int(value)
+
+
+def _table_float(value: float, options: RuntimeOptions, prefix: str = "") -> str:
+    if options.compact:
+        return compact_number(value, prefix=prefix)
+    if prefix:
+        return f"{prefix}{value:,.2f}"
+    return f"{value:,.2f}"
 
 
 def render_json(
@@ -305,40 +345,88 @@ LIMITS_CSV_FIELDS = (
 
 def render_limits_table(result: LoadResult, options: RuntimeOptions) -> str:
     buffer = io.StringIO()
-    console = Console(file=buffer, width=100 if options.compact else None)
+    console = _make_console(buffer, options)
     console.print("[bold]Codex Meter - Limits[/bold]")
     console.print(f"Window: {window_label(options.start, options.end, options.timezone)}")
-    if not result.credit_samples:
+    samples = _recent_samples(result.credit_samples, options.top_threads)
+    if not samples:
         console.print("No rate-limit samples found.")
         return buffer.getvalue()
-    for sample in result.credit_samples:
-        console.print(
-            f"- {iso_z(sample.timestamp)} | credits={sample.credits} | "
-            f"primary={sample.primary_used_percent}%/"
-            f"{sample.primary_window_minutes}m reset={sample.primary_resets_at} | "
-            f"secondary={sample.secondary_used_percent}%/"
-            f"{sample.secondary_window_minutes}m reset={sample.secondary_resets_at}"
+    if options.compact:
+        for sample in samples:
+            console.print(
+                f"- {iso_z(sample.timestamp)} | credits={sample.credits} | "
+                f"primary={sample.primary_used_percent}%/"
+                f"{sample.primary_window_minutes}m reset={sample.primary_resets_at} | "
+                f"secondary={sample.secondary_used_percent}%/"
+                f"{sample.secondary_window_minutes}m reset={sample.secondary_resets_at}"
+            )
+        return buffer.getvalue()
+    table = Table(show_lines=False, expand=not options.compact)
+    table.add_column("Time")
+    table.add_column("Plan")
+    table.add_column("Credits", justify="right")
+    table.add_column("Primary %", justify="right")
+    table.add_column("Reset In", justify="right")
+    table.add_column("Secondary %", justify="right")
+    table.add_column("Reset In", justify="right")
+    for sample in samples:
+        table.add_row(
+            iso_z(sample.timestamp),
+            str(sample.plan_type or "-"),
+            str(sample.credits if sample.credits is not None else "-"),
+            _percent(sample.primary_used_percent),
+            _reset_epoch(sample.primary_resets_at),
+            _percent(sample.secondary_used_percent),
+            _reset_epoch(sample.secondary_resets_at),
         )
+    console.print(table)
     return buffer.getvalue()
 
 
-def render_limits_csv(result: LoadResult) -> str:
+def _percent(value: object) -> str:
+    return "-" if value is None else f"{float(value):.1f}%"
+
+
+def _reset_epoch(value: object) -> str:
+    if value in {None, ""}:
+        return "-"
+    try:
+        reset_at = dt.datetime.fromtimestamp(float(value), tz=dt.UTC)
+    except (TypeError, ValueError, OSError):
+        return str(value)
+    remaining = reset_at - dt.datetime.now(tz=dt.UTC)
+    seconds = int(remaining.total_seconds())
+    if seconds <= 0:
+        return "now"
+    minutes, leftover = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m {leftover}s"
+
+
+def _recent_samples(samples: list, limit: int) -> list:
+    return sorted(samples, key=lambda sample: sample.timestamp)[-limit:]
+
+
+def render_limits_csv(result: LoadResult, options: RuntimeOptions) -> str:
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=list(LIMITS_CSV_FIELDS))
     writer.writeheader()
-    for sample in result.credit_samples:
+    for sample in _recent_samples(result.credit_samples, options.top_threads):
         row = rate_limit_sample_to_dict(sample)
         writer.writerow({key: row.get(key, "") for key in LIMITS_CSV_FIELDS})
     return out.getvalue()
 
 
-def render_limits_markdown(result: LoadResult) -> str:
+def render_limits_markdown(result: LoadResult, options: RuntimeOptions) -> str:
     headers = ["Timestamp", "Plan", "Credits", "Primary %", "Secondary %"]
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
     ]
-    for sample in result.credit_samples:
+    for sample in _recent_samples(result.credit_samples, options.top_threads):
         primary = sample.primary_used_percent
         secondary = sample.secondary_used_percent
         lines.append(
@@ -366,9 +454,9 @@ def render_limits(
     if output_format == "json":
         text = render_json(result, options, [], "limits", rate_card=_rate_card(options))
     elif output_format == "csv":
-        text = render_limits_csv(result)
+        text = render_limits_csv(result, options)
     elif output_format == "markdown":
-        text = render_limits_markdown(result)
+        text = render_limits_markdown(result, options)
     else:
         text = render_limits_table(result, options)
     write_output(text, output)

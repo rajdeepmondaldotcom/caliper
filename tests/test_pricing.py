@@ -12,6 +12,7 @@ def test_model_and_tier_normalization() -> None:
     assert normalize_model("gpt-5.5-2026-04-23") == "gpt-5.5"
     assert normalize_model("GPT-5.4-Mini") == "gpt-5.4-mini"
     assert normalize_model("gpt-5-3-codex-preview") == "gpt-5.3-codex"
+    assert normalize_model("gpt-5.3-codex-spark") == "gpt-5.3-codex-spark"
     assert normalize_service_tier("priority") == "fast"
     assert normalize_service_tier("regular") == "standard"
 
@@ -89,10 +90,12 @@ def test_long_context_rule_is_limited_to_gpt_55() -> None:
     assert long_54 is False
 
 
-def test_credit_only_model_card_not_flagged_unknown() -> None:
-    """gpt-5.1-codex-max has credit rates but no API rates — must not be marked unknown."""
+def test_codex_max_has_api_and_credit_rates() -> None:
+    """gpt-5.1-codex-max has API and credit rates — must not be marked unknown."""
     usage = Usage(input_tokens=1000, output_tokens=100, total_tokens=1100)
-    _cost, _long_context, unknown_model = estimate_event_cost(
+    cost, _long_context, unknown_model = estimate_event_cost(
         usage, "gpt-5.1-codex-max", "standard", "model", None
     )
     assert unknown_model is False
+    assert round(cost.api_dollars, 6) == round((1000 * 1.25 + 100 * 10.0) / 1_000_000, 6)
+    assert round(cost.adjusted_credits, 6) == round((1000 * 31.25 + 100 * 250.0) / 1_000_000, 6)

@@ -66,6 +66,9 @@ def test_limits_table(tmp_path) -> None:
     result = _invoke(tmp_path, "table")
     assert result.exit_code == 0, result.output
     assert "Codex Meter - Limits" in result.output
+    assert "Primary %" in result.output
+    assert "Reset In" in result.output
+    assert "primary=" not in result.output
 
 
 def test_limits_json(tmp_path) -> None:
@@ -93,3 +96,50 @@ def test_limits_markdown(tmp_path) -> None:
     lines = [line for line in result.output.splitlines() if line.strip()]
     assert lines[0].startswith("| Timestamp |")
     assert "Primary %" in lines[0]
+
+
+def test_limits_top_limits_reported_samples_not_loaded_events(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-limits-top.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(now, {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}),
+            token_event(
+                now + dt.timedelta(minutes=1),
+                {"input_tokens": 200, "output_tokens": 20, "total_tokens": 220},
+            ),
+            token_event(
+                now + dt.timedelta(minutes=2),
+                {"input_tokens": 300, "output_tokens": 30, "total_tokens": 330},
+            ),
+        ],
+    )
+    state_db = tmp_path / "state.sqlite"
+    make_state_db(state_db, session_path)
+    result = runner.invoke(
+        app,
+        [
+            "limits",
+            "--days",
+            "1",
+            "--until",
+            (now + dt.timedelta(minutes=3)).isoformat(),
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+            "--format",
+            "json",
+            "--top",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["totals"]["events"] == 3
+    assert len(payload["rate_limit_samples"]) == 2

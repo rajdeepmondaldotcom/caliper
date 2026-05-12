@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from codex_meter.models import CostTotals, LongContextRule, PricingSource, Rates, Usage
@@ -60,7 +60,7 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
     ),
     ModelCard(
         name="gpt-5.1-codex-max",
-        api_rates=None,
+        api_rates=Rates(1.25, 0.125, 10.0),
         credit_rates=Rates(31.25, 3.125, 250.0),
     ),
 )
@@ -83,6 +83,11 @@ PRICING_SOURCES = [
         url="https://help.openai.com/en/articles/20001106-codex-rate-card",
         checked="2026-05-12",
     ),
+    PricingSource(
+        name="GPT-5.1-Codex-Max model pricing",
+        url="https://developers.openai.com/api/docs/models/gpt-5.1-codex-max",
+        checked="2026-05-12",
+    ),
 ]
 
 
@@ -92,6 +97,7 @@ def normalize_model(model: str | None) -> str:
         return ""
     aliases = {
         "gpt-5.4-mini": ("gpt-5.4-mini", "gpt-5-4-mini"),
+        "gpt-5.3-codex-spark": ("gpt-5.3-codex-spark", "gpt-5-3-codex-spark"),
         "gpt-5.3-codex": ("gpt-5.3-codex", "gpt-5-3-codex"),
         "gpt-5.1-codex-max": ("gpt-5.1-codex-max", "gpt-5-1-codex-max"),
     }
@@ -179,6 +185,22 @@ class RateCard:
             ),
             long_context,
             unknown_api or unknown_credit,
+        )
+
+    def cache_savings_for(self, usage: Usage, model: str, service_tier: str) -> CostTotals:
+        if not usage.cached_input_tokens:
+            return CostTotals()
+        uncached_usage = replace(usage, cached_input_tokens=0)
+        uncached_cost, _, _ = self.cost_for(uncached_usage, model, service_tier)
+        actual_cost, _, _ = self.cost_for(usage, model, service_tier)
+        return CostTotals(
+            api_dollars=max(0.0, uncached_cost.api_dollars - actual_cost.api_dollars),
+            standard_credits=max(
+                0.0, uncached_cost.standard_credits - actual_cost.standard_credits
+            ),
+            adjusted_credits=max(
+                0.0, uncached_cost.adjusted_credits - actual_cost.adjusted_credits
+            ),
         )
 
     def _resolve_api_rates(
