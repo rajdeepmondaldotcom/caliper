@@ -344,9 +344,32 @@ class Aggregate:
         unknown_model: bool,
         unknown_tier: bool,
     ) -> None:
+        self._add_totals(event, costs, cache_savings)
+        self._add_event_identity(event)
+        self._add_project_identity(event)
+        self._add_thread_metadata(event)
+        self._touch_seen(event.timestamp)
+        self._add_context_flags(event, long_context, unknown_model, unknown_tier)
+        self._add_model_breakdown(
+            event,
+            costs,
+            cache_savings,
+            long_context,
+            unknown_model,
+            unknown_tier,
+        )
+
+    def _add_totals(
+        self,
+        event: UsageEvent,
+        costs: CostTotals,
+        cache_savings: CostTotals,
+    ) -> None:
         self.totals.add_usage(event.usage)
         self.costs.add(costs)
         self.cache_savings.add(cache_savings)
+
+    def _add_event_identity(self, event: UsageEvent) -> None:
         if event.model:
             self.models.add(event.model)
         if event.service_tier:
@@ -359,11 +382,15 @@ class Aggregate:
             self.model_sources.add(event.model_source)
         if event.session_id:
             self.session_ids.add(event.session_id)
+
+    def _add_project_identity(self, event: UsageEvent) -> None:
         if event.thread.cwd:
             self.project_paths.add(event.thread.cwd)
             self.project_names.add(project_name_from_path(event.thread.cwd))
         else:
             self.project_names.add(UNKNOWN_PROJECT)
+
+    def _add_thread_metadata(self, event: UsageEvent) -> None:
         if event.thread.git_origin_url:
             self.git_origins.add(event.thread.git_origin_url)
         if event.thread.git_branch:
@@ -376,15 +403,35 @@ class Aggregate:
             self.sources.add(event.thread.source)
         if event.thread.thread_source:
             self.sources.add(event.thread.thread_source)
-        if self.first_seen is None or event.timestamp < self.first_seen:
-            self.first_seen = event.timestamp
-        if self.last_seen is None or event.timestamp > self.last_seen:
-            self.last_seen = event.timestamp
+
+    def _touch_seen(self, timestamp: dt.datetime) -> None:
+        if self.first_seen is None or timestamp < self.first_seen:
+            self.first_seen = timestamp
+        if self.last_seen is None or timestamp > self.last_seen:
+            self.last_seen = timestamp
+
+    def _add_context_flags(
+        self,
+        event: UsageEvent,
+        long_context: bool,
+        unknown_model: bool,
+        unknown_tier: bool,
+    ) -> None:
         self.model_context_window = max(self.model_context_window, event.model_context_window)
         self.long_context_events += int(long_context)
         self.unknown_model_events += int(unknown_model)
         self.unknown_tier_events += int(unknown_tier)
         self.fallback_model_events += int(event.model_is_fallback)
+
+    def _add_model_breakdown(
+        self,
+        event: UsageEvent,
+        costs: CostTotals,
+        cache_savings: CostTotals,
+        long_context: bool,
+        unknown_model: bool,
+        unknown_tier: bool,
+    ) -> None:
         breakdown_key = f"{event.model}\0{event.service_tier}"
         breakdown = self.model_breakdowns.setdefault(
             breakdown_key,
