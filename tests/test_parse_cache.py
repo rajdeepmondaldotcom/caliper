@@ -3,13 +3,17 @@ from __future__ import annotations
 import datetime as dt
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 
 import pytest
 
 from codex_meter import parser
 from codex_meter.config import build_options
+from codex_meter.models import ParsedSessionRecord, RateLimitSample, ThreadMeta, Usage, UsageEvent
 from codex_meter.parse_cache import (
     ParseCache,
+    _decode_payload,
+    _encode_payload,
     _event_from_dict,
     _thread_from_dict,
     default_cache_path,
@@ -145,6 +149,37 @@ def test_parse_cache_ignores_legacy_or_invalid_payload(monkeypatch, tmp_path) ->
 
     assert cache.get(path, signature) is None
     assert cache.stats().misses == 1
+
+
+def test_parse_cache_round_trips_named_records() -> None:
+    event = UsageEvent(
+        timestamp=dt.datetime(2026, 5, 12, tzinfo=dt.UTC),
+        path=Path("/tmp/session.jsonl"),
+        session_id="session",
+        usage=Usage(input_tokens=1, total_tokens=1),
+        model="gpt-5.5",
+        service_tier="standard",
+        tier_source="logged",
+        thread=ThreadMeta(cwd="/tmp/project"),
+    )
+    sample = RateLimitSample(
+        timestamp=event.timestamp,
+        path=event.path,
+        session_id=event.session_id,
+        primary_used_percent=12.5,
+    )
+
+    payload = _encode_payload(
+        [ParsedSessionRecord(event=event, counter_reset=True, sample=sample)]
+    )
+    decoded = _decode_payload(payload)
+
+    assert decoded is not None
+    assert decoded[0].event is not None
+    assert decoded[0].event.model == "gpt-5.5"
+    assert decoded[0].counter_reset is True
+    assert decoded[0].sample is not None
+    assert decoded[0].sample.primary_used_percent == 12.5
 
 
 def test_parse_cache_thread_decode_ignores_future_metadata_keys() -> None:

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from codex_meter.models import (
     LoadResult,
+    ParsedSessionRecord,
     RateLimitSample,
     RuntimeOptions,
     ThreadMeta,
@@ -341,12 +342,18 @@ def model_for_event(
 
 
 def rate_limit_sample(*, path: Path, event_time: dt.datetime, rate_limits: dict) -> RateLimitSample:
-    primary = rate_limits.get("primary") or {}
-    secondary = rate_limits.get("secondary") or {}
     return RateLimitSample(
         timestamp=event_time,
         path=path,
         session_id=session_id_from_path(path),
+        **rate_limit_fields(rate_limits),
+    )
+
+
+def rate_limit_fields(rate_limits: dict) -> dict:
+    primary = rate_limits.get("primary") or {}
+    secondary = rate_limits.get("secondary") or {}
+    return dict(
         plan_type=str(rate_limits.get("plan_type") or ""),
         limit_id=str(rate_limits.get("limit_id") or ""),
         limit_name=str(rate_limits.get("limit_name") or ""),
@@ -399,7 +406,9 @@ def load_usage(options: RuntimeOptions) -> LoadResult:
             )
             if cache:
                 cache.put(path, signature, parsed)
-        for usage_event, reset, sample in parsed:
+        for record in parsed:
+            usage_event = record.event
+            sample = record.sample
             sample_in_window = sample is not None and start_utc <= sample.timestamp < end_utc
             if sample_in_window:
                 credit_samples.append(sample)
@@ -409,7 +418,7 @@ def load_usage(options: RuntimeOptions) -> LoadResult:
                 continue
             if usage_event.timestamp < start_utc or usage_event.timestamp >= end_utc:
                 continue
-            if reset and path not in reset_warnings:
+            if record.counter_reset and path not in reset_warnings:
                 warnings.append(f"Token counter reset detected in {path}; used current totals")
                 reset_warnings.add(path)
             key = usage_key(path, usage_event.timestamp.isoformat(), usage_event.usage)
@@ -506,7 +515,7 @@ def _parse_session(
             )
 
             if usage.is_zero():
-                yield None, total_reset, sample
+                yield ParsedSessionRecord(counter_reset=total_reset, sample=sample)
                 continue
 
             model, model_source, model_is_fallback = model_for_event(
@@ -523,8 +532,6 @@ def _parse_session(
                 config_tier=config_tier,
                 overrides=overrides,
             )
-            primary = rate_limits.get("primary") or {}
-            secondary = rate_limits.get("secondary") or {}
             usage_event = UsageEvent(
                 timestamp=event_time,
                 path=path,
@@ -538,16 +545,10 @@ def _parse_session(
                 model_is_fallback=model_is_fallback,
                 usage_source=usage_source,
                 model_context_window=model_context_window,
-                plan_type=str(rate_limits.get("plan_type") or ""),
-                limit_id=str(rate_limits.get("limit_id") or ""),
-                limit_name=str(rate_limits.get("limit_name") or ""),
-                credits=rate_limits.get("credits"),
-                primary_used_percent=primary.get("used_percent"),
-                primary_window_minutes=primary.get("window_minutes"),
-                primary_resets_at=primary.get("resets_at"),
-                secondary_used_percent=secondary.get("used_percent"),
-                secondary_window_minutes=secondary.get("window_minutes"),
-                secondary_resets_at=secondary.get("resets_at"),
-                rate_limit_reached_type=str(rate_limits.get("rate_limit_reached_type") or ""),
+                **rate_limit_fields(rate_limits),
             )
-            yield usage_event, total_reset, sample
+            yield ParsedSessionRecord(
+                event=usage_event,
+                counter_reset=total_reset,
+                sample=sample,
+            )

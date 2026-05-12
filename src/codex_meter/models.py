@@ -200,6 +200,13 @@ class RateLimitSample:
     rate_limit_reached_type: str = ""
 
 
+@dataclass(frozen=True)
+class ParsedSessionRecord:
+    event: UsageEvent | None = None
+    counter_reset: bool = False
+    sample: RateLimitSample | None = None
+
+
 @dataclass
 class CostTotals:
     api_dollars: Decimal | float = Decimal("0")

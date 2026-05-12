@@ -8,7 +8,13 @@ from contextlib import closing
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
-from codex_meter.models import RateLimitSample, ThreadMeta, Usage, UsageEvent
+from codex_meter.models import (
+    ParsedSessionRecord,
+    RateLimitSample,
+    ThreadMeta,
+    Usage,
+    UsageEvent,
+)
 
 
 def default_cache_path() -> Path:
@@ -150,18 +156,19 @@ def _sample_from_dict(raw: dict) -> RateLimitSample:
 
 def _encode_payload(parsed) -> bytes:
     records = []
-    for event, reset, sample in parsed:
+    for item in parsed:
+        record = _coerce_record(item)
         records.append(
             {
-                "event": _event_to_dict(event) if event is not None else None,
-                "reset": bool(reset),
-                "sample": _sample_to_dict(sample) if sample is not None else None,
+                "event": _event_to_dict(record.event) if record.event is not None else None,
+                "reset": bool(record.counter_reset),
+                "sample": _sample_to_dict(record.sample) if record.sample is not None else None,
             }
         )
     return json.dumps({"version": 1, "records": records}, separators=(",", ":")).encode("utf-8")
 
 
-def _decode_payload(raw) -> list[tuple[UsageEvent | None, bool, RateLimitSample | None]] | None:
+def _decode_payload(raw) -> list[ParsedSessionRecord] | None:
     try:
         text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
         payload = json.loads(text)
@@ -172,7 +179,7 @@ def _decode_payload(raw) -> list[tuple[UsageEvent | None, bool, RateLimitSample 
     records = payload.get("records")
     if not isinstance(records, list):
         return None
-    parsed: list[tuple[UsageEvent | None, bool, RateLimitSample | None]] = []
+    parsed: list[ParsedSessionRecord] = []
     try:
         for record in records:
             if not isinstance(record, dict):
@@ -180,12 +187,19 @@ def _decode_payload(raw) -> list[tuple[UsageEvent | None, bool, RateLimitSample 
             event_raw = record.get("event")
             sample_raw = record.get("sample")
             parsed.append(
-                (
-                    _event_from_dict(event_raw) if isinstance(event_raw, dict) else None,
-                    bool(record.get("reset")),
-                    _sample_from_dict(sample_raw) if isinstance(sample_raw, dict) else None,
+                ParsedSessionRecord(
+                    event=_event_from_dict(event_raw) if isinstance(event_raw, dict) else None,
+                    counter_reset=bool(record.get("reset")),
+                    sample=_sample_from_dict(sample_raw) if isinstance(sample_raw, dict) else None,
                 )
             )
     except (KeyError, TypeError, ValueError):
         return None
     return parsed
+
+
+def _coerce_record(record) -> ParsedSessionRecord:
+    if isinstance(record, ParsedSessionRecord):
+        return record
+    event, reset, sample = record
+    return ParsedSessionRecord(event=event, counter_reset=bool(reset), sample=sample)
