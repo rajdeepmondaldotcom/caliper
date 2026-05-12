@@ -1,8 +1,29 @@
 # codex-meter
 
-`codex-meter` is an offline-first CLI for understanding local OpenAI Codex usage. It reads your local Codex session JSONL files and state database, then reports tokens, cached input, output, reasoning output, estimated Codex credits, API-equivalent dollars, sessions, projects, models, and recent rate-limit samples.
+`codex-meter` is an **offline-first CLI** for understanding local OpenAI Codex usage.
+It reads your local Codex session logs + state DB and reports tokens, cached input,
+output, reasoning output, estimated Codex credits, API-equivalent dollars, sessions,
+projects, models, and rate-limit windows — all without a single network call.
 
-It is designed to feel familiar if you use `ccusage`, but it is Codex-specific: service-tier inference, Codex credit estimates, privacy-safe session labels, project/cwd grouping, and multi-window summaries are first-class.
+Think `ccusage`, but Codex-specific: service-tier inference, Codex credit estimates,
+privacy-safe session labels, project/cwd grouping, a live TUI, forecasts, what-ifs,
+budgets with CI-gateable exit codes, and a Prometheus exporter.
+
+## Highlights
+
+- **Rolling 7/30/90 day overview** out of the box.
+- **`codex-meter live`** — full-window TUI: burn rate, 5-hour primary + weekly
+  secondary countdowns, ETA-to-100% projection.
+- **`codex-meter forecast` / `compare` / `whatif`** — month-end projection with a
+  ±1σ band, A vs B window diff, tier/model swap re-cost.
+- **`codex-meter budgets check`** — TOML-defined budgets with severity-driven
+  exit codes (0 ok / 1 warn / 2 breach) for CI gating.
+- **`codex-meter export`** — Prometheus `/metrics`, Grafana dashboard JSON,
+  monthly receipt (markdown or HTML).
+- **`codex-meter doctor`** — Python version, paths, Codex CLI, rate-card age,
+  clock skew, parser warnings; JSON + non-zero exit for CI.
+- **Reasoning tokens priced correctly** (defaults to the output rate); per-model
+  long-context rules; embedded rate card + override via `--rates-file`.
 
 ## Install
 
@@ -20,73 +41,85 @@ pipx install .
 codex-meter
 ```
 
-Published package install, once released:
+Optional integrations:
 
 ```bash
-pipx install codex-meter
+pipx install 'codex-meter[prom]'   # adds prometheus_client
 ```
 
-## Quick Start
+## Quick start
 
 ```bash
-codex-meter
-codex-meter daily --days 7
-codex-meter monthly --since 2026-05-01 --format json
-codex-meter session --days 30 --show-prompts
-codex-meter project --days 90
-codex-meter limits
-codex-meter doctor
+codex-meter                            # rolling 7/30/90 day overview
+codex-meter daily --days 7             # per-day breakdown
+codex-meter live                       # full-window TUI dashboard
+codex-meter forecast --days 14         # month-end projection
+codex-meter compare --a "last 7 days" --b "previous 7 days"
+codex-meter whatif --tier standard     # re-cost the last 7 days as if standard
+codex-meter budgets check              # CI-gateable severity exit codes
+codex-meter rates show                 # active rate card + age
+codex-meter doctor                     # health check
+codex-meter init                       # scaffold .codex-meter.toml
 ```
 
-By default, `codex-meter` reports rolling 7, 30, and 90 day usage using local logs under `~/.codex/sessions`.
+Every report supports `--format table|json|csv|markdown`.
 
 ## Commands
 
-- `codex-meter` / `codex-meter overview`: rolling 7/30/90 day summary.
-- `codex-meter daily`: usage grouped by date.
-- `codex-meter weekly`: usage grouped by ISO week.
-- `codex-meter monthly`: usage grouped by month.
-- `codex-meter session`: usage grouped by local Codex session.
-- `codex-meter project`: usage grouped by project/cwd from Codex metadata.
-- `codex-meter models`: usage grouped by model and service tier.
-- `codex-meter limits`: recent rate-limit samples found in token events.
-- `codex-meter doctor`: local path and data availability checks.
+| Command | Description |
+| --- | --- |
+| `overview` | Rolling 7 / 30 / 90 day summary (default). |
+| `daily` | Usage grouped by date. |
+| `weekly` | Usage grouped by ISO week. |
+| `monthly` | Usage grouped by month. |
+| `session` | Usage grouped by Codex session. |
+| `project` | Usage grouped by project / cwd. |
+| `models` | Usage grouped by model and service tier. |
+| `limits` | Decoded rate-limit windows + recent samples. |
+| `live` | Refresh-1Hz TUI with burn rate, 5h + weekly countdowns. |
+| `forecast` | Month-end projection ± 1σ band + days-to-depletion. |
+| `compare` | Diff two windows (`last 7 days`, ISO ranges, etc.). |
+| `whatif` | Re-cost the window under a hypothetical tier/model swap. |
+| `budgets check` | TOML budgets → ok / warn / breach exit codes. |
+| `rates show` / `refresh` | Inspect or (planned) refresh the embedded rate card. |
+| `export prometheus` | Serve `/metrics` (default 127.0.0.1:9090). |
+| `export grafana` | Emit a Grafana dashboard JSON. |
+| `export receipt` | Monthly receipt (markdown or HTML). |
+| `doctor` | Health check; exit code = worst severity. |
+| `init` | Scaffold `.codex-meter.toml`. |
 
-Supported output formats:
+## Data sources
 
-```bash
---format table
---format json
---format csv
---format markdown
-```
+`codex-meter` reads only local files:
 
-## Data Sources
+- `~/.codex/sessions/**/*.jsonl` — token-count + turn-context events.
+- `~/.codex/state_5.sqlite` — title, cwd, git branch, model, reasoning effort.
+- `~/.codex/config.toml` — fallback service tier when logs don't record one.
 
-`codex-meter` reads:
+No network calls. Pricing is embedded and overridable via `--rates-file`.
 
-- `~/.codex/sessions/**/*.jsonl` for token count events.
-- `~/.codex/state_5.sqlite` for session metadata such as title, cwd, git branch, model, and reasoning effort.
-- `~/.codex/config.toml` for current service-tier fallback when historical logs do not record the tier.
+## Pricing
 
-No network access is required for reports. Pricing data is embedded and can be overridden locally.
+The bundled rate card was checked **2026-05-12** against:
 
-## Pricing And Credits
+- OpenAI API pricing — https://openai.com/api/pricing/
+- GPT-5.5 model + long-context rule — https://developers.openai.com/api/docs/models/gpt-5.5
+- Codex rate card — https://help.openai.com/en/articles/20001106-codex-rate-card
 
-The bundled rate card was checked on 2026-05-12 against:
+Run `codex-meter rates show` to inspect the active card + its age. The card
+declares its source dates; `codex-meter doctor` warns when they exceed 30 days
+and fails when they exceed 90.
 
-- OpenAI API Pricing: https://openai.com/api/pricing/
-- GPT-5.5 model pricing and long-context rule: https://developers.openai.com/api/docs/models/gpt-5.5
-- Codex rate card: https://help.openai.com/en/articles/20001106-codex-rate-card
+**Dollar values are API-equivalent estimates from local logs.** They are not an
+OpenAI billing ledger — especially when Codex usage is rolled into a ChatGPT
+plan. Codex credits are the right unit for plan-side reasoning.
 
-The dollar value is an API-equivalent estimate from local logs. It is not an OpenAI billing ledger, especially when Codex usage is included in a ChatGPT plan.
-
-Use a local rates file when the published rate card changes:
+Local overrides (per [`schemas/rates.schema.json`](schemas/rates.schema.json)):
 
 ```json
 {
   "api": {
-    "gpt-5.5": { "input": 5, "cached_input": 0.5, "output": 30 }
+    "gpt-5.5": { "input": 5, "cached_input": 0.5, "output": 30, "reasoning_output": 30 }
   },
   "credits": {
     "gpt-5.5": { "input": 125, "cached_input": 12.5, "output": 750 }
@@ -98,37 +131,53 @@ Use a local rates file when the published rate card changes:
 codex-meter daily --rates-file ./rates.json
 ```
 
-## Service Tier Accuracy
+## Service tier accuracy
 
-Codex historical logs may not always record whether a request used standard or fast mode. `codex-meter` uses this precedence:
+Codex historical logs may not record whether a request used standard or fast.
+`codex-meter` resolves the tier via this precedence:
 
-1. `--service-tier standard|fast`
-2. `--tier-overrides overrides.json`
-3. Logged tier in session events
-4. Current `~/.codex/config.toml`
-5. `--unknown-service-tier`
+1. `--service-tier standard|fast` — uniform CLI override.
+2. `--tier-overrides overrides.json` — per-session or per-window assertions
+   (schema: [`schemas/tier-overrides.schema.json`](schemas/tier-overrides.schema.json)).
+3. Logged tier on the event payload.
+4. Current `~/.codex/config.toml` tier setting.
+5. `--unknown-service-tier` fallback.
 
-Tier override example:
+## Budgets
 
-```json
-{
-  "overrides": [
-    {
-      "start": "2026-05-12 09:00:00",
-      "end": "2026-05-12 13:30:00",
-      "service_tier": "standard"
-    },
-    {
-      "session": "rollout-2026-05-12T18-36-01-example.jsonl",
-      "service_tier": "fast"
-    }
-  ]
-}
+Add a `[budgets]` table to `.codex-meter.toml` (run `codex-meter init` to scaffold):
+
+```toml
+[budgets]
+daily_credits = 25000
+weekly_credits = 100000
+weekly_api_dollars = 50.0
+
+# Or nested with a per-period warn threshold:
+# [budgets.monthly]
+# credits = 500000
+# warn_at = 0.7
+```
+
+```bash
+codex-meter budgets check         # exits 0/1/2 by severity
+codex-meter budgets check --format json | jq
+```
+
+## Live + integrations
+
+```bash
+codex-meter live                                # TUI
+codex-meter export prometheus --port 9090       # /metrics on 127.0.0.1
+codex-meter export grafana > dashboard.json     # Grafana JSON
+codex-meter export receipt --month 2026-05 --format html > receipt.html
 ```
 
 ## Privacy
 
-Human-readable output redacts long prompt/session text by default. Use `--show-prompts` when you want full local details. JSON output includes structured metadata and should be treated as potentially sensitive if shared.
+Human-readable output redacts long prompt/session text by default. Use
+`--show-prompts` for full local details. JSON output includes structured
+metadata; treat it as potentially sensitive when sharing.
 
 ## Development
 
@@ -136,15 +185,16 @@ Human-readable output redacts long prompt/session text by default. Use `--show-p
 uv sync --dev
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest
+uv run pytest                   # 130+ tests
+uv run pytest --cov=src/codex_meter --cov-report=term
 uv run python -m build
 ```
 
-Local smoke test:
+Smoke test against your own logs:
 
 ```bash
 uv run codex-meter doctor
-uv run codex-meter daily --days 1 --format json
+uv run codex-meter overview
 ```
 
 ## License

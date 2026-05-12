@@ -389,32 +389,213 @@ def limits(
     render_limits(result, options, output_format, output)
 
 
+_DOCTOR_STATUS_STYLES = {"ok": "green", "warn": "yellow", "fail": "red"}
+_DOCTOR_EXIT_CODES = {"ok": 0, "warn": 1, "fail": 2}
+
+
+def _doctor_check(label: str, status: str, detail: str) -> tuple[str, str, str]:
+    return label, status, detail
+
+
+def _check_codex_cli_version() -> tuple[str, str, str]:
+    import subprocess
+
+    try:
+        completed = subprocess.run(  # noqa: S603 — codex on PATH, no shell.
+            ["codex", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except FileNotFoundError:
+        return _doctor_check("Codex CLI", "warn", "not found on PATH; install Codex for live data.")
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return _doctor_check("Codex CLI", "warn", f"could not invoke (`{exc}`)")
+    version = (completed.stdout or completed.stderr or "").strip().splitlines()[0:1]
+    return _doctor_check("Codex CLI", "ok", version[0] if version else "found")
+
+
+def _check_clock_skew(events) -> tuple[str, str, str]:
+    if not events:
+        return _doctor_check("Clock", "ok", "no events to compare")
+    latest = max(event.timestamp for event in events)
+    now = dt.datetime.now(tz=dt.UTC)
+    skew = (latest - now).total_seconds()
+    if abs(skew) <= 300:
+        return _doctor_check("Clock", "ok", f"latest event within {abs(skew):.0f}s of now")
+    if abs(skew) <= 86400:
+        return _doctor_check("Clock", "warn", f"latest event {skew:+.0f}s from now")
+    return _doctor_check("Clock", "fail", f"latest event {skew:+.0f}s from now")
+
+
+def _check_rate_card_age() -> tuple[str, str, str]:
+    age = _rate_card_age_days()
+    if age <= 30:
+        return _doctor_check("Rate card", "ok", f"checked {age} days ago")
+    if age <= 90:
+        return _doctor_check("Rate card", "warn", f"checked {age} days ago")
+    return _doctor_check(
+        "Rate card",
+        "fail",
+        f"checked {age} days ago — run `codex-meter rates show` and consider updating.",
+    )
+
+
+def _check_python_version() -> tuple[str, str, str]:
+    import sys
+
+    info = sys.version_info
+    if info < (3, 11):
+        return _doctor_check("Python", "fail", f"{info.major}.{info.minor} — requires >= 3.11")
+    return _doctor_check("Python", "ok", f"{info.major}.{info.minor}.{info.micro}")
+
+
 @app.command()
 def doctor(
     session_root: SessionRootOpt = None,
     state_db: StateDbOpt = None,
     codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    output_format: Annotated[
+        str,
+        typer.Option("--format", "-f", help="table or json."),
+    ] = "table",
 ) -> None:
-    """Check local Codex data paths."""
+    """Check local Codex data paths, rate-card age, clock skew, and tooling."""
+    if output_format not in {"table", "json"}:
+        raise _exit_error("--format must be one of: table, json")
     try:
         options = build_options(
-            days=1,
+            days=7.0,
             session_root=session_root,
             state_db=state_db,
             codex_config=codex_config,
+            config=config,
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
+
     files = list(options.session_root.glob("**/*.jsonl")) if options.session_root.exists() else []
-    session_status = "OK" if options.session_root.exists() else "MISSING"
-    state_status = "OK" if options.state_db.exists() else "MISSING"
-    config_status = "OK" if options.config_path.exists() else "MISSING"
+    result = load_usage(options) if files else None
+    checks: list[tuple[str, str, str]] = []
+    checks.append(_check_python_version())
+    checks.append(
+        _doctor_check(
+            "Session root",
+            "ok" if options.session_root.exists() else "fail",
+            f"{options.session_root} ({format_int(len(files))} JSONL files)",
+        )
+    )
+    checks.append(
+        _doctor_check(
+            "State DB",
+            "ok" if options.state_db.exists() else "warn",
+            str(options.state_db),
+        )
+    )
+    checks.append(
+        _doctor_check(
+            "Codex config",
+            "ok" if options.config_path.exists() else "warn",
+            str(options.config_path),
+        )
+    )
+    checks.append(_check_codex_cli_version())
+    checks.append(_check_rate_card_age())
+    checks.append(_check_clock_skew(result.events if result else []))
+    if result:
+        checks.append(
+            _doctor_check("Events loaded", "ok", f"{len(result.events):,} in last 7 days")
+        )
+        if result.warnings:
+            for warning in result.warnings:
+                checks.append(_doctor_check("Parser warning", "warn", warning))
+
+    worst = "ok"
+    severity_rank = {"ok": 0, "warn": 1, "fail": 2}
+    for _, status, _detail in checks:
+        if severity_rank[status] > severity_rank[worst]:
+            worst = status
+
+    if output_format == "json":
+        import json as _json
+
+        typer.echo(
+            _json.dumps(
+                {
+                    "checks": [
+                        {"label": label, "status": status, "detail": detail}
+                        for label, status, detail in checks
+                    ],
+                    "worst": worst,
+                },
+                indent=2,
+            )
+        )
+        raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
+
+    from rich.table import Table
+
     console.print("[bold]Codex Meter - Doctor[/bold]")
-    console.print(f"Session root: {options.session_root} {session_status}")
-    console.print(f"Session files: {format_int(len(files))}")
-    console.print(f"State DB: {options.state_db} {state_status}")
-    console.print(f"Codex config: {options.config_path} {config_status}")
-    console.print("Pricing: embedded offline rate card")
+    table = Table(show_lines=False)
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Detail")
+    for label, status, detail in checks:
+        style = _DOCTOR_STATUS_STYLES[status]
+        table.add_row(label, f"[{style}]{status.upper()}[/{style}]", detail)
+    console.print(table)
+    console.print(
+        f"Overall: [{_DOCTOR_STATUS_STYLES[worst]}]{worst.upper()}[/{_DOCTOR_STATUS_STYLES[worst]}]"
+    )
+    raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
+
+
+@app.command()
+def init(
+    path: Annotated[
+        Path,
+        typer.Option("--path", help="Target file path."),
+    ] = Path(".codex-meter.toml"),
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite an existing config."),
+    ] = False,
+) -> None:
+    """Scaffold a .codex-meter.toml config with commented defaults."""
+    if path.exists() and not force:
+        raise _exit_error(f"{path} already exists. Pass --force to overwrite.")
+    template = (
+        "# codex-meter configuration.\n"
+        "# Tip: every key here can also be set per-invocation via a CLI flag.\n"
+        "\n"
+        "# Default rolling window for `codex-meter` (days).\n"
+        "default_days = 30\n"
+        "\n"
+        "# Service-tier inference. auto = use precedence chain.\n"
+        'service_tier = "auto"\n'
+        'unknown_service_tier = "current-config"\n'
+        "\n"
+        "# Default model when none is recorded.\n"
+        'default_model = "gpt-5.5"\n'
+        "\n"
+        "# Optional budgets — used by `codex-meter budgets check`.\n"
+        "# Severity: ok < 80%, warn at 80%, breach at 100%.\n"
+        "[budgets]\n"
+        "# daily_credits = 25000\n"
+        "# weekly_credits = 100000\n"
+        "# monthly_credits = 400000\n"
+        "# weekly_api_dollars = 50.0\n"
+        "\n"
+        "# Or use the nested form to set warn_at per period:\n"
+        "# [budgets.monthly]\n"
+        "# credits = 500000\n"
+        "# warn_at = 0.7\n"
+    )
+    path.write_text(template)
+    console.print(f"[green]Wrote[/green] {path}")
+    console.print("[dim]Edit it, then run `codex-meter budgets check` to verify.[/dim]")
 
 
 rates_app = typer.Typer(help="Inspect and manage the embedded Codex rate card.")

@@ -84,9 +84,10 @@ def test_doctor_cli_reports_paths(tmp_path) -> None:
         ],
     )
 
-    assert result.exit_code == 0
-    assert "Session root:" in result.output
-    assert "State DB:" in result.output
+    # Doctor returns severity-based exit; fixture has empty sqlite so warn is acceptable.
+    assert result.exit_code in {0, 1}
+    assert "Session root" in result.output
+    assert "State DB" in result.output
 
 
 def test_session_json_hides_prompt_labels_by_default(tmp_path) -> None:
