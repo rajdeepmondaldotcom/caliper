@@ -52,6 +52,16 @@ dev = [
   "typer>=0.12"
 ]
 
+[tool.hatch.build.targets.sdist]
+include = [
+  "/CHANGELOG.md",
+  "/LICENSE",
+  "/README.md",
+  "/pyproject.toml",
+  "/schemas",
+  "/src/codex_meter",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/codex_meter"]
 
