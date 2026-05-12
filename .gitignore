@@ -11,3 +11,6 @@ dist/
 htmlcov/
 .coverage
 .codex-meter.toml
+.env
+.env.*
+!.env.example
