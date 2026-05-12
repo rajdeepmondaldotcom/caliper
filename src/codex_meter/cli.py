@@ -1338,9 +1338,31 @@ def _daily_credit_series(events, options: RuntimeOptions, rate_card: RateCard) -
     return [row.costs.adjusted_credits for row in rows]
 
 
-def _days_remaining_in_month(now: dt.datetime) -> int:
-    import calendar
+def _daily_api_dollar_series(events, options: RuntimeOptions, rate_card: RateCard) -> list[float]:
+    result = LoadResult(
+        events=list(events),
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        credit_samples=[],
+        warnings=[],
+    )
+    rows = aggregate_daily(result, options, rate_card=rate_card)
+    return [row.costs.api_dollars for row in rows]
 
+
+def _sparkline(values: list[float]) -> str:
+    if not values:
+        return ""
+    bars = "▁▂▃▄▅▆▇█"
+    low = min(values)
+    high = max(values)
+    if high == low:
+        return bars[0] * len(values)
+    return "".join(bars[round((value - low) / (high - low) * (len(bars) - 1))] for value in values)
+
+
+def _days_remaining_in_month(now: dt.datetime) -> int:
     last_day = calendar.monthrange(now.year, now.month)[1]
     return max(0, last_day - now.day)
 
@@ -1366,8 +1388,7 @@ def forecast(
     pricing_mode: PricingModeOpt = "model",
 ) -> None:
     """Project month-end credits + ±1σ band. Optional --cap shows days-to-depletion."""
-    if output_format not in {"table", "json"}:
-        raise _exit_error("--format must be one of: table, json")
+    _validate_format(output_format)
     try:
         options = build_options(
             days=float(days),
@@ -1386,34 +1407,67 @@ def forecast(
     result = load_usage(options)
     rate_card = RateCard.load(options.rates_file, options.pricing_mode)
     daily = _daily_credit_series(result.events, options, rate_card)
+    daily_dollars = _daily_api_dollar_series(result.events, options, rate_card)
     now = dt.datetime.now(tz=local_timezone())
     days_remaining = _days_remaining_in_month(now)
     projection = project_forecast(daily, days_remaining, unit="credits", cap=cap)
+    dollar_projection = project_forecast(daily_dollars, days_remaining, unit="API $")
+    sparkline = _sparkline(daily)
+
+    forecast_payload = {
+        "unit": projection.unit,
+        "days_analyzed": projection.days_analyzed,
+        "daily_mean": projection.daily_mean,
+        "daily_stdev": projection.daily_stdev,
+        "days_remaining": projection.days_remaining,
+        "linear_total": projection.linear_total,
+        "ewma_total": projection.ewma_total,
+        "linear_low": projection.linear_low,
+        "linear_high": projection.linear_high,
+        "cap": projection.cap,
+        "days_to_cap": projection.days_to_cap,
+        "sparkline": sparkline,
+        "projections": {
+            "credits": {
+                "linear_total": projection.linear_total,
+                "ewma_total": projection.ewma_total,
+                "daily_mean": projection.daily_mean,
+            },
+            "api_dollars": {
+                "linear_total": dollar_projection.linear_total,
+                "ewma_total": dollar_projection.ewma_total,
+                "daily_mean": dollar_projection.daily_mean,
+            },
+        },
+    }
+    forecast_records = [
+        {
+            "unit": "credits",
+            "daily_mean": f"{projection.daily_mean:.2f}",
+            "linear_total": f"{projection.linear_total:.2f}",
+            "ewma_total": f"{projection.ewma_total:.2f}",
+            "sparkline": sparkline,
+        },
+        {
+            "unit": "api_dollars",
+            "daily_mean": f"{dollar_projection.daily_mean:.2f}",
+            "linear_total": f"{dollar_projection.linear_total:.2f}",
+            "ewma_total": f"{dollar_projection.ewma_total:.2f}",
+            "sparkline": sparkline,
+        },
+    ]
 
     if output_format == "json":
-        import json as _json
-
-        typer.echo(
-            _json.dumps(
-                {
-                    "unit": projection.unit,
-                    "days_analyzed": projection.days_analyzed,
-                    "daily_mean": projection.daily_mean,
-                    "daily_stdev": projection.daily_stdev,
-                    "days_remaining": projection.days_remaining,
-                    "linear_total": projection.linear_total,
-                    "ewma_total": projection.ewma_total,
-                    "linear_low": projection.linear_low,
-                    "linear_high": projection.linear_high,
-                    "cap": projection.cap,
-                    "days_to_cap": projection.days_to_cap,
-                },
-                indent=2,
-            )
-        )
+        typer.echo(json.dumps(forecast_payload, indent=2))
         return
 
-    from rich.table import Table
+    if output_format == "csv":
+        typer.echo(_records_to_csv(forecast_records), nl=False)
+        return
+
+    if output_format == "markdown":
+        typer.echo(_records_to_markdown(forecast_records), nl=False)
+        return
 
     console.print("[bold]Codex Meter - Forecast[/bold]")
     console.print(
@@ -1426,11 +1480,13 @@ def forecast(
     table.add_row("Daily mean", f"{projection.daily_mean:,.2f} {projection.unit}")
     table.add_row("Daily σ", f"{projection.daily_stdev:,.2f} {projection.unit}")
     table.add_row("Linear projection", f"{projection.linear_total:,.2f} {projection.unit}")
+    table.add_row("API $ projection", f"${dollar_projection.linear_total:,.2f}")
     table.add_row(
         "  ±1σ band",
         f"{projection.linear_low:,.2f} – {projection.linear_high:,.2f}",
     )
     table.add_row("EWMA projection", f"{projection.ewma_total:,.2f} {projection.unit}")
+    table.add_row("Trend", sparkline or "no usage")
     if projection.cap is not None and projection.days_to_cap is not None:
         table.add_row("Plan cap", f"{projection.cap:,.2f} {projection.unit}")
         table.add_row("Days to depletion at mean rate", f"{projection.days_to_cap:,.1f}")
@@ -1483,8 +1539,7 @@ def compare(
     pricing_mode: PricingModeOpt = "model",
 ) -> None:
     """Compare two windows side-by-side with credit + dollar deltas."""
-    if output_format not in {"table", "json"}:
-        raise _exit_error("--format must be one of: table, json")
+    _validate_format(output_format)
 
     now = dt.datetime.now(tz=local_timezone())
     try:
@@ -1524,12 +1579,19 @@ def compare(
     credits_delta, credits_pct = _delta(agg_a.costs.adjusted_credits, agg_b.costs.adjusted_credits)
     dollars_delta, dollars_pct = _delta(agg_a.costs.api_dollars, agg_b.costs.api_dollars)
     tokens_delta, tokens_pct = _delta(agg_a.totals.total_tokens, agg_b.totals.total_tokens)
+    max_events = max(agg_a.totals.events, agg_b.totals.events)
+    min_events = min(agg_a.totals.events, agg_b.totals.events)
+    sparse_warning = ""
+    if max_events and min_events < max_events * 0.05:
+        sparse_side = "A" if agg_a.totals.events == min_events else "B"
+        sparse_warning = (
+            f"warning: window {sparse_side} has {min_events:,} events; "
+            "comparison is not representative"
+        )
 
     if output_format == "json":
-        import json as _json
-
         typer.echo(
-            _json.dumps(
+            json.dumps(
                 {
                     "a": _interval_summary(interval_a, agg_a),
                     "b": _interval_summary(interval_b, agg_b),
@@ -1541,13 +1603,49 @@ def compare(
                         "tokens": tokens_delta,
                         "tokens_pct": tokens_pct,
                     },
+                    "warnings": [sparse_warning] if sparse_warning else [],
                 },
                 indent=2,
             )
         )
         return
 
-    from rich.table import Table
+    compare_records = [
+        {
+            "metric": "credits",
+            "a": agg_a.costs.adjusted_credits,
+            "b": agg_b.costs.adjusted_credits,
+            "delta": credits_delta,
+            "pct": credits_pct,
+        },
+        {
+            "metric": "api_dollars",
+            "a": agg_a.costs.api_dollars,
+            "b": agg_b.costs.api_dollars,
+            "delta": dollars_delta,
+            "pct": dollars_pct,
+        },
+        {
+            "metric": "tokens",
+            "a": agg_a.totals.total_tokens,
+            "b": agg_b.totals.total_tokens,
+            "delta": tokens_delta,
+            "pct": tokens_pct,
+        },
+        {
+            "metric": "events",
+            "a": agg_a.totals.events,
+            "b": agg_b.totals.events,
+            "delta": "",
+            "pct": "",
+        },
+    ]
+    if output_format == "csv":
+        typer.echo(_records_to_csv(compare_records), nl=False)
+        return
+    if output_format == "markdown":
+        typer.echo(_records_to_markdown(compare_records), nl=False)
+        return
 
     console.print("[bold]Codex Meter - Compare[/bold]")
     console.print(f"A: {interval_a.label}  ({iso_z(interval_a.start)} → {iso_z(interval_a.end)})")
@@ -1587,6 +1685,8 @@ def compare(
         "",
     )
     console.print(table)
+    if sparse_warning:
+        console.print(f"[yellow]{sparse_warning}[/yellow]")
 
 
 def _interval_summary(interval: Interval, agg: Aggregate) -> dict:
@@ -1637,8 +1737,7 @@ def whatif(
             f"--model {model!r} is not in the embedded rate card. "
             f"Use one of: {', '.join(sorted(MODELS_BY_NAME))}"
         )
-    if output_format not in {"table", "json"}:
-        raise _exit_error("--format must be one of: table, json")
+    _validate_format(output_format)
 
     try:
         options = build_options(
@@ -1657,6 +1756,47 @@ def whatif(
 
     result = load_usage(options)
     rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    if result.events and all(
+        (tier is None or event.service_tier == tier) and (model is None or event.model == model)
+        for event in result.events
+    ):
+        label_parts = []
+        if tier:
+            label_parts.append(f"tier={tier}")
+        if model:
+            label_parts.append(f"model={model}")
+        label = ", ".join(label_parts)
+        message = f"All {len(result.events):,} events are already at {label}; no change."
+        noop_record = {
+            "days": days,
+            "tier": tier or "",
+            "model": model or "",
+            "noop": True,
+            "message": message,
+            "events_evaluated": len(result.events),
+        }
+        if output_format == "json":
+            typer.echo(
+                json.dumps(
+                    {
+                        "days": days,
+                        "hypothetical": {"tier": tier, "model": model},
+                        "noop": True,
+                        "message": message,
+                        "events_evaluated": len(result.events),
+                    },
+                    indent=2,
+                )
+            )
+            return
+        if output_format == "csv":
+            typer.echo(_records_to_csv([noop_record]), nl=False)
+            return
+        if output_format == "markdown":
+            typer.echo(_records_to_markdown([noop_record]), nl=False)
+            return
+        console.print(message)
+        return
     actual_credits = 0.0
     actual_dollars = 0.0
     hypothetical_credits = 0.0
@@ -1677,10 +1817,8 @@ def whatif(
     dollar_pct = (dollar_delta / actual_dollars * 100.0) if actual_dollars else 0.0
 
     if output_format == "json":
-        import json as _json
-
         typer.echo(
-            _json.dumps(
+            json.dumps(
                 {
                     "days": days,
                     "hypothetical": {"tier": tier, "model": model},
@@ -1705,7 +1843,28 @@ def whatif(
         )
         return
 
-    from rich.table import Table
+    whatif_records = [
+        {
+            "metric": "credits",
+            "actual": actual_credits,
+            "projected": hypothetical_credits,
+            "delta": credit_delta,
+            "pct": credit_pct,
+        },
+        {
+            "metric": "api_dollars",
+            "actual": actual_dollars,
+            "projected": hypothetical_dollars,
+            "delta": dollar_delta,
+            "pct": dollar_pct,
+        },
+    ]
+    if output_format == "csv":
+        typer.echo(_records_to_csv(whatif_records), nl=False)
+        return
+    if output_format == "markdown":
+        typer.echo(_records_to_markdown(whatif_records), nl=False)
+        return
 
     label_parts = []
     if tier:
@@ -2006,9 +2165,8 @@ def budgets_check(
     pricing_mode: PricingModeOpt = "model",
     output_format: FormatOpt = "table",
 ) -> None:
-    """Evaluate `[budgets]` from .codex-meter.toml against the current window."""
-    if output_format not in {"table", "json"}:
-        raise _exit_error("--format must be one of: table, json")
+    """Evaluate \\[budgets] from .codex-meter.toml against the current window."""
+    _validate_format(output_format)
     try:
         loaded = load_config(config) if config else load_config()
     except ValueError as exc:
@@ -2021,8 +2179,9 @@ def budgets_check(
 
     if not budget_list:
         console.print(
-            "[dim]No budgets defined. Add a [budgets] table to .codex-meter.toml. "
-            "Example: daily_credits = 25000.[/dim]"
+            "No budgets defined. Add a [budgets] table to .codex-meter.toml. "
+            "Example: daily_credits = 25000.",
+            markup=False,
         )
         raise typer.Exit(0)
 
@@ -2047,25 +2206,24 @@ def budgets_check(
     usage = _usage_for_periods(result.events, options, rate_card, now)
     alerts: list[BudgetAlert] = evaluate_budgets(budget_list, usage)
     worst = max_severity(alerts)
+    alert_records = [
+        {
+            "period": alert.budget.period,
+            "metric": alert.budget.metric,
+            "limit": alert.budget.limit,
+            "warn_at": alert.budget.warn_at,
+            "used": alert.used,
+            "used_percent": alert.used_percent,
+            "severity": alert.severity,
+        }
+        for alert in alerts
+    ]
 
     if output_format == "json":
-        import json as _json
-
         typer.echo(
-            _json.dumps(
+            json.dumps(
                 {
-                    "alerts": [
-                        {
-                            "period": alert.budget.period,
-                            "metric": alert.budget.metric,
-                            "limit": alert.budget.limit,
-                            "warn_at": alert.budget.warn_at,
-                            "used": alert.used,
-                            "used_percent": alert.used_percent,
-                            "severity": alert.severity,
-                        }
-                        for alert in alerts
-                    ],
+                    "alerts": alert_records,
                     "max_severity": worst,
                 },
                 indent=2,
@@ -2073,7 +2231,13 @@ def budgets_check(
         )
         raise typer.Exit(SEVERITY_EXIT_CODE[worst])
 
-    from rich.table import Table
+    if output_format == "csv":
+        typer.echo(_records_to_csv(alert_records), nl=False)
+        raise typer.Exit(SEVERITY_EXIT_CODE[worst])
+
+    if output_format == "markdown":
+        typer.echo(_records_to_markdown(alert_records), nl=False)
+        raise typer.Exit(SEVERITY_EXIT_CODE[worst])
 
     console.print("[bold]Codex Meter - Budgets[/bold]")
     table = Table()

@@ -7,6 +7,8 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 
+WINDOW_EXAMPLES = "Try: 'last 7 days', 'previous 7 days', 'this week', '2026-05-01..2026-05-12'."
+
 
 @dataclass(frozen=True)
 class Interval:
@@ -118,7 +120,7 @@ def _iso_to_dt(raw: str, tz: dt.tzinfo | None, *, end_of_day: bool) -> dt.dateti
     try:
         parsed = dt.datetime.fromisoformat(text)
     except ValueError as exc:
-        raise ValueError(f"Unrecognized window expression: {raw!r}") from exc
+        raise ValueError(f"Unrecognized window expression: {raw!r}. {WINDOW_EXAMPLES}") from exc
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=tz or dt.UTC)
     return parsed

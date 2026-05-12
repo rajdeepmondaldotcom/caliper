@@ -60,6 +60,8 @@ def test_forecast_table_runs_and_reports_zero_for_empty_dataset(tmp_path) -> Non
     )
     assert result.exit_code == 0, result.output
     assert "Codex Meter - Forecast" in result.output
+    assert "API $" in result.output
+    assert "Trend" in result.output
 
 
 def test_forecast_json_reports_required_fields(tmp_path) -> None:
@@ -99,6 +101,32 @@ def test_forecast_json_reports_required_fields(tmp_path) -> None:
     }
     assert expected_keys <= set(payload.keys())
     assert payload["cap"] == 10000.0
+    assert "api_dollars" in payload["projections"]
+    assert "sparkline" in payload
+
+
+def test_tail_json_returns_recent_events(tmp_path) -> None:
+    session_root, state_db, missing_cfg = _build_fixture(tmp_path, tier="standard")
+    result = runner.invoke(
+        app,
+        [
+            "tail",
+            "--n",
+            "1",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["events"][0]["model"] == "gpt-5.5"
+    assert payload["events"][0]["service_tier"] == "standard"
 
 
 def test_whatif_requires_at_least_one_change(tmp_path) -> None:
@@ -216,3 +244,49 @@ def test_compare_rejects_unknown_expression(tmp_path) -> None:
     )
     assert result.exit_code == 2
     assert "Unrecognized window expression" in result.output
+    assert "Try:" in result.output
+
+
+def test_whatif_reports_noop_tier_swap(tmp_path) -> None:
+    session_root, state_db, missing_cfg = _build_fixture(tmp_path, tier="standard")
+    result = runner.invoke(
+        app,
+        [
+            "whatif",
+            "--days",
+            "1",
+            "--tier",
+            "standard",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "already at tier=standard" in result.output
+    assert "no change" in result.output
+
+
+def test_compare_warns_when_window_is_sparse(tmp_path) -> None:
+    session_root, state_db, missing_cfg = _build_fixture(tmp_path, tier="standard")
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "--a",
+            "last 1 days",
+            "--b",
+            "previous 1 days",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "not representative" in result.output
