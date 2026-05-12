@@ -5,14 +5,16 @@ import json
 import subprocess
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
 
-from codex_meter import cli
+from codex_meter import cli, rate_audit
 from codex_meter.config import build_options
 from codex_meter.models import LoadResult, RateLimitSample, ThreadMeta, Usage, UsageEvent
 from codex_meter.output import records_to_csv, records_to_markdown
+from codex_meter.rate_audit import dedupe_models, extract_models_from_text, fetch_rate_sources
 
 runner = CliRunner()
 
@@ -77,27 +79,41 @@ def test_fetch_rate_sources_records_network_errors(monkeypatch) -> None:
         raise urllib.error.URLError("offline")
 
     monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
-    payload = cli._fetch_rate_sources()
+    payload = fetch_rate_sources()
     assert payload["models"] == []
     assert {source["status"] for source in payload["sources"]} == {"error"}
 
 
+def test_fetch_rate_sources_rejects_invalid_urls(monkeypatch) -> None:
+    monkeypatch.setattr(
+        rate_audit,
+        "PRICING_SOURCES",
+        [SimpleNamespace(name="bad source", url="file:///tmp/rates.json", checked="2026-05-12")],
+    )
+
+    payload = fetch_rate_sources()
+
+    assert payload["models"] == []
+    assert payload["sources"][0]["status"] == "error"
+    assert "unsupported rate source URL" in payload["sources"][0]["error"]
+
+
 def test_extract_and_dedupe_models() -> None:
-    assert cli._extract_models_from_text("not json") == []
-    assert cli._extract_models_from_text(json.dumps({"models": [{"name": "gpt-test"}]})) == [
+    assert extract_models_from_text("not json") == []
+    assert extract_models_from_text(json.dumps({"models": [{"name": "gpt-test"}]})) == [
         {"name": "gpt-test"}
     ]
     html = """
     <h1>GPT-5.1-Codex-Max</h1>
     <p>Pricing Text tokens Per 1M tokens Input $1.25 Cached input $0.125 Output $10.00</p>
     """
-    assert cli._extract_models_from_text(html) == [
+    assert extract_models_from_text(html) == [
         {
             "name": "gpt-5.1-codex-max",
             "api": {"input": 1.25, "cached_input": 0.125, "output": 10.0},
         }
     ]
-    assert cli._dedupe_models([{"name": "b"}, {"name": "a"}, {"name": "b", "x": 1}]) == [
+    assert dedupe_models([{"name": "b"}, {"name": "a"}, {"name": "b", "x": 1}]) == [
         {"name": "a"},
         {"name": "b", "x": 1},
     ]
@@ -105,7 +121,7 @@ def test_extract_and_dedupe_models() -> None:
     <p>Fast mode consumes credits at 2.5x the Standard rate for GPT-5.5 and
     2x the Standard rate for GPT-5.4.</p>
     """
-    speed_models = cli._extract_models_from_text(speed_html)
+    speed_models = extract_models_from_text(speed_html)
     assert (
         next(model for model in speed_models if model["name"] == "gpt-5.5")["fast_multiplier"]
         == 2.5
@@ -119,7 +135,7 @@ def test_extract_and_dedupe_models() -> None:
     <p>For GPT-5.4, prompts with &gt;272K input tokens are priced at 2x input and
     1.5x output for the full session.</p>
     """
-    long_models = cli._extract_models_from_text(long_context_html)
+    long_models = extract_models_from_text(long_context_html)
     assert long_models == [
         {
             "name": "gpt-5.4",
