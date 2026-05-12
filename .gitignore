@@ -12,3 +12,5 @@ htmlcov/
 .coverage
 .codex-meter.toml
 docs/
+AGENTS.md
+CLAUDE.md
