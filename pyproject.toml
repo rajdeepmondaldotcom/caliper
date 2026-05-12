@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "codex-meter"
 version = "0.2.0"
-description = "Offline-first Codex usage reports for tokens, credits, costs, sessions, and projects."
+description = "Local Codex usage intelligence for sessions, projects, models, cache, and rate-limit windows."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

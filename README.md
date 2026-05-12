@@ -4,14 +4,14 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Track Codex usage before it spikes.
+Understand your Codex work locally.
 
-`codex-meter` reads your local Codex logs and shows the numbers you actually
-need: tokens, cached input, credits, API-equivalent dollars, sessions, projects,
-models, tiers, budgets, and rate-limit pressure.
+`codex-meter` turns local Codex logs into a clear record of how your coding work
+happened: sessions, projects, models, tiers, cache reuse, tokens, credits,
+API-equivalent dollars, and rate-limit windows.
 
-No cloud sync. No account login. No billing scrape. Just local evidence, turned
-into decisions.
+No cloud sync. No account login. No billing scrape. Just local evidence you can
+inspect, export, and trust.
 
 ## Install
 
@@ -43,7 +43,7 @@ uv tool install '.[prom]'
 codex-meter                         # 7 / 30 / 90 day overview
 codex-meter doctor                  # check local data and assumptions
 codex-meter live                    # watch usage while you work
-codex-meter project --days 30       # find expensive repos
+codex-meter project --days 30       # see project activity
 codex-meter models --days 30        # inspect model and tier mix
 ```
 
@@ -52,9 +52,10 @@ Use `--no-parse-cache` when debugging parser behavior.
 
 ## Why It Exists
 
-Codex usage is easy to ignore until it becomes expensive, confusing, or rate
-limited. The raw logs are already on your machine. `codex-meter` makes them
-readable.
+Codex already leaves a detailed trail on your machine. The problem is that the
+trail is split across JSONL sessions, SQLite metadata, config, rate-limit
+samples, and pricing assumptions. `codex-meter` turns that trail into one local
+view.
 
 It answers:
 
@@ -62,9 +63,9 @@ It answers:
 - Where did it go?
 - Which model and tier drove it?
 - How much input was cached?
-- Am I about to hit a budget or limit?
+- What changed across sessions, projects, and days?
 
-This is not an OpenAI billing ledger. It is local usage accounting.
+This is not an OpenAI billing ledger. It is local usage intelligence.
 
 ## Commands
 
@@ -81,7 +82,7 @@ This is not an OpenAI billing ledger. It is local usage accounting.
 | Forecast | `codex-meter forecast --days 14` |
 | Compare windows | `codex-meter compare --a "last 7 days" --b "previous 7 days"` |
 | What-if pricing | `codex-meter whatif --tier standard` |
-| Budgets | `codex-meter budgets check` |
+| Optional budgets | `codex-meter budgets check` |
 | Receipt | `codex-meter export receipt --month 2026-05 --format html` |
 | Prometheus | `codex-meter export prometheus --port 9090` |
 | Grafana | `codex-meter export grafana > dashboard.json` |

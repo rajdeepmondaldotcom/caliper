@@ -69,7 +69,10 @@ from codex_meter.render import format_int, render, render_limits
 from codex_meter.timeutil import iso_z, local_timezone
 
 app = typer.Typer(
-    help="Offline-first Codex usage reports for tokens, credits, costs, sessions, and projects.",
+    help=(
+        "Local Codex usage intelligence for sessions, projects, models, cache, "
+        "and rate-limit windows."
+    ),
     no_args_is_help=False,
 )
 console = Console()
@@ -537,7 +540,7 @@ def insights(
     width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
 ) -> None:
-    """Surface actionable usage patterns and cost-saving opportunities."""
+    """Surface usage patterns, cache behavior, and project signals."""
     if output_format not in {"table", "json", "markdown"}:
         raise _exit_error("--format must be one of: table, json, markdown")
     options = _options(locals())
