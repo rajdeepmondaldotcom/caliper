@@ -172,7 +172,10 @@ def test_whatif_tier_swap_reduces_credits_when_going_from_fast_to_standard(tmp_p
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["actual"]["credits"] > payload["projected"]["credits"]
+    assert "credits_exact" in payload["actual"]
+    assert "api_dollars_exact" in payload["projected"]
     assert payload["delta"]["credits"] < 0
+    assert "credits_exact" in payload["delta"]
 
 
 def test_whatif_rejects_unknown_model(tmp_path) -> None:
@@ -221,7 +224,9 @@ def test_compare_returns_balanced_delta(tmp_path) -> None:
     payload = json.loads(result.output)
     assert {"a", "b", "delta"} <= set(payload.keys())
     assert payload["a"]["credits"] >= 0
+    assert "credits_exact" in payload["a"]
     assert payload["b"]["credits"] >= 0
+    assert "api_dollars_exact" in payload["delta"]
 
 
 def test_compare_rejects_unknown_expression(tmp_path) -> None:

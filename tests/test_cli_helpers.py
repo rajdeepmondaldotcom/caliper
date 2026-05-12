@@ -235,7 +235,9 @@ def test_budgets_check_formats_and_table(monkeypatch, tmp_path) -> None:
 
     json_result = runner.invoke(cli.app, [*base_args, "--format", "json"])
     assert json_result.exit_code == 0, json_result.output
-    assert json.loads(json_result.output)["max_severity"] == "ok"
+    json_payload = json.loads(json_result.output)
+    assert json_payload["max_severity"] == "ok"
+    assert "used_exact" in json_payload["alerts"][0]
 
     csv_result = runner.invoke(cli.app, [*base_args, "--format", "csv"])
     assert csv_result.exit_code == 0, csv_result.output
