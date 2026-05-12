@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from codex_meter import cli
 from codex_meter.config import build_options
 from codex_meter.models import LoadResult, RateLimitSample, ThreadMeta, Usage, UsageEvent
+from codex_meter.output import records_to_csv, records_to_markdown
 
 runner = CliRunner()
 
@@ -57,9 +58,9 @@ def _result(
 
 
 def test_records_helpers_handle_empty_and_escaping() -> None:
-    assert cli._records_to_csv([]) == ""
-    assert cli._records_to_markdown([]) == "_No data._\n"
-    text = cli._records_to_markdown([{"name": "a|b", "count": 2}])
+    assert records_to_csv([]) == ""
+    assert records_to_markdown([]) == "_No data._\n"
+    text = records_to_markdown([{"name": "a|b", "count": 2}])
     assert "a\\|b" in text
 
 

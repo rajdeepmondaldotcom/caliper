@@ -63,6 +63,12 @@ from codex_meter.models import (
     decimal_string,
     decimal_value,
 )
+from codex_meter.output import (
+    amount_fields,
+    json_dumps,
+    records_to_csv,
+    records_to_markdown,
+)
 from codex_meter.parse_cache import default_cache_path
 from codex_meter.parser import load_usage
 from codex_meter.pricing import (
@@ -159,51 +165,9 @@ def _exit_error(message: str) -> typer.Exit:
     return typer.Exit(2)
 
 
-def _json_default(value: object) -> float:
-    if isinstance(value, Decimal):
-        return float(value)
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
-
-
-def _json_dumps(payload: object) -> str:
-    return json.dumps(payload, indent=2, default=_json_default)
-
-
-def _amount_fields(name: str, value: object) -> dict[str, object]:
-    return {name: value, f"{name}_exact": decimal_string(value)}
-
-
 def _validate_format(output_format: str) -> None:
     if output_format not in OUTPUT_FORMATS:
         raise _exit_error(f"--format must be one of: {', '.join(OUTPUT_FORMATS)}")
-
-
-def _records_to_csv(records: list[dict]) -> str:
-    if not records:
-        return ""
-    out = io.StringIO()
-    fields = list(records[0].keys())
-    writer = csv.DictWriter(out, fieldnames=fields)
-    writer.writeheader()
-    writer.writerows(records)
-    return out.getvalue()
-
-
-def _records_to_markdown(records: list[dict]) -> str:
-    if not records:
-        return "_No data._\n"
-    fields = list(records[0].keys())
-    lines = [
-        "| " + " | ".join(fields) + " |",
-        "| " + " | ".join(["---"] * len(fields)) + " |",
-    ]
-    for record in records:
-        lines.append(
-            "| "
-            + " | ".join(str(record.get(field, "")).replace("|", "\\|") for field in fields)
-            + " |"
-        )
-    return "\n".join(lines) + "\n"
 
 
 def _options(values: dict) -> RuntimeOptions:
@@ -575,7 +539,7 @@ def insights(
     card = RateCard.load(options.rates_file, options.pricing_mode)
     items = build_insights(result, options, rate_card=card)[: options.top_threads]
     if output_format == "json":
-        text = _json_dumps(insights_payload(items)) + "\n"
+        text = json_dumps(insights_payload(items)) + "\n"
     elif output_format == "markdown":
         text = render_insights_markdown(items)
     else:
@@ -642,7 +606,7 @@ def tail(
     result = load_usage(options)
     rows = _recent_tail_rows(result, n, by)
     if output_format == "json":
-        text = _json_dumps({"by": by, f"{by}s": rows}) + "\n"
+        text = json_dumps({"by": by, f"{by}s": rows}) + "\n"
     elif output_format == "csv":
         text = _tail_csv(rows)
     else:
@@ -901,7 +865,7 @@ def doctor(
 
     if output_format == "json":
         typer.echo(
-            _json_dumps(
+            json_dumps(
                 {
                     "checks": [
                         {"label": label, "status": status, "detail": detail}
@@ -918,7 +882,7 @@ def doctor(
             {"label": label, "status": status, "detail": detail} for label, status, detail in checks
         ]
         typer.echo(
-            _records_to_csv(check_records),
+            records_to_csv(check_records),
             nl=False,
         )
         raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
@@ -928,7 +892,7 @@ def doctor(
             {"label": label, "status": status, "detail": detail} for label, status, detail in checks
         ]
         typer.echo(
-            _records_to_markdown(check_records),
+            records_to_markdown(check_records),
             nl=False,
         )
         raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
@@ -1079,7 +1043,7 @@ def rates_show(
         ],
     }
     if output_format == "json":
-        typer.echo(_json_dumps(payload))
+        typer.echo(json_dumps(payload))
         return
     if output_format in {"csv", "markdown"}:
         records = [
@@ -1091,7 +1055,7 @@ def rates_show(
             }
             for card in payload["models"]
         ]
-        text = _records_to_csv(records) if output_format == "csv" else _records_to_markdown(records)
+        text = records_to_csv(records) if output_format == "csv" else records_to_markdown(records)
         typer.echo(text, nl=False)
         return
 
@@ -1141,7 +1105,7 @@ def rates_refresh(
     target = output or _fetched_rates_path()
     payload = _fetch_rate_sources()
     target.expanduser().parent.mkdir(parents=True, exist_ok=True)
-    target.expanduser().write_text(_json_dumps(payload) + "\n")
+    target.expanduser().write_text(json_dumps(payload) + "\n")
     console.print(f"[green]Wrote[/green] {target}")
 
 
@@ -1545,15 +1509,15 @@ def forecast(
     ]
 
     if output_format == "json":
-        typer.echo(_json_dumps(forecast_payload))
+        typer.echo(json_dumps(forecast_payload))
         return
 
     if output_format == "csv":
-        typer.echo(_records_to_csv(forecast_records), nl=False)
+        typer.echo(records_to_csv(forecast_records), nl=False)
         return
 
     if output_format == "markdown":
-        typer.echo(_records_to_markdown(forecast_records), nl=False)
+        typer.echo(records_to_markdown(forecast_records), nl=False)
         return
 
     console.print("[bold]Codex Meter - Forecast[/bold]")
@@ -1709,14 +1673,14 @@ def compare(
 
     if output_format == "json":
         typer.echo(
-            _json_dumps(
+            json_dumps(
                 {
                     "a": _interval_summary(interval_a, agg_a),
                     "b": _interval_summary(interval_b, agg_b),
                     "delta": {
-                        **_amount_fields("credits", credits_delta),
+                        **amount_fields("credits", credits_delta),
                         "credits_pct": credits_pct,
-                        **_amount_fields("api_dollars", dollars_delta),
+                        **amount_fields("api_dollars", dollars_delta),
                         "api_dollars_pct": dollars_pct,
                         "tokens": tokens_delta,
                         "tokens_pct": tokens_pct,
@@ -1758,10 +1722,10 @@ def compare(
         },
     ]
     if output_format == "csv":
-        typer.echo(_records_to_csv(compare_records), nl=False)
+        typer.echo(records_to_csv(compare_records), nl=False)
         return
     if output_format == "markdown":
-        typer.echo(_records_to_markdown(compare_records), nl=False)
+        typer.echo(records_to_markdown(compare_records), nl=False)
         return
 
     console.print("[bold]Codex Meter - Compare[/bold]")
@@ -1813,9 +1777,9 @@ def _interval_summary(interval: Interval, agg: Aggregate) -> dict:
         "label": interval.label,
         "start": iso_z(interval.start),
         "end": iso_z(interval.end),
-        **_amount_fields("credits", agg.costs.adjusted_credits),
-        **_amount_fields("standard_credits", agg.costs.standard_credits),
-        **_amount_fields("api_dollars", agg.costs.api_dollars),
+        **amount_fields("credits", agg.costs.adjusted_credits),
+        **amount_fields("standard_credits", agg.costs.standard_credits),
+        **amount_fields("api_dollars", agg.costs.api_dollars),
         "events": agg.totals.events,
         "tokens": agg.totals.total_tokens,
         "models": sorted(agg.models),
@@ -1902,7 +1866,7 @@ def whatif(
         }
         if output_format == "json":
             typer.echo(
-                _json_dumps(
+                json_dumps(
                     {
                         "days": days,
                         "hypothetical": {"tier": tier, "model": model},
@@ -1916,10 +1880,10 @@ def whatif(
             )
             return
         if output_format == "csv":
-            typer.echo(_records_to_csv([noop_record]), nl=False)
+            typer.echo(records_to_csv([noop_record]), nl=False)
             return
         if output_format == "markdown":
-            typer.echo(_records_to_markdown([noop_record]), nl=False)
+            typer.echo(records_to_markdown([noop_record]), nl=False)
             return
         console.print(message)
         return
@@ -1944,22 +1908,22 @@ def whatif(
 
     if output_format == "json":
         typer.echo(
-            _json_dumps(
+            json_dumps(
                 {
                     "days": days,
                     "hypothetical": {"tier": tier, "model": model},
                     "actual": {
-                        **_amount_fields("credits", actual_credits),
-                        **_amount_fields("api_dollars", actual_dollars),
+                        **amount_fields("credits", actual_credits),
+                        **amount_fields("api_dollars", actual_dollars),
                     },
                     "projected": {
-                        **_amount_fields("credits", hypothetical_credits),
-                        **_amount_fields("api_dollars", hypothetical_dollars),
+                        **amount_fields("credits", hypothetical_credits),
+                        **amount_fields("api_dollars", hypothetical_dollars),
                     },
                     "delta": {
-                        **_amount_fields("credits", credit_delta),
+                        **amount_fields("credits", credit_delta),
                         "credits_pct": credit_pct,
-                        **_amount_fields("api_dollars", dollar_delta),
+                        **amount_fields("api_dollars", dollar_delta),
                         "api_dollars_pct": dollar_pct,
                     },
                     "events_evaluated": len(result.events),
@@ -1989,10 +1953,10 @@ def whatif(
         },
     ]
     if output_format == "csv":
-        typer.echo(_records_to_csv(whatif_records), nl=False)
+        typer.echo(records_to_csv(whatif_records), nl=False)
         return
     if output_format == "markdown":
-        typer.echo(_records_to_markdown(whatif_records), nl=False)
+        typer.echo(records_to_markdown(whatif_records), nl=False)
         return
 
     label_parts = []
@@ -2377,7 +2341,7 @@ def budgets_check(
 
     if output_format == "json":
         typer.echo(
-            _json_dumps(
+            json_dumps(
                 {
                     "alerts": alert_records,
                     "max_severity": worst,
@@ -2389,11 +2353,11 @@ def budgets_check(
         raise typer.Exit(SEVERITY_EXIT_CODE[worst])
 
     if output_format == "csv":
-        typer.echo(_records_to_csv(alert_records), nl=False)
+        typer.echo(records_to_csv(alert_records), nl=False)
         raise typer.Exit(SEVERITY_EXIT_CODE[worst])
 
     if output_format == "markdown":
-        typer.echo(_records_to_markdown(alert_records), nl=False)
+        typer.echo(records_to_markdown(alert_records), nl=False)
         raise typer.Exit(SEVERITY_EXIT_CODE[worst])
 
     console.print("[bold]Codex Meter - Budgets[/bold]")
@@ -2471,7 +2435,7 @@ def statusline(
     rate_card = RateCard.load(options.rates_file, options.pricing_mode)
     snapshot = build_statusline_snapshot(result, options, rate_card, now=options.end)
     if output_format == "json":
-        text = _json_dumps(statusline_payload(snapshot)) + "\n"
+        text = json_dumps(statusline_payload(snapshot)) + "\n"
     else:
         text = render_statusline_text(snapshot) + "\n"
     if output:
