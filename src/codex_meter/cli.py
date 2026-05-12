@@ -19,6 +19,7 @@ from codex_meter.aggregation import (
     aggregate_weekly,
 )
 from codex_meter.config import build_options
+from codex_meter.live import run_live
 from codex_meter.models import Aggregate, LoadResult, RuntimeOptions
 from codex_meter.parser import load_usage
 from codex_meter.pricing import MODEL_CARDS, PRICING_SOURCES, RateCard
@@ -518,3 +519,38 @@ def rates_refresh() -> None:
         "rates refresh is not yet implemented. Use --rates-file to override locally, "
         "or open an issue to request live refresh."
     )
+
+
+@app.command()
+def live(
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    rates_file: RatesFileOpt = None,
+    tier_overrides: TierOverridesOpt = None,
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    default_model: DefaultModelOpt = "gpt-5.5",
+    interval: Annotated[
+        float,
+        typer.Option("--interval", "-i", min=0.5, help="Refresh seconds. Default 2."),
+    ] = 2.0,
+) -> None:
+    """Live TUI: today's usage, 5h + weekly window countdowns, burn rate."""
+    try:
+        options = build_options(
+            days=7,
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+            config=config,
+            rates_file=rates_file,
+            tier_overrides=tier_overrides,
+            service_tier=service_tier,
+            unknown_service_tier=unknown_service_tier,
+            default_model=default_model,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+    run_live(options, interval=interval)
