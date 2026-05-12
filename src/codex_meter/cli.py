@@ -76,6 +76,7 @@ from codex_meter.pricing import (
     PRICING_SOURCES,
     RateCard,
 )
+from codex_meter.prom_snapshot import build_prometheus_snapshot
 from codex_meter.rate_audit import fetch_rate_sources, fetched_rates_path, rates_payload
 from codex_meter.render import format_int, pricing_status, pricing_warnings, render, render_limits
 from codex_meter.statusline import (
@@ -1570,57 +1571,6 @@ export_app = typer.Typer(help="Generate external artifacts: receipts, Grafana da
 app.add_typer(export_app, name="export")
 
 
-def _build_prometheus_snapshot(options: RuntimeOptions):
-    """Construct a Prometheus MetricsSnapshot from a freshly loaded usage window."""
-    from codex_meter.prom_export import MetricsSnapshot
-    from codex_meter.windows import compute_window_state
-
-    result = load_usage(options)
-    rate_card = RateCard.load(options.rates_file, options.pricing_mode)
-    now = dt.datetime.now(tz=local_timezone())
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_events = [event for event in result.events if event.timestamp >= today_start]
-    today_result = LoadResult(
-        events=today_events,
-        duplicates=0,
-        tier_sources={},
-        plan_types=set(),
-        credit_samples=[],
-        warnings=[],
-    )
-    from codex_meter.aggregation import aggregate_total
-
-    totals = aggregate_total(today_result, options, label="today", rate_card=rate_card)
-    primary = compute_window_state(result.credit_samples, now, "primary")
-    secondary = compute_window_state(result.credit_samples, now, "secondary")
-
-    tokens: dict[tuple[str, str, str], int] = {}
-    for event in today_events:
-        key_input = (event.model or "unknown", event.service_tier or "unknown", "input")
-        tokens[key_input] = tokens.get(key_input, 0) + int(event.usage.input_tokens)
-        key_cached = (event.model or "unknown", event.service_tier or "unknown", "cached")
-        tokens[key_cached] = tokens.get(key_cached, 0) + int(event.usage.cached_input_tokens)
-        key_output = (event.model or "unknown", event.service_tier or "unknown", "output")
-        tokens[key_output] = tokens.get(key_output, 0) + int(event.usage.output_tokens)
-        key_reasoning = (event.model or "unknown", event.service_tier or "unknown", "reasoning")
-        tokens[key_reasoning] = tokens.get(key_reasoning, 0) + int(
-            event.usage.reasoning_output_tokens
-        )
-
-    burn = primary.burn_rate_per_hour
-    return MetricsSnapshot(
-        credits_used=float(totals.costs.adjusted_credits),
-        burn_per_hour=burn if burn is not None else 0.0,
-        primary_window_percent=primary.used_percent if primary.used_percent is not None else 0.0,
-        secondary_window_percent=(
-            secondary.used_percent if secondary.used_percent is not None else 0.0
-        ),
-        events_total=totals.totals.events,
-        long_context_events_total=totals.long_context_events,
-        tokens_total=tokens,
-    )
-
-
 @export_app.command("prometheus")
 def export_prometheus(
     host: Annotated[
@@ -1661,7 +1611,7 @@ def export_prometheus(
 
     console.print(f"[green]Prometheus exporter listening on http://{host}:{port}/metrics[/green]")
     try:
-        serve_forever(host, port, lambda: _build_prometheus_snapshot(options))
+        serve_forever(host, port, lambda: build_prometheus_snapshot(options))
     except OSError as exc:
         raise _exit_error(
             f"could not bind {host}:{port}: {exc}. "

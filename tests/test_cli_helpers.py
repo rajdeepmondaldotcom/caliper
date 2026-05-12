@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
-from codex_meter import cli, rate_audit
+from codex_meter import cli, prom_snapshot, rate_audit
 from codex_meter.config import build_options
 from codex_meter.health import check_rates_file, check_state_db_readable
 from codex_meter.models import LoadResult, RateLimitSample, ThreadMeta, Usage, UsageEvent
@@ -267,7 +267,7 @@ def test_budgets_check_formats_and_table(monkeypatch, tmp_path) -> None:
 
 
 def test_prometheus_snapshot_aggregates_today(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(cli, "local_timezone", lambda: dt.UTC)
+    monkeypatch.setattr(prom_snapshot, "local_timezone", lambda: dt.UTC)
     now = dt.datetime.now(tz=dt.UTC)
     sample = RateLimitSample(
         timestamp=now,
@@ -277,7 +277,7 @@ def test_prometheus_snapshot_aggregates_today(monkeypatch, tmp_path) -> None:
         secondary_used_percent=3.5,
     )
     load_result = _result(_event(now), credit_samples=[sample])
-    monkeypatch.setattr(cli, "load_usage", lambda _options: load_result)
+    monkeypatch.setattr(prom_snapshot, "load_usage", lambda _options: load_result)
 
     options = build_options(
         days=7,
@@ -285,7 +285,7 @@ def test_prometheus_snapshot_aggregates_today(monkeypatch, tmp_path) -> None:
         state_db=tmp_path / "state.sqlite",
         codex_config=tmp_path / "missing.toml",
     )
-    snapshot = cli._build_prometheus_snapshot(options)
+    snapshot = prom_snapshot.build_prometheus_snapshot(options)
 
     assert snapshot.events_total == 1
     assert snapshot.primary_window_percent == 12.5
