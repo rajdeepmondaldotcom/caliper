@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -10,6 +11,19 @@ def _safe_int(value: object) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def decimal_value(value: object) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def decimal_string(value: object) -> str:
+    amount = decimal_value(value)
+    if amount == 0:
+        return "0"
+    return format(amount.normalize(), "f")
 
 
 @dataclass(frozen=True)
@@ -48,13 +62,20 @@ class Usage:
 
 @dataclass(frozen=True)
 class Rates:
-    input: float
-    cached_input: float
-    output: float
-    reasoning_output: float | None = None
+    input: Decimal | float
+    cached_input: Decimal | float
+    output: Decimal | float
+    reasoning_output: Decimal | float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "input", decimal_value(self.input))
+        object.__setattr__(self, "cached_input", decimal_value(self.cached_input))
+        object.__setattr__(self, "output", decimal_value(self.output))
+        if self.reasoning_output is not None:
+            object.__setattr__(self, "reasoning_output", decimal_value(self.reasoning_output))
 
     @property
-    def effective_reasoning_output(self) -> float:
+    def effective_reasoning_output(self) -> Decimal:
         return self.reasoning_output if self.reasoning_output is not None else self.output
 
 
@@ -158,14 +179,33 @@ class RateLimitSample:
 
 @dataclass
 class CostTotals:
-    api_dollars: float = 0.0
-    standard_credits: float = 0.0
-    adjusted_credits: float = 0.0
+    api_dollars: Decimal | float = Decimal("0")
+    standard_credits: Decimal | float = Decimal("0")
+    adjusted_credits: Decimal | float = Decimal("0")
+    api_unpriced_events: int = 0
+    credit_unpriced_events: int = 0
+    estimated_events: int = 0
+    ambiguous_reasoning_events: int = 0
+    local_override_events: int = 0
+
+    def __post_init__(self) -> None:
+        self.api_dollars = decimal_value(self.api_dollars)
+        self.standard_credits = decimal_value(self.standard_credits)
+        self.adjusted_credits = decimal_value(self.adjusted_credits)
+
+    @property
+    def unpriced_events(self) -> int:
+        return max(self.api_unpriced_events, self.credit_unpriced_events)
 
     def add(self, other: CostTotals) -> None:
         self.api_dollars += other.api_dollars
         self.standard_credits += other.standard_credits
         self.adjusted_credits += other.adjusted_credits
+        self.api_unpriced_events += other.api_unpriced_events
+        self.credit_unpriced_events += other.credit_unpriced_events
+        self.estimated_events += other.estimated_events
+        self.ambiguous_reasoning_events += other.ambiguous_reasoning_events
+        self.local_override_events += other.local_override_events
 
 
 @dataclass

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from codex_meter.models import Usage
 from codex_meter.pricing import (
     estimate_event_cost,
@@ -28,17 +30,19 @@ def test_estimate_event_cost_applies_cached_input_and_fast_multiplier() -> None:
 
     cost, long_context, unknown_model = estimate_event_cost(usage, "gpt-5.5", "fast", "model", None)
 
-    # gpt-5.5 long-context: input ×2, output ×1.5; reasoning billed at output rate.
+    # gpt-5.5 long-context: input ×2, output ×1.5. This token shape has
+    # total_tokens == input_tokens + output_tokens, so reasoning is already
+    # included in output_tokens and must not be billed again.
     # api ($/M): uncached 500K × 5 × 2 + cached 500K × 0.5 × 2 +
-    #            output 100K × 30 × 1.5 + reasoning 25K × 30 × 1.5 = 11.125
+    #            output 100K × 30 × 1.5 = 10.00
     # credits: uncached 500K × 125 × 2 + cached 500K × 12.5 × 2 +
-    #          output 100K × 750 × 1.5 + reasoning 25K × 750 × 1.5 = 278.125
-    # fast 2.5× → 695.3125
+    #          output 100K × 750 × 1.5 = 250
+    # fast 2.5× → 625
     assert long_context is True
     assert unknown_model is False
-    assert round(cost.api_dollars, 3) == 11.125
-    assert round(cost.standard_credits, 3) == 278.125
-    assert round(cost.adjusted_credits, 4) == 695.3125
+    assert cost.api_dollars == Decimal("10.00")
+    assert cost.standard_credits == Decimal("250.00")
+    assert cost.adjusted_credits == Decimal("625.000")
 
 
 def test_reasoning_tokens_contribute_at_output_rate_when_unspecified() -> None:
@@ -50,29 +54,65 @@ def test_reasoning_tokens_contribute_at_output_rate_when_unspecified() -> None:
     bare_cost, _, _ = estimate_event_cost(bare, "gpt-5.5", "standard", "model", None)
     reasoning_cost, _, _ = estimate_event_cost(with_reasoning, "gpt-5.5", "standard", "model", None)
     # 1000 reasoning tokens × $30/M = $0.03 added to API dollars.
-    assert round(reasoning_cost.api_dollars - bare_cost.api_dollars, 6) == round(
-        1000 * 30 / 1_000_000, 6
+    assert (reasoning_cost.api_dollars - bare_cost.api_dollars).quantize(
+        Decimal("0.000001")
+    ) == Decimal("0.030000")
+
+
+def test_reasoning_tokens_are_not_double_counted_when_output_already_includes_them() -> None:
+    without_reasoning = Usage(input_tokens=1000, output_tokens=1000, total_tokens=2000)
+    with_included_reasoning = Usage(
+        input_tokens=1000,
+        output_tokens=1000,
+        reasoning_output_tokens=500,
+        total_tokens=2000,
     )
+
+    bare_cost, _, _ = estimate_event_cost(without_reasoning, "gpt-5.5", "standard", "model", None)
+    included_cost, _, _ = estimate_event_cost(
+        with_included_reasoning, "gpt-5.5", "standard", "model", None
+    )
+
+    assert included_cost.api_dollars == bare_cost.api_dollars
+    assert included_cost.ambiguous_reasoning_events == 0
+
+
+def test_ambiguous_reasoning_shape_is_marked_and_not_double_counted() -> None:
+    usage = Usage(
+        input_tokens=1000,
+        output_tokens=1000,
+        reasoning_output_tokens=500,
+        total_tokens=2300,
+    )
+
+    cost, _, _ = estimate_event_cost(usage, "gpt-5.5", "standard", "model", None)
+
+    assert cost.api_dollars == Decimal("0.035")
+    assert cost.ambiguous_reasoning_events == 1
 
 
 def test_long_context_rule_lives_on_model_card() -> None:
-    """gpt-5.5 has a long-context rule, gpt-5.4 does not."""
+    """Long-context rules live on model cards."""
     from codex_meter.pricing import MODELS_BY_NAME
 
     assert MODELS_BY_NAME["gpt-5.5"].long_context is not None
     assert MODELS_BY_NAME["gpt-5.5"].long_context.threshold == 272_000
     assert MODELS_BY_NAME["gpt-5.5"].long_context.input_mult == 2.0
     assert MODELS_BY_NAME["gpt-5.5"].long_context.output_mult == 1.5
-    assert MODELS_BY_NAME["gpt-5.4"].long_context is None
+    assert MODELS_BY_NAME["gpt-5.4"].long_context is not None
+    assert MODELS_BY_NAME["gpt-5.4"].long_context.threshold == 272_000
 
 
-def test_unknown_model_uses_fallback_without_marking_flat_mode_unknown() -> None:
+def test_unknown_model_is_unpriced_without_marking_flat_mode_unknown() -> None:
     usage = Usage(input_tokens=10_000, output_tokens=1_000, total_tokens=11_000)
 
-    _cost, _long_context, unknown_model = estimate_event_cost(
+    cost, _long_context, unknown_model = estimate_event_cost(
         usage, "future-model", "standard", "model", None
     )
     assert unknown_model is True
+    assert cost.api_dollars == Decimal("0")
+    assert cost.adjusted_credits == Decimal("0")
+    assert cost.unpriced_events == 1
 
     _cost, _long_context, unknown_model = estimate_event_cost(
         usage, "future-model", "standard", "flat", None
@@ -80,22 +120,23 @@ def test_unknown_model_uses_fallback_without_marking_flat_mode_unknown() -> None
     assert unknown_model is False
 
 
-def test_long_context_rule_is_limited_to_gpt_55() -> None:
+def test_long_context_rule_applies_to_1050k_context_models() -> None:
     usage = Usage(input_tokens=300_000, output_tokens=10_000, total_tokens=310_000)
 
     _cost_55, long_55, _ = estimate_event_cost(usage, "gpt-5.5", "standard", "model", None)
     _cost_54, long_54, _ = estimate_event_cost(usage, "gpt-5.4", "standard", "model", None)
 
     assert long_55 is True
-    assert long_54 is False
+    assert long_54 is True
 
 
-def test_codex_max_has_api_and_credit_rates() -> None:
-    """gpt-5.1-codex-max has API and credit rates — must not be marked unknown."""
+def test_codex_max_has_api_rate_but_unknown_credit_rate() -> None:
+    """gpt-5.1-codex-max is API-priced but absent from the Codex credit table."""
     usage = Usage(input_tokens=1000, output_tokens=100, total_tokens=1100)
     cost, _long_context, unknown_model = estimate_event_cost(
         usage, "gpt-5.1-codex-max", "standard", "model", None
     )
     assert unknown_model is False
-    assert round(cost.api_dollars, 6) == round((1000 * 1.25 + 100 * 10.0) / 1_000_000, 6)
-    assert round(cost.adjusted_credits, 6) == round((1000 * 31.25 + 100 * 250.0) / 1_000_000, 6)
+    assert cost.api_dollars == Decimal("0.00225")
+    assert cost.adjusted_credits == Decimal("0")
+    assert cost.credit_unpriced_events == 1

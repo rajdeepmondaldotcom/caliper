@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/rajdeepmondaldotcom/codex-meter/schemas/rates.schema.json",
   "title": "codex-meter rates override file",
-  "description": "Local override of the embedded Codex rate card. Each model entry overrides the embedded values for that model only. Unlisted models keep the embedded rates.",
+  "description": "Local override of the embedded Codex rate card. `api` and `credits` can be supplied independently; local entries are treated as trusted user-provided rates for the named model. Unlisted models keep source-verified embedded rates when available and are otherwise reported as partial/unpriced.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -54,6 +54,11 @@
           "cached_input": 0.5,
           "output": 30.0,
           "reasoning_output": 30.0
+        },
+        "gpt-5.1-codex-max": {
+          "input": 1.25,
+          "cached_input": 0.125,
+          "output": 10.0
         }
       },
       "credits": {

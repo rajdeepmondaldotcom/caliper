@@ -194,16 +194,23 @@ Normal reports do not touch the network. The only networked command is explicit:
 codex-meter rates refresh --allow-network
 ```
 
-That writes a local pricing-source audit snapshot. It does not rewrite the
-embedded rate card.
+That writes a local pricing-source audit snapshot, including observed token
+rates, fast multipliers, long-context rules, and discrepancies. It does not
+rewrite the embedded rate card.
 
 ## Accuracy
 
 The hard part is not adding tokens. It is making assumptions visible.
 
-`codex-meter` tracks cached input separately, prices reasoning output, applies
-per-model long-context rules, warns on fallback-priced models, and reports
-whether service tiers came from logs, config, overrides, or assumptions.
+`codex-meter` tracks cached input separately, applies per-model long-context
+rules, uses exact decimal math internally, and reports whether service tiers
+came from logs, config, overrides, or assumptions. If a model or credit rate is
+not source-verified, reports mark pricing as partial instead of silently using a
+fallback as exact.
+
+Reasoning tokens are only billed separately when the Codex token log shows they
+are not already included in output tokens. This prevents double-counting on
+current local Codex logs.
 
 Service-tier precedence:
 

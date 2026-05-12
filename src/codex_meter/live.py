@@ -21,6 +21,7 @@ from codex_meter.aggregation import aggregate_total
 from codex_meter.models import LoadResult, RuntimeOptions
 from codex_meter.parser import load_usage
 from codex_meter.pricing import RateCard
+from codex_meter.render import pricing_status, pricing_warnings
 from codex_meter.timeutil import local_timezone
 from codex_meter.windows import (
     WindowState,
@@ -43,6 +44,8 @@ class LiveFrame:
     today_cache_savings: float = 0.0
     today_sparkline: str = ""
     refresh_ms: float = 0.0
+    pricing_status: str = "exact"
+    pricing_warnings: tuple[str, ...] = ()
 
 
 def _window_subset(events, start: dt.datetime, end: dt.datetime):
@@ -86,16 +89,18 @@ def collect_frame(options: RuntimeOptions, now: dt.datetime | None = None) -> Li
 
     return LiveFrame(
         now=now,
-        today_credits=today_total.costs.adjusted_credits,
-        today_api_dollars=today_total.costs.api_dollars,
-        week_credits=week_total.costs.adjusted_credits,
+        today_credits=float(today_total.costs.adjusted_credits),
+        today_api_dollars=float(today_total.costs.api_dollars),
+        week_credits=float(week_total.costs.adjusted_credits),
         primary=primary,
         secondary=secondary,
         plan_types=tuple(sorted(result.plan_types)),
         events_loaded=len(result.events),
-        today_cache_savings=today_total.cache_savings.api_dollars,
+        today_cache_savings=float(today_total.cache_savings.api_dollars),
         today_sparkline=_sparkline(_hourly_credit_series(today_events, rate_card, now)),
         refresh_ms=(time.perf_counter() - started) * 1000,
+        pricing_status=pricing_status(today_total),
+        pricing_warnings=tuple(pricing_warnings(today_total)),
     )
 
 
@@ -107,7 +112,7 @@ def _hourly_credit_series(events, rate_card: RateCard, now: dt.datetime) -> list
         if local_event.date() != local_now.date():
             continue
         costs, _, _ = rate_card.cost_for(event.usage, event.model, event.service_tier)
-        buckets[local_event.hour] += costs.adjusted_credits
+        buckets[local_event.hour] += float(costs.adjusted_credits)
     return buckets
 
 
@@ -150,6 +155,10 @@ def _usage_panel(frame: LiveFrame) -> Panel:
         grid.add_row("Plan", ", ".join(frame.plan_types))
     if frame.today_cache_savings:
         grid.add_row("Cache saved", f"${frame.today_cache_savings:,.2f}")
+    if frame.pricing_status != "exact":
+        grid.add_row("Pricing", frame.pricing_status)
+    for warning in frame.pricing_warnings[:2]:
+        grid.add_row("Warning", warning)
     if frame.today_sparkline:
         grid.add_row("Today trend", frame.today_sparkline)
     grid.add_row("Refresh", f"{frame.refresh_ms:,.0f} ms")

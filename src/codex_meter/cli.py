@@ -13,6 +13,7 @@ import subprocess
 import urllib.request
 from collections.abc import Callable
 from contextlib import closing
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
@@ -55,7 +56,7 @@ from codex_meter.humanize import short_table_label
 from codex_meter.insights import build_insights, insights_payload, render_insights_markdown
 from codex_meter.intervals import Interval, parse_interval
 from codex_meter.live import run_live
-from codex_meter.models import Aggregate, LoadResult, RuntimeOptions
+from codex_meter.models import Aggregate, LoadResult, RuntimeOptions, decimal_value
 from codex_meter.parse_cache import default_cache_path
 from codex_meter.parser import load_usage
 from codex_meter.pricing import (
@@ -65,7 +66,7 @@ from codex_meter.pricing import (
     RateCard,
     normalize_model,
 )
-from codex_meter.render import format_int, render, render_limits
+from codex_meter.render import format_int, pricing_status, pricing_warnings, render, render_limits
 from codex_meter.timeutil import iso_z, local_timezone
 
 app = typer.Typer(
@@ -144,6 +145,16 @@ OPTION_KEYS = (
 def _exit_error(message: str) -> typer.Exit:
     console.print(f"[red]error:[/red] {message}")
     return typer.Exit(2)
+
+
+def _json_default(value: object) -> float:
+    if isinstance(value, Decimal):
+        return float(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _json_dumps(payload: object) -> str:
+    return json.dumps(payload, indent=2, default=_json_default)
 
 
 def _validate_format(output_format: str) -> None:
@@ -548,7 +559,7 @@ def insights(
     card = RateCard.load(options.rates_file, options.pricing_mode)
     items = build_insights(result, options, rate_card=card)[: options.top_threads]
     if output_format == "json":
-        text = json.dumps(insights_payload(items), indent=2) + "\n"
+        text = _json_dumps(insights_payload(items)) + "\n"
     elif output_format == "markdown":
         text = render_insights_markdown(items)
     else:
@@ -615,7 +626,7 @@ def tail(
     result = load_usage(options)
     rows = _recent_tail_rows(result, n, by)
     if output_format == "json":
-        text = json.dumps({"by": by, f"{by}s": rows}, indent=2) + "\n"
+        text = _json_dumps({"by": by, f"{by}s": rows}) + "\n"
     elif output_format == "csv":
         text = _tail_csv(rows)
     else:
@@ -874,15 +885,14 @@ def doctor(
 
     if output_format == "json":
         typer.echo(
-            json.dumps(
+            _json_dumps(
                 {
                     "checks": [
                         {"label": label, "status": status, "detail": detail}
                         for label, status, detail in checks
                     ],
                     "worst": worst,
-                },
-                indent=2,
+                }
             )
         )
         raise typer.Exit(_DOCTOR_EXIT_CODES[worst])
@@ -1036,22 +1046,8 @@ def rates_show(
         "models": [
             {
                 "name": card.name,
-                "api": (
-                    {
-                        "input": card.api_rates.input,
-                        "cached_input": card.api_rates.cached_input,
-                        "output": card.api_rates.output,
-                        "reasoning_output": card.api_rates.effective_reasoning_output,
-                    }
-                    if card.api_rates
-                    else None
-                ),
-                "credits": {
-                    "input": card.credit_rates.input,
-                    "cached_input": card.credit_rates.cached_input,
-                    "output": card.credit_rates.output,
-                    "reasoning_output": card.credit_rates.effective_reasoning_output,
-                },
+                "api": _rates_payload(card.api_rates),
+                "credits": _rates_payload(card.credit_rates),
                 "fast_multiplier": card.fast_multiplier,
                 "long_context": (
                     {
@@ -1067,7 +1063,7 @@ def rates_show(
         ],
     }
     if output_format == "json":
-        typer.echo(json.dumps(payload, indent=2))
+        typer.echo(_json_dumps(payload))
         return
     if output_format in {"csv", "markdown"}:
         records = [
@@ -1075,7 +1071,7 @@ def rates_show(
                 "model": card["name"],
                 "fast_multiplier": card["fast_multiplier"],
                 "api_input": (card["api"] or {}).get("input", ""),
-                "credits_input": card["credits"]["input"],
+                "credits_input": (card["credits"] or {}).get("input", ""),
             }
             for card in payload["models"]
         ]
@@ -1129,7 +1125,7 @@ def rates_refresh(
     target = output or _fetched_rates_path()
     payload = _fetch_rate_sources()
     target.expanduser().parent.mkdir(parents=True, exist_ok=True)
-    target.expanduser().write_text(json.dumps(payload, indent=2) + "\n")
+    target.expanduser().write_text(_json_dumps(payload) + "\n")
     console.print(f"[green]Wrote[/green] {target}")
 
 
@@ -1201,11 +1197,17 @@ def _extract_models_from_html(text: str) -> list[dict]:
             continue
         api_rates = _extract_api_rates(window)
         credit_rates = _extract_credit_rates(window, card.name)
+        fast_multiplier = _extract_fast_multiplier(window, card.name)
+        long_context = _extract_long_context_rule(window)
         item: dict = {"name": card.name}
         if api_rates:
             item["api"] = api_rates
         if credit_rates:
             item["credits"] = credit_rates
+        if fast_multiplier is not None:
+            item["fast_multiplier"] = fast_multiplier
+        if long_context is not None:
+            item["long_context"] = long_context
         if len(item) > 1:
             found.append(item)
     return found
@@ -1221,7 +1223,7 @@ def _normal_text(text: str) -> str:
 
 def _window_for_model(text: str, model: str) -> str:
     candidates = [
-        text[match.start() : match.start() + 3500]
+        text[max(0, match.start() - 1000) : match.start() + 3500]
         for match in re.finditer(re.escape(model), text, flags=re.IGNORECASE)
     ]
     for candidate in candidates:
@@ -1262,6 +1264,26 @@ def _extract_credit_rates(window: str, model: str) -> dict | None:
     }
 
 
+def _extract_fast_multiplier(window: str, model: str) -> float | None:
+    display = re.escape(model.replace("gpt", "GPT"))
+    patterns = [
+        rf"([0-9.]+)x\s+the\s+Standard\s+rate\s+for\s+{display}",
+        rf"{display}[^.]*?([0-9.]+)x\s+the\s+Standard\s+rate",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, window, flags=re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+    return None
+
+
+def _extract_long_context_rule(window: str) -> dict | None:
+    lowered = window.lower()
+    if ">272k" not in lowered or "2x input" not in lowered or "1.5x output" not in lowered:
+        return None
+    return {"threshold": 272_000, "input_mult": 2.0, "output_mult": 1.5}
+
+
 def _dedupe_models(models: list[dict]) -> list[dict]:
     deduped: dict[str, dict] = {}
     for model in models:
@@ -1281,10 +1303,10 @@ def _rates_payload(rates) -> dict | None:
     if rates is None:
         return None
     return {
-        "input": rates.input,
-        "cached_input": rates.cached_input,
-        "output": rates.output,
-        "reasoning_output": rates.effective_reasoning_output,
+        "input": float(rates.input),
+        "cached_input": float(rates.cached_input),
+        "output": float(rates.output),
+        "reasoning_output": float(rates.effective_reasoning_output),
     }
 
 
@@ -1295,6 +1317,15 @@ def _embedded_rate_snapshot() -> list[dict]:
             "api": _rates_payload(card.api_rates),
             "credits": _rates_payload(card.credit_rates),
             "fast_multiplier": card.fast_multiplier,
+            "long_context": (
+                {
+                    "threshold": card.long_context.threshold,
+                    "input_mult": card.long_context.input_mult,
+                    "output_mult": card.long_context.output_mult,
+                }
+                if card.long_context
+                else None
+            ),
         }
         for card in MODEL_CARDS
     ]
@@ -1324,6 +1355,36 @@ def _rate_discrepancies(observed_models: list[dict]) -> list[dict]:
                             "observed": actual,
                         }
                     )
+        if observed.get("fast_multiplier") is not None:
+            actual_fast = float(observed["fast_multiplier"])
+            if abs(actual_fast - float(card.fast_multiplier)) > 1e-9:
+                discrepancies.append(
+                    {
+                        "model": card.name,
+                        "section": "fast_multiplier",
+                        "field": "multiplier",
+                        "embedded": card.fast_multiplier,
+                        "observed": actual_fast,
+                    }
+                )
+        if isinstance(observed.get("long_context"), dict) and card.long_context is not None:
+            expected_long = {
+                "threshold": card.long_context.threshold,
+                "input_mult": card.long_context.input_mult,
+                "output_mult": card.long_context.output_mult,
+            }
+            for field, expected in expected_long.items():
+                actual = observed["long_context"].get(field)
+                if actual is not None and abs(float(actual) - float(expected)) > 1e-9:
+                    discrepancies.append(
+                        {
+                            "model": card.name,
+                            "section": "long_context",
+                            "field": field,
+                            "embedded": expected,
+                            "observed": actual,
+                        }
+                    )
     return discrepancies
 
 
@@ -1338,7 +1399,7 @@ def _daily_credit_series(events, options: RuntimeOptions, rate_card: RateCard) -
         warnings=[],
     )
     rows = aggregate_daily(result, options, rate_card=rate_card)
-    return [row.costs.adjusted_credits for row in rows]
+    return [float(row.costs.adjusted_credits) for row in rows]
 
 
 def _daily_api_dollar_series(events, options: RuntimeOptions, rate_card: RateCard) -> list[float]:
@@ -1351,7 +1412,7 @@ def _daily_api_dollar_series(events, options: RuntimeOptions, rate_card: RateCar
         warnings=[],
     )
     rows = aggregate_daily(result, options, rate_card=rate_card)
-    return [row.costs.api_dollars for row in rows]
+    return [float(row.costs.api_dollars) for row in rows]
 
 
 def _sparkline(values: list[float]) -> str:
@@ -1409,6 +1470,9 @@ def forecast(
 
     result = load_usage(options)
     rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    total = aggregate_total(result, options, rate_card=rate_card)
+    status = pricing_status(total)
+    warnings = pricing_warnings(total)
     daily = _daily_credit_series(result.events, options, rate_card)
     daily_dollars = _daily_api_dollar_series(result.events, options, rate_card)
     now = dt.datetime.now(tz=local_timezone())
@@ -1442,6 +1506,8 @@ def forecast(
                 "daily_mean": dollar_projection.daily_mean,
             },
         },
+        "pricing_status": status,
+        "pricing_warnings": warnings,
     }
     forecast_records = [
         {
@@ -1450,6 +1516,7 @@ def forecast(
             "linear_total": f"{projection.linear_total:.2f}",
             "ewma_total": f"{projection.ewma_total:.2f}",
             "sparkline": sparkline,
+            "pricing_status": status,
         },
         {
             "unit": "api_dollars",
@@ -1457,11 +1524,12 @@ def forecast(
             "linear_total": f"{dollar_projection.linear_total:.2f}",
             "ewma_total": f"{dollar_projection.ewma_total:.2f}",
             "sparkline": sparkline,
+            "pricing_status": status,
         },
     ]
 
     if output_format == "json":
-        typer.echo(json.dumps(forecast_payload, indent=2))
+        typer.echo(_json_dumps(forecast_payload))
         return
 
     if output_format == "csv":
@@ -1473,6 +1541,8 @@ def forecast(
         return
 
     console.print("[bold]Codex Meter - Forecast[/bold]")
+    for warning in warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
     console.print(
         f"Window analyzed: trailing {days} days  ({projection.days_analyzed} days with usage)"
     )
@@ -1605,7 +1675,7 @@ def compare(
 
     def _delta(left: float, right: float) -> tuple[float, float]:
         diff = left - right
-        pct = (diff / right * 100.0) if right else 0.0
+        pct = float(decimal_value(diff) / decimal_value(right) * Decimal("100")) if right else 0.0
         return diff, pct
 
     credits_delta, credits_pct = _delta(agg_a.costs.adjusted_credits, agg_b.costs.adjusted_credits)
@@ -1623,7 +1693,7 @@ def compare(
 
     if output_format == "json":
         typer.echo(
-            json.dumps(
+            _json_dumps(
                 {
                     "a": _interval_summary(interval_a, agg_a),
                     "b": _interval_summary(interval_b, agg_b),
@@ -1636,8 +1706,7 @@ def compare(
                         "tokens_pct": tokens_pct,
                     },
                     "warnings": [sparse_warning] if sparse_warning else [],
-                },
-                indent=2,
+                }
             )
         )
         return
@@ -1682,6 +1751,8 @@ def compare(
     console.print("[bold]Codex Meter - Compare[/bold]")
     console.print(f"A: {interval_a.label}  ({iso_z(interval_a.start)} → {iso_z(interval_a.end)})")
     console.print(f"B: {interval_b.label}  ({iso_z(interval_b.start)} → {iso_z(interval_b.end)})")
+    for warning in pricing_warnings(agg_a) + pricing_warnings(agg_b):
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
     table = Table()
     table.add_column("Metric")
     table.add_column("A", justify="right")
@@ -1732,6 +1803,8 @@ def _interval_summary(interval: Interval, agg: Aggregate) -> dict:
         "events": agg.totals.events,
         "tokens": agg.totals.total_tokens,
         "models": sorted(agg.models),
+        "pricing_status": pricing_status(agg),
+        "pricing_warnings": pricing_warnings(agg),
     }
 
 
@@ -1788,6 +1861,9 @@ def whatif(
 
     result = load_usage(options)
     rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    actual_total = aggregate_total(result, options, rate_card=rate_card)
+    actual_pricing_status = pricing_status(actual_total)
+    actual_pricing_warnings = pricing_warnings(actual_total)
     if result.events and all(
         (tier is None or event.service_tier == tier) and (model is None or event.model == model)
         for event in result.events
@@ -1806,18 +1882,20 @@ def whatif(
             "noop": True,
             "message": message,
             "events_evaluated": len(result.events),
+            "pricing_status": actual_pricing_status,
         }
         if output_format == "json":
             typer.echo(
-                json.dumps(
+                _json_dumps(
                     {
                         "days": days,
                         "hypothetical": {"tier": tier, "model": model},
                         "noop": True,
                         "message": message,
                         "events_evaluated": len(result.events),
-                    },
-                    indent=2,
+                        "pricing_status": actual_pricing_status,
+                        "pricing_warnings": actual_pricing_warnings,
+                    }
                 )
             )
             return
@@ -1829,10 +1907,10 @@ def whatif(
             return
         console.print(message)
         return
-    actual_credits = 0.0
-    actual_dollars = 0.0
-    hypothetical_credits = 0.0
-    hypothetical_dollars = 0.0
+    actual_credits = Decimal("0")
+    actual_dollars = Decimal("0")
+    hypothetical_credits = Decimal("0")
+    hypothetical_dollars = Decimal("0")
     for event in result.events:
         actual, _, _ = rate_card.cost_for(event.usage, event.model, event.service_tier)
         actual_credits += actual.adjusted_credits
@@ -1845,12 +1923,12 @@ def whatif(
 
     credit_delta = hypothetical_credits - actual_credits
     dollar_delta = hypothetical_dollars - actual_dollars
-    credit_pct = (credit_delta / actual_credits * 100.0) if actual_credits else 0.0
-    dollar_pct = (dollar_delta / actual_dollars * 100.0) if actual_dollars else 0.0
+    credit_pct = float(credit_delta / actual_credits * Decimal("100")) if actual_credits else 0.0
+    dollar_pct = float(dollar_delta / actual_dollars * Decimal("100")) if actual_dollars else 0.0
 
     if output_format == "json":
         typer.echo(
-            json.dumps(
+            _json_dumps(
                 {
                     "days": days,
                     "hypothetical": {"tier": tier, "model": model},
@@ -1869,8 +1947,9 @@ def whatif(
                         "api_dollars_pct": dollar_pct,
                     },
                     "events_evaluated": len(result.events),
-                },
-                indent=2,
+                    "pricing_status": actual_pricing_status,
+                    "pricing_warnings": actual_pricing_warnings,
+                }
             )
         )
         return
@@ -1882,6 +1961,7 @@ def whatif(
             "projected": hypothetical_credits,
             "delta": credit_delta,
             "pct": credit_pct,
+            "pricing_status": actual_pricing_status,
         },
         {
             "metric": "api_dollars",
@@ -1889,6 +1969,7 @@ def whatif(
             "projected": hypothetical_dollars,
             "delta": dollar_delta,
             "pct": dollar_pct,
+            "pricing_status": actual_pricing_status,
         },
     ]
     if output_format == "csv":
@@ -1906,6 +1987,8 @@ def whatif(
     label = ", ".join(label_parts) or "no-op"
     console.print(f"[bold]Codex Meter - What If ({label})[/bold]")
     console.print(f"Trailing {days} days · {len(result.events):,} events")
+    for warning in actual_pricing_warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
     table = Table()
     table.add_column("Metric")
     table.add_column("Actual", justify="right")
@@ -1972,7 +2055,7 @@ def _build_prometheus_snapshot(options: RuntimeOptions):
 
     burn = primary.burn_rate_per_hour
     return MetricsSnapshot(
-        credits_used=totals.costs.adjusted_credits,
+        credits_used=float(totals.costs.adjusted_credits),
         burn_per_hour=burn if burn is not None else 0.0,
         primary_window_percent=primary.used_percent if primary.used_percent is not None else 0.0,
         secondary_window_percent=(
@@ -2144,6 +2227,8 @@ def export_receipt(
         tier_sources=result.tier_sources,
         insights=[item.title for item in build_insights(scoped, options, rate_card=rate_card)[:3]],
         warning_count=len(result.warnings),
+        pricing_status=pricing_status(totals),
+        pricing_warnings=pricing_warnings(totals),
     )
     text = (
         render_receipt_html(payload)
@@ -2252,6 +2337,9 @@ def budgets_check(
 
     result = load_usage(options)
     rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    total = aggregate_total(result, options, rate_card=rate_card)
+    status = pricing_status(total)
+    warnings = pricing_warnings(total)
     now = dt.datetime.now(tz=local_timezone())
     usage = _usage_for_periods(result.events, options, rate_card, now)
     alerts: list[BudgetAlert] = evaluate_budgets(budget_list, usage)
@@ -2265,18 +2353,20 @@ def budgets_check(
             "used": alert.used,
             "used_percent": alert.used_percent,
             "severity": alert.severity,
+            "pricing_status": status,
         }
         for alert in alerts
     ]
 
     if output_format == "json":
         typer.echo(
-            json.dumps(
+            _json_dumps(
                 {
                     "alerts": alert_records,
                     "max_severity": worst,
-                },
-                indent=2,
+                    "pricing_status": status,
+                    "pricing_warnings": warnings,
+                }
             )
         )
         raise typer.Exit(SEVERITY_EXIT_CODE[worst])
@@ -2290,6 +2380,8 @@ def budgets_check(
         raise typer.Exit(SEVERITY_EXIT_CODE[worst])
 
     console.print("[bold]Codex Meter - Budgets[/bold]")
+    for warning in warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
     table = Table()
     table.add_column("Period")
     table.add_column("Metric")

@@ -100,6 +100,31 @@ def test_extract_and_dedupe_models() -> None:
         {"name": "a"},
         {"name": "b", "x": 1},
     ]
+    speed_html = """
+    <p>Fast mode consumes credits at 2.5x the Standard rate for GPT-5.5 and
+    2x the Standard rate for GPT-5.4.</p>
+    """
+    speed_models = cli._extract_models_from_text(speed_html)
+    assert (
+        next(model for model in speed_models if model["name"] == "gpt-5.5")["fast_multiplier"]
+        == 2.5
+    )
+    assert (
+        next(model for model in speed_models if model["name"] == "gpt-5.4")["fast_multiplier"]
+        == 2.0
+    )
+    long_context_html = """
+    <h1>GPT-5.4</h1>
+    <p>For GPT-5.4, prompts with &gt;272K input tokens are priced at 2x input and
+    1.5x output for the full session.</p>
+    """
+    long_models = cli._extract_models_from_text(long_context_html)
+    assert long_models == [
+        {
+            "name": "gpt-5.4",
+            "long_context": {"threshold": 272_000, "input_mult": 2.0, "output_mult": 1.5},
+        }
+    ]
 
 
 def test_check_state_db_readable_reports_missing(tmp_path) -> None:

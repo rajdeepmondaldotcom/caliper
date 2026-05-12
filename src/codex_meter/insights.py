@@ -63,7 +63,7 @@ def build_insights(
     projects = aggregate_projects(result, options, rate_card=card)
     if projects and total.costs.adjusted_credits:
         top = projects[0]
-        share = top.costs.adjusted_credits / total.costs.adjusted_credits
+        share = float(top.costs.adjusted_credits / total.costs.adjusted_credits)
         if share >= 0.4:
             insights.append(
                 Insight(

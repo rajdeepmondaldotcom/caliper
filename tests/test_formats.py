@@ -96,7 +96,7 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert len(payload["breakdowns"]) == 1
 
 
-def test_table_warns_when_model_uses_fallback_pricing(tmp_path) -> None:
+def test_table_warns_when_model_has_unpriced_costs(tmp_path) -> None:
     session_root, state_db, until, missing_cfg = _fixture(tmp_path, model="gpt-5.3-codex-spark")
     result = _invoke(
         [
@@ -114,7 +114,8 @@ def test_table_warns_when_model_uses_fallback_pricing(tmp_path) -> None:
         ]
     )
     assert result.exit_code == 0, result.output
-    assert "fallback pricing" in result.output
+    assert "no API-dollar rate" in result.output
+    assert "partial" in result.output
 
 
 def test_daily_csv_has_header_and_data(tmp_path) -> None:
@@ -157,6 +158,9 @@ def test_daily_csv_has_header_and_data(tmp_path) -> None:
         "credits",
         "standard_credits",
         "api_dollars",
+        "pricing_status",
+        "unpriced_events",
+        "estimated_events",
         "models",
         "service_tiers",
     }

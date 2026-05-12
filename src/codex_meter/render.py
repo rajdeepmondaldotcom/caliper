@@ -14,7 +14,14 @@ from rich.table import Table
 
 from codex_meter.aggregation import aggregate_model_mode, aggregate_total
 from codex_meter.humanize import compact_number, format_int, redact, short_table_label
-from codex_meter.models import Aggregate, CostTotals, LoadResult, RuntimeOptions, TokenTotals
+from codex_meter.models import (
+    Aggregate,
+    CostTotals,
+    LoadResult,
+    RuntimeOptions,
+    TokenTotals,
+    decimal_string,
+)
 from codex_meter.pricing import PRICING_SOURCES, RateCard
 from codex_meter.timeutil import iso_z, window_label
 
@@ -46,12 +53,18 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "output_tokens": item.totals.output_tokens,
         "reasoning_output_tokens": item.totals.reasoning_output_tokens,
         "total_tokens": item.totals.total_tokens,
-        "credits": item.costs.adjusted_credits,
-        "standard_credits": item.costs.standard_credits,
-        "api_dollars": item.costs.api_dollars,
-        "cache_savings_credits": item.cache_savings.adjusted_credits,
-        "cache_savings_standard_credits": item.cache_savings.standard_credits,
-        "cache_savings_api_dollars": item.cache_savings.api_dollars,
+        "credits": float(item.costs.adjusted_credits),
+        "standard_credits": float(item.costs.standard_credits),
+        "api_dollars": float(item.costs.api_dollars),
+        "credits_exact": decimal_string(item.costs.adjusted_credits),
+        "standard_credits_exact": decimal_string(item.costs.standard_credits),
+        "api_dollars_exact": decimal_string(item.costs.api_dollars),
+        "cache_savings_credits": float(item.cache_savings.adjusted_credits),
+        "cache_savings_standard_credits": float(item.cache_savings.standard_credits),
+        "cache_savings_api_dollars": float(item.cache_savings.api_dollars),
+        "cache_savings_credits_exact": decimal_string(item.cache_savings.adjusted_credits),
+        "cache_savings_standard_credits_exact": decimal_string(item.cache_savings.standard_credits),
+        "cache_savings_api_dollars_exact": decimal_string(item.cache_savings.api_dollars),
         "models": sorted(item.models),
         "service_tiers": sorted(item.service_tiers),
         "plan_types": sorted(item.plan_types),
@@ -60,7 +73,53 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "long_context_events": item.long_context_events,
         "unknown_model_events": item.unknown_model_events,
         "unknown_tier_events": item.unknown_tier_events,
+        "pricing_status": pricing_status(item),
+        "unpriced_events": item.costs.unpriced_events,
+        "api_unpriced_events": item.costs.api_unpriced_events,
+        "credit_unpriced_events": item.costs.credit_unpriced_events,
+        "estimated_events": pricing_estimated_events(item),
+        "ambiguous_reasoning_events": item.costs.ambiguous_reasoning_events,
+        "local_rate_override_events": item.costs.local_override_events,
     }
+
+
+def pricing_estimated_events(item: Aggregate) -> int:
+    return (
+        item.costs.estimated_events
+        + item.unknown_tier_events
+        + item.costs.ambiguous_reasoning_events
+    )
+
+
+def pricing_status(item: Aggregate) -> str:
+    if item.costs.unpriced_events or item.unknown_model_events:
+        return "partial"
+    if pricing_estimated_events(item):
+        return "estimated"
+    return "exact"
+
+
+def pricing_warnings(item: Aggregate) -> list[str]:
+    warnings: list[str] = []
+    if item.costs.api_unpriced_events:
+        warnings.append(f"{item.costs.api_unpriced_events:,} events have no API-dollar rate.")
+    if item.costs.credit_unpriced_events:
+        warnings.append(f"{item.costs.credit_unpriced_events:,} events have no Codex credit rate.")
+    if item.unknown_model_events:
+        warnings.append(
+            f"{item.unknown_model_events:,} events used models with no known rate card."
+        )
+    if item.unknown_tier_events:
+        warnings.append(
+            f"{item.unknown_tier_events:,} events used inferred service tiers; costs are estimates."
+        )
+    if item.costs.estimated_events:
+        warnings.append(f"{item.costs.estimated_events:,} events used explicit estimate pricing.")
+    if item.costs.ambiguous_reasoning_events:
+        warnings.append(
+            f"{item.costs.ambiguous_reasoning_events:,} events had ambiguous reasoning token shape."
+        )
+    return warnings
 
 
 def rate_limit_sample_to_dict(sample) -> dict:
@@ -98,6 +157,8 @@ def report_payload(
         "pricing": {
             "mode": options.pricing_mode,
             "offline": options.offline,
+            "status": pricing_status(total),
+            "warnings": pricing_warnings(total),
             "sources": [asdict(source) for source in PRICING_SOURCES],
         },
         "metadata": {
@@ -138,11 +199,9 @@ def render_table(
     if result.warnings:
         for warning in result.warnings:
             console.print(f"[yellow]Warning:[/yellow] {warning}")
-    if total.unknown_model_events:
+    for warning in pricing_warnings(total):
         console.print(
-            "[yellow]Warning:[/yellow] "
-            f"{format_int(total.unknown_model_events)} events used fallback pricing "
-            "because their model is not in the embedded rate card."
+            f"[yellow]Warning:[/yellow] {warning} Reported costs are {pricing_status(total)}."
         )
     console.print()
 
@@ -242,6 +301,9 @@ def render_csv(rows: list[Aggregate], show_prompts: bool) -> str:
             "credits",
             "standard_credits",
             "api_dollars",
+            "pricing_status",
+            "unpriced_events",
+            "estimated_events",
             "models",
             "service_tiers",
         ],
@@ -256,14 +318,26 @@ def render_csv(rows: list[Aggregate], show_prompts: bool) -> str:
 
 
 def render_markdown(rows: list[Aggregate], show_prompts: bool) -> str:
-    headers = ["Group", "Events", "Input", "Cached", "Output", "Total", "Credits", "API $"]
+    headers = [
+        "Group",
+        "Events",
+        "Input",
+        "Cached",
+        "Output",
+        "Total",
+        "Credits",
+        "API $",
+        "Pricing",
+    ]
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
     ]
     totals = TokenTotals()
     costs = CostTotals()
+    row_statuses: set[str] = set()
     for row in rows:
+        row_statuses.add(pricing_status(row))
         totals.events += row.totals.events
         totals.input_tokens += row.totals.input_tokens
         totals.cached_input_tokens += row.totals.cached_input_tokens
@@ -282,11 +356,19 @@ def render_markdown(rows: list[Aggregate], show_prompts: bool) -> str:
                     str(row.totals.total_tokens),
                     f"{row.costs.adjusted_credits:.2f}",
                     f"{row.costs.api_dollars:.2f}",
+                    pricing_status(row),
                 ]
             )
             + " |"
         )
     if rows:
+        total_status = (
+            "partial"
+            if "partial" in row_statuses
+            else "estimated"
+            if "estimated" in row_statuses
+            else "exact"
+        )
         lines.append(
             "| "
             + " | ".join(
@@ -299,6 +381,7 @@ def render_markdown(rows: list[Aggregate], show_prompts: bool) -> str:
                     str(totals.total_tokens),
                     f"{costs.adjusted_credits:.2f}",
                     f"{costs.api_dollars:.2f}",
+                    total_status,
                 ]
             )
             + " |"

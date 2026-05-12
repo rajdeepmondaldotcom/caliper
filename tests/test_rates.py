@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from io import BytesIO
 
 from typer.testing import CliRunner
@@ -31,11 +32,12 @@ def test_rates_show_json_schema() -> None:
     assert gpt55["long_context"]["threshold"] == 272_000
     assert gpt55["api"]["reasoning_output"] == gpt55["api"]["output"]
     gpt54 = next(model for model in payload["models"] if model["name"] == "gpt-5.4")
-    assert gpt54["long_context"] is None
+    assert gpt54["long_context"]["threshold"] == 272_000
     max_card = next(model for model in payload["models"] if model["name"] == "gpt-5.1-codex-max")
     assert max_card["api"]["input"] == 1.25
     assert max_card["api"]["cached_input"] == 0.125
     assert max_card["api"]["output"] == 10.0
+    assert max_card["credits"] is None
 
 
 def test_rates_show_markdown() -> None:
@@ -107,7 +109,7 @@ def test_rates_file_override_with_reasoning_field(tmp_path) -> None:
     )
     cost, _, _ = estimate_event_cost(usage, "gpt-5.5", "standard", "model", rates_path)
     # input 1000 × 1 + output 1000 × 10 + reasoning 1000 × 100 = 111,000 → /1M = 0.111
-    assert round(cost.api_dollars, 6) == 0.111
+    assert cost.api_dollars == Decimal("0.111")
 
 
 def test_long_context_threshold_uses_model_card_value() -> None:

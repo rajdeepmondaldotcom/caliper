@@ -19,6 +19,14 @@
 - Dependabot configuration now covers `uv` dependencies and GitHub Actions.
 
 ### Changed
+- Cost reporting now uses exact decimal arithmetic internally, exposes exact
+  decimal strings in JSON output, and marks partial or estimated pricing when
+  rates or service tiers are not source-verified.
+- `rates refresh --allow-network` audits fast-mode multipliers and long-context
+  rules in addition to per-token rates.
+- GPT-5.4 now carries the official `>272K` long-context rule.
+- GPT-5.1-Codex-Max remains API-priced, but Codex credit totals are marked
+  partial unless a local `--rates-file` supplies credit rates.
 - Table rendering now honors terminal/`--width` instead of collapsing to 80 columns.
 - Grouped reports accept `--top` as an alias for `--top-threads`.
 - Doctor, rates, forecast, compare, what-if, and budgets now support CSV/Markdown
@@ -36,12 +44,14 @@
   paths instead of source-checkout installation.
 
 ### Fixed
+- Reasoning tokens are no longer double-counted when Codex logs already include
+  them in `output_tokens`.
 - Literal `[budgets]` text no longer disappears in Rich output.
 - Doctor clock-skew output uses directional wording instead of signed seconds.
 - What-if no-op scenarios now say there is no change.
 - Compare warns when one window is too sparse to be representative.
-- GPT-5.3-Codex-Spark stays fallback-priced instead of being normalized to
-  GPT-5.3-Codex.
+- GPT-5.3-Codex-Spark stays unpriced/research-preview instead of being
+  normalized to GPT-5.3-Codex.
 - Rate-limit samples are retained for burn-rate math and only truncated at
   render/report time.
 - SQLite connections are closed explicitly, making warning-as-error test runs

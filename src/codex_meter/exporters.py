@@ -24,6 +24,8 @@ class ReceiptInputs:
     tier_sources: dict[str, int] | None = None
     insights: list[str] | None = None
     warning_count: int = 0
+    pricing_status: str = "exact"
+    pricing_warnings: list[str] | None = None
 
 
 def month_bounds(month: str, tz: dt.tzinfo) -> tuple[dt.datetime, dt.datetime]:
@@ -90,6 +92,9 @@ def render_receipt_markdown(payload: ReceiptInputs) -> str:
         lines.append(f"| Tier sources | {sources} |")
     if payload.warning_count:
         lines.append(f"| Parser warnings | {_format_int(payload.warning_count)} |")
+    if payload.pricing_status != "exact" or payload.pricing_warnings:
+        warnings = "; ".join(payload.pricing_warnings or []) or payload.pricing_status
+        lines.append(f"| Pricing status | {payload.pricing_status}: {warnings} |")
     lines.append("")
     if payload.insights:
         lines.append("## Insights")
@@ -160,6 +165,12 @@ def render_receipt_html(payload: ReceiptInputs) -> str:
                     or "—",
                 ),
                 ("Parser warnings", _format_int(payload.warning_count)),
+                (
+                    "Pricing status",
+                    (f"{payload.pricing_status}: {'; '.join(payload.pricing_warnings or [])}")
+                    if payload.pricing_status != "exact" or payload.pricing_warnings
+                    else "exact",
+                ),
             )
         )
         + "</tbody></table>"
