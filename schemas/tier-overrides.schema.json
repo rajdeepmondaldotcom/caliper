@@ -20,7 +20,10 @@
   "$defs": {
     "override": {
       "type": "object",
-      "required": ["service_tier"],
+      "anyOf": [
+        { "required": ["service_tier"] },
+        { "required": ["tier"] }
+      ],
       "additionalProperties": false,
       "properties": {
         "service_tier": {
@@ -30,6 +33,7 @@
         },
         "tier": {
           "type": "string",
+          "enum": ["standard", "fast", "priority", "default", "regular"],
           "description": "Alias of service_tier."
         },
         "session": {
