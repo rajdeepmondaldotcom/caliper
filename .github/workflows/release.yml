@@ -22,7 +22,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@v8.1.0
       - name: Set up Python
         run: uv python install 3.13
       - name: Validate tag matches pyproject version
