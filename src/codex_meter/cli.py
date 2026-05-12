@@ -73,6 +73,11 @@ from codex_meter.pricing import (
     normalize_model,
 )
 from codex_meter.render import format_int, pricing_status, pricing_warnings, render, render_limits
+from codex_meter.statusline import (
+    build_statusline_snapshot,
+    render_statusline_text,
+    statusline_payload,
+)
 from codex_meter.timeutil import iso_z, local_timezone
 
 app = typer.Typer(
@@ -119,6 +124,7 @@ CompactOpt = Annotated[bool, typer.Option("--compact")]
 WidthOpt = Annotated[int | None, typer.Option("--width", help="Table width override.")]
 TopThreadsOpt = Annotated[int, typer.Option("--top", "--top-threads", help="Limit grouped rows.")]
 FormatOpt = Annotated[str, typer.Option("--format", "-f", help="table, json, csv, or markdown.")]
+StatuslineFormatOpt = Annotated[str, typer.Option("--format", "-f", help="text or json.")]
 OutputOpt = Annotated[Path | None, typer.Option("--output", help="Write output to a file.")]
 
 RowsFn = Callable[[LoadResult, RuntimeOptions], list[Aggregate]]
@@ -2412,6 +2418,66 @@ def budgets_check(
     console.print(table)
     console.print(f"Max severity: {_severity_style(worst)}")
     raise typer.Exit(SEVERITY_EXIT_CODE[worst])
+
+
+@app.command()
+def statusline(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = 7.0,
+    timezone: TimezoneOpt = "local",
+    output_format: StatuslineFormatOpt = "text",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    offline: OfflineOpt = True,
+) -> None:
+    """Print a compact one-line usage snapshot for prompts and hooks."""
+    if output_format not in {"text", "json"}:
+        raise _exit_error("--format must be one of: text, json")
+    try:
+        options = build_options(
+            since=since,
+            until=until,
+            days=days,
+            timezone=timezone,
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+            config=config,
+            pricing_mode=pricing_mode,
+            service_tier=service_tier,
+            unknown_service_tier=unknown_service_tier,
+            tier_overrides=tier_overrides,
+            rates_file=rates_file,
+            no_dedupe=no_dedupe,
+            no_parse_cache=no_parse_cache,
+            default_model=default_model,
+            offline=offline,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+    result = load_usage(options)
+    rate_card = RateCard.load(options.rates_file, options.pricing_mode)
+    snapshot = build_statusline_snapshot(result, options, rate_card, now=options.end)
+    if output_format == "json":
+        text = _json_dumps(statusline_payload(snapshot)) + "\n"
+    else:
+        text = render_statusline_text(snapshot) + "\n"
+    if output:
+        output.expanduser().write_text(text)
+    else:
+        typer.echo(text, nl=False)
 
 
 @app.command()
