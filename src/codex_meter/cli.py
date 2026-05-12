@@ -1497,6 +1497,35 @@ def _events_in_interval(events, interval: Interval):
     return [event for event in events if interval.start <= event.timestamp < interval.end]
 
 
+def _safe_receipt_rows(
+    rows: list[Aggregate], *, kind: str, show_sensitive: bool
+) -> list[Aggregate]:
+    if show_sensitive:
+        return rows
+    safe_rows: list[Aggregate] = []
+    for index, row in enumerate(rows, start=1):
+        if kind == "session":
+            timestamp = row.label.split(" | ", 1)[0]
+            label = f"Session {index} ({timestamp})"
+        elif kind == "project":
+            label = f"Project {index}: {short_table_label(row.label) or 'Unknown Project'}"
+        else:
+            label = row.label
+        safe_rows.append(Aggregate(key=f"{kind}-{index}", label=label))
+        safe_rows[-1].totals = row.totals
+        safe_rows[-1].costs = row.costs
+        safe_rows[-1].cache_savings = row.cache_savings
+        safe_rows[-1].models = set(row.models)
+        safe_rows[-1].service_tiers = set(row.service_tiers)
+        safe_rows[-1].plan_types = set(row.plan_types)
+        safe_rows[-1].usage_sources = set(row.usage_sources)
+        safe_rows[-1].model_context_window = row.model_context_window
+        safe_rows[-1].long_context_events = row.long_context_events
+        safe_rows[-1].unknown_model_events = row.unknown_model_events
+        safe_rows[-1].unknown_tier_events = row.unknown_tier_events
+    return safe_rows
+
+
 def _aggregate_interval(
     events,
     options: RuntimeOptions,
@@ -2033,6 +2062,13 @@ def export_receipt(
         int,
         typer.Option("--top", min=1, max=50, help="Rows in 'top sessions' / 'top projects'."),
     ] = 5,
+    show_sensitive: Annotated[
+        bool,
+        typer.Option(
+            "--show-sensitive",
+            help="Include full session labels and local project paths in the receipt.",
+        ),
+    ] = False,
 ) -> None:
     """Generate a monthly receipt (markdown or html)."""
     if receipt_format not in {"markdown", "html"}:
@@ -2045,7 +2081,7 @@ def export_receipt(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
-    span_days = (end - start).total_seconds() / 86400.0 + 1
+    span_days = (end - start).total_seconds() / 86400.0
     try:
         options = build_options(
             days=span_days,
@@ -2084,8 +2120,16 @@ def export_receipt(
 
     totals = aggregate_total(scoped, options, label="Month", rate_card=rate_card)
     by_model = aggregate_model_mode(scoped, options, rate_card=rate_card)
-    top_sessions = aggregate_sessions(scoped, options, rate_card=rate_card)[:top]
-    top_projects = aggregate_projects(scoped, options, rate_card=rate_card)[:top]
+    top_sessions = _safe_receipt_rows(
+        aggregate_sessions(scoped, options, rate_card=rate_card)[:top],
+        kind="session",
+        show_sensitive=show_sensitive,
+    )
+    top_projects = _safe_receipt_rows(
+        aggregate_projects(scoped, options, rate_card=rate_card)[:top],
+        kind="project",
+        show_sensitive=show_sensitive,
+    )
 
     payload = ReceiptInputs(
         month=chosen_month,
@@ -2094,6 +2138,9 @@ def export_receipt(
         top_sessions=top_sessions,
         top_projects=top_projects,
         generated_at=now,
+        tier_sources=result.tier_sources,
+        insights=[item.title for item in build_insights(scoped, options, rate_card=rate_card)[:3]],
+        warning_count=len(result.warnings),
     )
     text = (
         render_receipt_html(payload)

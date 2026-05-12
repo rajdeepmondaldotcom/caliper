@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import calendar
 import datetime as dt
 import html
 import json
@@ -22,6 +21,9 @@ class ReceiptInputs:
     top_sessions: list[Aggregate]
     top_projects: list[Aggregate]
     generated_at: dt.datetime
+    tier_sources: dict[str, int] | None = None
+    insights: list[str] | None = None
+    warning_count: int = 0
 
 
 def month_bounds(month: str, tz: dt.tzinfo) -> tuple[dt.datetime, dt.datetime]:
@@ -34,9 +36,11 @@ def month_bounds(month: str, tz: dt.tzinfo) -> tuple[dt.datetime, dt.datetime]:
         raise ValueError(f"Invalid --month {month!r}; expected YYYY-MM") from exc
     if not 1 <= month_int <= 12:
         raise ValueError(f"Month must be 1..12, got {month_int}")
-    last_day = calendar.monthrange(year_int, month_int)[1]
     start = dt.datetime(year_int, month_int, 1, tzinfo=tz)
-    end = dt.datetime(year_int, month_int, last_day, 23, 59, 59, tzinfo=tz)
+    if month_int == 12:
+        end = dt.datetime(year_int + 1, 1, 1, tzinfo=tz)
+    else:
+        end = dt.datetime(year_int, month_int + 1, 1, tzinfo=tz)
     return start, end
 
 
@@ -64,6 +68,11 @@ def render_receipt_markdown(payload: ReceiptInputs) -> str:
     lines.append("| --- | ---: |")
     lines.append(f"| Credits | {_format_credits(payload.totals.costs.adjusted_credits)} |")
     lines.append(f"| API $ | {_format_money(payload.totals.costs.api_dollars)} |")
+    cache_savings = _format_credits(payload.totals.cache_savings.adjusted_credits)
+    lines.append(
+        f"| Cache savings | {cache_savings} credits / "
+        f"{_format_money(payload.totals.cache_savings.api_dollars)} |"
+    )
     lines.append(f"| Events | {_format_int(payload.totals.totals.events)} |")
     lines.append(f"| Tokens | {_format_int(payload.totals.totals.total_tokens)} |")
     lines.append(
@@ -74,7 +83,20 @@ def render_receipt_markdown(payload: ReceiptInputs) -> str:
     lines.append(
         f"| Reasoning tokens | {_format_int(payload.totals.totals.reasoning_output_tokens)} |"
     )
+    if payload.tier_sources:
+        sources = ", ".join(
+            f"{key}={value:,}" for key, value in sorted(payload.tier_sources.items())
+        )
+        lines.append(f"| Tier sources | {sources} |")
+    if payload.warning_count:
+        lines.append(f"| Parser warnings | {_format_int(payload.warning_count)} |")
     lines.append("")
+    if payload.insights:
+        lines.append("## Insights")
+        lines.append("")
+        for insight in payload.insights:
+            lines.append(f"- {insight}")
+        lines.append("")
     lines.extend(_section_table("Models", payload.by_model))
     lines.extend(_section_table("Top sessions", payload.top_sessions))
     lines.extend(_section_table("Top projects", payload.top_projects))
@@ -118,16 +140,36 @@ def render_receipt_html(payload: ReceiptInputs) -> str:
             for name, value in (
                 ("Credits", _format_credits(payload.totals.costs.adjusted_credits)),
                 ("API $", _format_money(payload.totals.costs.api_dollars)),
+                (
+                    "Cache savings",
+                    f"{_format_credits(payload.totals.cache_savings.adjusted_credits)} credits / "
+                    f"{_format_money(payload.totals.cache_savings.api_dollars)}",
+                ),
                 ("Events", _format_int(payload.totals.totals.events)),
                 ("Tokens", _format_int(payload.totals.totals.total_tokens)),
                 ("Input tokens", _format_int(payload.totals.totals.input_tokens)),
                 ("Cached input", _format_int(payload.totals.totals.cached_input_tokens)),
                 ("Output tokens", _format_int(payload.totals.totals.output_tokens)),
                 ("Reasoning tokens", _format_int(payload.totals.totals.reasoning_output_tokens)),
+                (
+                    "Tier sources",
+                    ", ".join(
+                        f"{key}={value:,}"
+                        for key, value in sorted((payload.tier_sources or {}).items())
+                    )
+                    or "—",
+                ),
+                ("Parser warnings", _format_int(payload.warning_count)),
             )
         )
         + "</tbody></table>"
     )
+    if payload.insights:
+        sections.append(
+            "<h2>Insights</h2><ul>"
+            + "".join(f"<li>{html.escape(item)}</li>" for item in payload.insights)
+            + "</ul>"
+        )
     sections.append(_html_section("Models", payload.by_model))
     sections.append(_html_section("Top sessions", payload.top_sessions))
     sections.append(_html_section("Top projects", payload.top_projects))

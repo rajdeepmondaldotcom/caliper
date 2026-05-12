@@ -1,13 +1,48 @@
 from __future__ import annotations
 
+import datetime as dt
+import io
 import json
 
 from typer.testing import CliRunner
 
 from codex_meter.cli import app
-from codex_meter.prom_export import MetricsSnapshot, build_metrics_text
+from codex_meter.prom_export import (
+    MetricsSnapshot,
+    build_metrics_text,
+    make_handler,
+    serve_forever,
+)
+from codex_meter.timeutil import local_timezone
+
+from .conftest import make_state_db, token_event, turn_context, write_session
 
 runner = CliRunner()
+
+
+def _receipt_fixture(tmp_path, when: dt.datetime | None = None) -> tuple:
+    session_root = tmp_path / "sessions"
+    now = when or dt.datetime.now(tz=dt.UTC)
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-test.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(
+                now,
+                {
+                    "input_tokens": 1000,
+                    "cached_input_tokens": 500,
+                    "output_tokens": 100,
+                    "reasoning_output_tokens": 25,
+                    "total_tokens": 1100,
+                },
+            ),
+        ],
+    )
+    state_db = tmp_path / "state.sqlite"
+    make_state_db(state_db, session_path)
+    return session_root, state_db, now
 
 
 def test_metrics_text_includes_all_expected_metric_names() -> None:
@@ -52,6 +87,82 @@ def test_metrics_text_handles_empty_tokens_dict() -> None:
     assert "codex_meter_credits_used 0.0" in body
 
 
+def test_metrics_handler_serves_metrics_and_404s() -> None:
+    snapshot = MetricsSnapshot(
+        credits_used=1.0,
+        burn_per_hour=2.0,
+        primary_window_percent=3.0,
+        secondary_window_percent=4.0,
+        events_total=5,
+        long_context_events_total=6,
+    )
+    handler_cls = make_handler(lambda: snapshot)
+
+    class TestHandler(handler_cls):
+        def __init__(self, path: str) -> None:
+            self.path = path
+            self.wfile = io.BytesIO()
+            self.status: int | None = None
+            self.headers: dict[str, str] = {}
+
+        def send_response(self, code: int, message: str | None = None) -> None:
+            del message
+            self.status = code
+
+        def send_header(self, keyword: str, value: str) -> None:
+            self.headers[keyword] = value
+
+        def end_headers(self) -> None:
+            return
+
+        def send_error(self, code: int, message: str | None = None, explain=None) -> None:
+            del message, explain
+            self.status = code
+
+    ok = TestHandler("/metrics")
+    ok.do_GET()
+    assert ok.status == 200
+    assert ok.headers["Content-Type"].startswith("text/plain")
+    assert b"codex_meter_credits_used 1.0" in ok.wfile.getvalue()
+
+    missing = TestHandler("/")
+    missing.do_GET()
+    assert missing.status == 404
+
+
+def test_serve_forever_closes_server(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeServer:
+        def __init__(self, address, handler_cls) -> None:
+            self.address = address
+            self.handler_cls = handler_cls
+
+        def serve_forever(self) -> None:
+            calls.append("serve")
+            raise KeyboardInterrupt
+
+        def server_close(self) -> None:
+            calls.append("close")
+
+    monkeypatch.setattr("http.server.ThreadingHTTPServer", FakeServer)
+
+    serve_forever(
+        "127.0.0.1",
+        0,
+        lambda: MetricsSnapshot(
+            credits_used=0,
+            burn_per_hour=0,
+            primary_window_percent=0,
+            secondary_window_percent=0,
+            events_total=0,
+            long_context_events_total=0,
+        ),
+    )
+
+    assert calls == ["serve", "close"]
+
+
 def test_export_grafana_cli_emits_valid_dashboard_json() -> None:
     result = runner.invoke(app, ["export", "grafana"])
     assert result.exit_code == 0, result.output
@@ -61,31 +172,7 @@ def test_export_grafana_cli_emits_valid_dashboard_json() -> None:
 
 
 def test_export_receipt_cli_renders_markdown(tmp_path) -> None:
-    import datetime as dt
-
-    from .conftest import make_state_db, token_event, turn_context, write_session
-
-    session_root = tmp_path / "sessions"
-    now = dt.datetime.now(tz=dt.UTC)
-    session_path = write_session(
-        session_root,
-        "rollout-2026-05-12T00-00-00-test.jsonl",
-        [
-            turn_context(model="gpt-5.5", service_tier="standard"),
-            token_event(
-                now,
-                {
-                    "input_tokens": 1000,
-                    "cached_input_tokens": 500,
-                    "output_tokens": 100,
-                    "reasoning_output_tokens": 25,
-                    "total_tokens": 1100,
-                },
-            ),
-        ],
-    )
-    state_db = tmp_path / "state.sqlite"
-    make_state_db(state_db, session_path)
+    session_root, state_db, now = _receipt_fixture(tmp_path)
 
     result = runner.invoke(
         app,
@@ -107,6 +194,62 @@ def test_export_receipt_cli_renders_markdown(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert "# Codex Meter Receipt" in result.output
     assert "## Totals" in result.output
+    assert "/tmp/project-alpha" not in result.output
+    assert "2026-05-12T00-00-00-test" not in result.output
+    assert "Synthetic private prompt" not in result.output
+
+
+def test_export_receipt_show_sensitive_restores_full_labels(tmp_path) -> None:
+    session_root, state_db, now = _receipt_fixture(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "receipt",
+            "--month",
+            now.strftime("%Y-%m"),
+            "--format",
+            "markdown",
+            "--show-sensitive",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "/tmp/project-alpha" in result.output
+    assert "2026-05-12T00-00-00-test" in result.output
+
+
+def test_export_receipt_includes_last_moment_of_month(tmp_path) -> None:
+    local_end = dt.datetime(2026, 5, 31, 23, 59, 59, 500_000, tzinfo=local_timezone())
+    session_root, state_db, _now = _receipt_fixture(tmp_path, local_end)
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "receipt",
+            "--month",
+            "2026-05",
+            "--format",
+            "markdown",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "| Events | 1 |" in result.output
 
 
 def test_export_receipt_rejects_bad_month() -> None:

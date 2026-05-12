@@ -33,6 +33,8 @@ def _payload() -> ReceiptInputs:
     totals.totals.reasoning_output_tokens = 50
     totals.totals.total_tokens = 1750
     totals.totals.events = 3
+    totals.cache_savings.api_dollars = 9.87
+    totals.cache_savings.adjusted_credits = 246.8
     return ReceiptInputs(
         month="2026-05",
         totals=totals,
@@ -43,15 +45,16 @@ def _payload() -> ReceiptInputs:
     )
 
 
-def test_month_bounds_returns_inclusive_endpoints() -> None:
+def test_month_bounds_returns_exclusive_next_month_end() -> None:
     start, end = month_bounds("2026-05", dt.UTC)
     assert start == dt.datetime(2026, 5, 1, tzinfo=dt.UTC)
-    assert end == dt.datetime(2026, 5, 31, 23, 59, 59, tzinfo=dt.UTC)
+    assert end == dt.datetime(2026, 6, 1, tzinfo=dt.UTC)
 
 
 def test_month_bounds_handles_february_leap_year() -> None:
     start, end = month_bounds("2024-02", dt.UTC)
-    assert end.day == 29
+    assert start == dt.datetime(2024, 2, 1, tzinfo=dt.UTC)
+    assert end == dt.datetime(2024, 3, 1, tzinfo=dt.UTC)
 
 
 def test_month_bounds_rejects_bad_input() -> None:
@@ -70,6 +73,8 @@ def test_receipt_markdown_includes_sections_and_totals() -> None:
     assert "## Top projects" in text
     assert "1,234.50" in text
     assert "$12.34" in text
+    assert "Cache savings" in text
+    assert "$9.87" in text
 
 
 def test_receipt_html_escapes_user_input() -> None:
@@ -78,6 +83,7 @@ def test_receipt_html_escapes_user_input() -> None:
     html = render_receipt_html(payload)
     assert "&lt;script&gt;" in html
     assert "<script>alert(1)</script>" not in html
+    assert "Cache savings" in html
 
 
 def test_grafana_dashboard_has_required_panels() -> None:
