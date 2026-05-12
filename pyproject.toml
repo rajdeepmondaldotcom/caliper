@@ -84,6 +84,7 @@ source = ["src/codex_meter"]
 branch = true
 
 [tool.coverage.report]
+fail_under = 85
 exclude_also = [
   "if __name__ == .__main__.:",
   "raise NotImplementedError",
