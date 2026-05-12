@@ -117,10 +117,11 @@ Most report commands support:
 --top 20
 ```
 
-JSON reports also include a `projects` inventory for the selected window. That
-inventory keeps project paths, session counts, first/last seen timestamps,
-models, tiers, git branches/remotes when Codex recorded them, and the same token
-and cost fields as the primary breakdown.
+JSON reports also include a `projects` inventory for the selected window and
+row-level `model_breakdowns` for each total/breakdown row. Those inventories keep
+project paths, session counts, first/last seen timestamps, models, tiers, model
+source/fallback flags, git branches/remotes when Codex recorded them, and the
+same token and cost fields as the primary breakdown.
 
 ## Live View
 
@@ -206,6 +207,10 @@ long-context event count, and tokens by model/tier/kind.
 - `~/.codex/state_5.sqlite`
 - `~/.codex/config.toml`
 
+If `CODEX_HOME` is set, those defaults move under that directory, matching Codex
+itself. Explicit `--session-root`, `--state-db`, `--codex-config`, and config
+file paths still take precedence.
+
 Workspace attribution is local and evidence-based. For each usage event,
 `codex-meter` uses:
 
@@ -232,6 +237,12 @@ rules, uses exact decimal math internally, and reports whether service tiers
 came from logs, config, overrides, or assumptions. If a model or credit rate is
 not source-verified, reports mark pricing as partial instead of silently using a
 fallback as exact.
+
+Model identity is also source-tracked. JSON exports show whether a model came
+from JSONL `turn_context`, SQLite thread metadata, or the configured default
+model. When the default model is used because a legacy session recorded tokens
+without model metadata, JSON marks those events as fallback model events and
+pricing is treated as estimated.
 
 Codex subscription plans are treated as limit metadata, not as hidden pricing
 multipliers. Reports preserve the raw `plan_type`, add normalized subscription

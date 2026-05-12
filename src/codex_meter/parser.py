@@ -24,7 +24,7 @@ from codex_meter.parse_cache import ParseCache
 from codex_meter.pricing import normalize_model, normalize_service_tier
 from codex_meter.timeutil import parse_datetime, parse_event_timestamp
 
-PARSER_CACHE_VERSION = 4
+PARSER_CACHE_VERSION = 5
 
 
 def session_files(session_root: Path) -> Iterable[Path]:
@@ -282,12 +282,13 @@ def service_tier_for_event(
 
 def update_context_from_event(
     event: dict, current: ThreadMeta, current_tier: str
-) -> tuple[ThreadMeta, str]:
+) -> tuple[ThreadMeta, str, bool]:
     payload = event.get("payload") or {}
     event_type = event.get("type")
     payload_type = payload.get("type")
 
     if event_type == "turn_context":
+        model_seen = bool(str(payload.get("model") or "").strip())
         model = payload.get("model") or current.model
         effort = payload.get("effort") or current.reasoning_effort
         cwd = payload.get("cwd") or current.cwd
@@ -302,24 +303,41 @@ def update_context_from_event(
                 reasoning_effort=str(effort or ""),
             ),
             tier,
+            model_seen,
         )
 
     if event_type == "session_meta":
         tier = normalize_service_tier(payload.get("service_tier")) or current_tier
-        return current, tier
+        return current, tier, False
 
     if event_type == "event_msg" and payload_type == "session_configured":
         tier = normalize_service_tier(payload.get("service_tier")) or current_tier
-        return current, tier
+        return current, tier, False
 
     if event_type == "event_msg" and payload_type == "user_message":
         message = str(payload.get("message") or "").strip().lower()
         if message.startswith("/fast on"):
-            return current, "fast"
+            return current, "fast", False
         if message.startswith("/fast off"):
-            return current, "standard"
+            return current, "standard", False
 
-    return current, current_tier
+    return current, current_tier, False
+
+
+def model_for_event(
+    current_meta: ThreadMeta,
+    current_model_source: str,
+    thread_meta: ThreadMeta,
+    default_model: str,
+) -> tuple[str, str, bool]:
+    current_model = normalize_model(current_meta.model)
+    if current_model and current_model_source:
+        return current_model, current_model_source, False
+    state_model = normalize_model(thread_meta.model)
+    if state_model:
+        return state_model, "state-db", False
+    fallback = normalize_model(default_model)
+    return fallback, "default", True
 
 
 def rate_limit_sample(*, path: Path, event_time: dt.datetime, rate_limits: dict) -> RateLimitSample:
@@ -454,6 +472,7 @@ def _parse_session(
         return
     current_meta = thread_meta
     logged_tier = ""
+    current_model_source = "state-db" if thread_meta.model else ""
     previous_total_usage: Usage | None = None
     with handle:
         for line in handle:
@@ -461,7 +480,11 @@ def _parse_session(
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            current_meta, logged_tier = update_context_from_event(event, current_meta, logged_tier)
+            current_meta, logged_tier, model_seen = update_context_from_event(
+                event, current_meta, logged_tier
+            )
+            if model_seen:
+                current_model_source = "turn_context"
             if event.get("type") != "event_msg":
                 continue
             payload = event.get("payload") or {}
@@ -486,10 +509,11 @@ def _parse_session(
                 yield None, total_reset, sample
                 continue
 
-            model = (
-                normalize_model(current_meta.model)
-                or normalize_model(thread_meta.model)
-                or normalize_model(options.default_model)
+            model, model_source, model_is_fallback = model_for_event(
+                current_meta=current_meta,
+                current_model_source=current_model_source,
+                thread_meta=thread_meta,
+                default_model=options.default_model,
             )
             tier, tier_source = service_tier_for_event(
                 path=path,
@@ -510,6 +534,8 @@ def _parse_session(
                 service_tier=tier,
                 tier_source=tier_source,
                 thread=current_meta,
+                model_source=model_source,
+                model_is_fallback=model_is_fallback,
                 usage_source=usage_source,
                 model_context_window=model_context_window,
                 plan_type=str(rate_limits.get("plan_type") or ""),

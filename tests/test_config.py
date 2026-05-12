@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
 import pytest
 
@@ -42,6 +43,29 @@ top_threads = 3
     assert options.pricing_mode == "flat"
     assert options.default_model == "gpt-5.4"
     assert options.top_threads == 3
+
+
+def test_codex_home_sets_default_codex_paths(monkeypatch, tmp_path) -> None:
+    codex_home = tmp_path / "custom-codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    until = dt.datetime(2026, 5, 12, tzinfo=dt.UTC)
+
+    options = build_options(days=1, until=until.isoformat(), config=tmp_path / "missing.toml")
+
+    assert options.session_root == codex_home / "sessions"
+    assert options.state_db == codex_home / "state_5.sqlite"
+    assert options.config_path == codex_home / "config.toml"
+
+
+def test_blank_codex_home_is_ignored(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CODEX_HOME", "   ")
+    until = dt.datetime(2026, 5, 12, tzinfo=dt.UTC)
+
+    options = build_options(days=1, until=until.isoformat(), config=tmp_path / "missing.toml")
+
+    assert options.session_root == Path.home() / ".codex" / "sessions"
+    assert options.state_db == Path.home() / ".codex" / "state_5.sqlite"
+    assert options.config_path == Path.home() / ".codex" / "config.toml"
 
 
 def test_build_options_rejects_invalid_choices(tmp_path) -> None:

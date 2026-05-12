@@ -165,6 +165,8 @@ class UsageEvent:
     service_tier: str
     tier_source: str
     thread: ThreadMeta
+    model_source: str = ""
+    model_is_fallback: bool = False
     usage_source: str = "last_token_usage"
     model_context_window: int = 0
     plan_type: str = ""
@@ -252,6 +254,52 @@ class TokenTotals:
 
 
 @dataclass
+class ModelBreakdown:
+    key: str
+    model: str
+    service_tier: str
+    totals: TokenTotals = field(default_factory=TokenTotals)
+    costs: CostTotals = field(default_factory=CostTotals)
+    cache_savings: CostTotals = field(default_factory=CostTotals)
+    plan_types: set[str] = field(default_factory=set)
+    usage_sources: set[str] = field(default_factory=set)
+    model_sources: set[str] = field(default_factory=set)
+    long_context_events: int = 0
+    unknown_model_events: int = 0
+    unknown_tier_events: int = 0
+    fallback_model_events: int = 0
+    first_seen: dt.datetime | None = None
+    last_seen: dt.datetime | None = None
+
+    def add_event(
+        self,
+        event: UsageEvent,
+        costs: CostTotals,
+        cache_savings: CostTotals,
+        long_context: bool,
+        unknown_model: bool,
+        unknown_tier: bool,
+    ) -> None:
+        self.totals.add_usage(event.usage)
+        self.costs.add(costs)
+        self.cache_savings.add(cache_savings)
+        if event.plan_type:
+            self.plan_types.add(event.plan_type)
+        if event.usage_source:
+            self.usage_sources.add(event.usage_source)
+        if event.model_source:
+            self.model_sources.add(event.model_source)
+        self.long_context_events += int(long_context)
+        self.unknown_model_events += int(unknown_model)
+        self.unknown_tier_events += int(unknown_tier)
+        self.fallback_model_events += int(event.model_is_fallback)
+        if self.first_seen is None or event.timestamp < self.first_seen:
+            self.first_seen = event.timestamp
+        if self.last_seen is None or event.timestamp > self.last_seen:
+            self.last_seen = event.timestamp
+
+
+@dataclass
 class Aggregate:
     key: str
     label: str
@@ -262,10 +310,13 @@ class Aggregate:
     service_tiers: set[str] = field(default_factory=set)
     plan_types: set[str] = field(default_factory=set)
     usage_sources: set[str] = field(default_factory=set)
+    model_sources: set[str] = field(default_factory=set)
     model_context_window: int = 0
     long_context_events: int = 0
     unknown_model_events: int = 0
     unknown_tier_events: int = 0
+    fallback_model_events: int = 0
+    model_breakdowns: dict[str, ModelBreakdown] = field(default_factory=dict)
     session_ids: set[str] = field(default_factory=set)
     project_paths: set[str] = field(default_factory=set)
     project_names: set[str] = field(default_factory=set)
@@ -297,6 +348,8 @@ class Aggregate:
             self.plan_types.add(event.plan_type)
         if event.usage_source:
             self.usage_sources.add(event.usage_source)
+        if event.model_source:
+            self.model_sources.add(event.model_source)
         if event.session_id:
             self.session_ids.add(event.session_id)
         if event.thread.cwd:
@@ -324,6 +377,17 @@ class Aggregate:
         self.long_context_events += int(long_context)
         self.unknown_model_events += int(unknown_model)
         self.unknown_tier_events += int(unknown_tier)
+        self.fallback_model_events += int(event.model_is_fallback)
+        breakdown_key = f"{event.model}\0{event.service_tier}"
+        breakdown = self.model_breakdowns.setdefault(
+            breakdown_key,
+            ModelBreakdown(
+                key=breakdown_key,
+                model=event.model,
+                service_tier=event.service_tier,
+            ),
+        )
+        breakdown.add_event(event, costs, cache_savings, long_context, unknown_model, unknown_tier)
 
 
 @dataclass(frozen=True)

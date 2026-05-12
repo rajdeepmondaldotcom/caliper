@@ -92,6 +92,13 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["totals"]["events"] == 1
     assert payload["totals"]["models"] == ["gpt-5.5"]
     assert payload["totals"]["service_tiers"] == ["standard"]
+    assert payload["totals"]["model_sources"] == ["turn_context"]
+    assert payload["totals"]["fallback_model_events"] == 0
+    assert payload["totals"]["model_breakdowns"][0]["model"] == "gpt-5.5"
+    assert payload["totals"]["model_breakdowns"][0]["service_tier"] == "standard"
+    assert payload["totals"]["model_breakdowns"][0]["events"] == 1
+    assert payload["totals"]["model_breakdowns"][0]["model_sources"] == ["turn_context"]
+    assert payload["totals"]["model_breakdowns"][0]["credits_exact"]
     assert payload["totals"]["subscription_plans"][0]["slug"] == "pro"
     assert payload["pricing"]["mode"] == "model"
     assert payload["subscription"]["plans"][0]["slug"] == "pro"
@@ -113,6 +120,7 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["projects"][0]["project_names"] == ["project-alpha"]
     assert payload["projects"][0]["git_origins"] == ["https://github.com/example/project-alpha"]
     assert payload["projects"][0]["git_branches"] == ["main"]
+    assert payload["projects"][0]["model_breakdowns"][0]["model"] == "gpt-5.5"
     assert payload["projects"][0]["first_seen"]
     assert payload["projects"][0]["last_seen"]
 

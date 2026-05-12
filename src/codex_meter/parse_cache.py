@@ -130,7 +130,8 @@ def _event_from_dict(raw: dict) -> UsageEvent:
     item["path"] = Path(str(item["path"]))
     item["usage"] = _usage_from_dict(item["usage"])
     item["thread"] = _thread_from_dict(item["thread"])
-    return UsageEvent(**item)
+    names = {field.name for field in fields(UsageEvent)}
+    return UsageEvent(**{key: value for key, value in item.items() if key in names})
 
 
 def _sample_to_dict(sample: RateLimitSample) -> dict:

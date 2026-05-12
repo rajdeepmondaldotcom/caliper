@@ -8,7 +8,12 @@ import pytest
 
 from codex_meter import parser
 from codex_meter.config import build_options
-from codex_meter.parse_cache import ParseCache, _thread_from_dict, default_cache_path
+from codex_meter.parse_cache import (
+    ParseCache,
+    _event_from_dict,
+    _thread_from_dict,
+    default_cache_path,
+)
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 
@@ -146,3 +151,24 @@ def test_parse_cache_thread_decode_ignores_future_metadata_keys() -> None:
     thread = _thread_from_dict({"cwd": "/tmp/project", "future_field": "ignored"})
 
     assert thread.cwd == "/tmp/project"
+
+
+def test_parse_cache_event_decode_ignores_future_metadata_keys() -> None:
+    event = _event_from_dict(
+        {
+            "timestamp": "2026-05-12T00:00:00+00:00",
+            "path": "/tmp/session.jsonl",
+            "session_id": "session",
+            "usage": {"input_tokens": 1, "total_tokens": 1},
+            "model": "gpt-5.5",
+            "service_tier": "standard",
+            "tier_source": "logged",
+            "thread": {"cwd": "/tmp/project"},
+            "model_source": "turn_context",
+            "model_is_fallback": False,
+            "future_event_key": "ignored",
+        }
+    )
+
+    assert event.model == "gpt-5.5"
+    assert event.model_source == "turn_context"

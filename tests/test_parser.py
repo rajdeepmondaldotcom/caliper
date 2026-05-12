@@ -50,6 +50,8 @@ def test_load_usage_streams_events_dedupes_and_joins_state(tmp_path) -> None:
     assert result.duplicates == 1
     assert result.events[0].thread.cwd == "/tmp/project-alpha"
     assert result.events[0].model == "gpt-5.5"
+    assert result.events[0].model_source == "turn_context"
+    assert result.events[0].model_is_fallback is False
     assert result.events[0].service_tier == "fast"
     assert result.tier_sources == {"logged": 1}
     assert result.plan_types == {"pro"}
@@ -352,6 +354,7 @@ def test_turn_context_cwd_tracks_workspace_without_state_db(tmp_path) -> None:
     result = load_usage(options)
 
     assert result.events[0].thread.cwd == "/tmp/workspace-from-jsonl"
+    assert result.events[0].model_source == "turn_context"
 
 
 def test_state_db_loader_reads_extended_thread_metadata(tmp_path) -> None:
@@ -437,6 +440,42 @@ def test_state_db_loader_reads_extended_thread_metadata(tmp_path) -> None:
     assert thread.agent_nickname == "Builder"
     assert thread.memory_mode == "enabled"
     assert thread.thread_source == "local"
+    assert result.events[0].model_source == "state-db"
+    assert result.events[0].model_is_fallback is False
+
+
+def test_missing_model_uses_default_model_with_fallback_flag(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-missing-model.jsonl",
+        [
+            token_event(
+                now,
+                {
+                    "input_tokens": 1000,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 100,
+                    "total_tokens": 1100,
+                },
+            )
+        ],
+    )
+
+    options = build_options(
+        days=1,
+        until=(now + dt.timedelta(seconds=1)).isoformat(),
+        session_root=session_root,
+        state_db=tmp_path / "missing.sqlite",
+        codex_config=tmp_path / "missing.toml",
+        default_model="gpt-5.4",
+    )
+    result = load_usage(options)
+
+    assert result.events[0].model == "gpt-5.4"
+    assert result.events[0].model_source == "default"
+    assert result.events[0].model_is_fallback is True
 
 
 def test_slash_fast_commands_update_service_tier(tmp_path) -> None:

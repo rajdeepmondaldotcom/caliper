@@ -18,6 +18,7 @@ from codex_meter.models import (
     Aggregate,
     CostTotals,
     LoadResult,
+    ModelBreakdown,
     RuntimeOptions,
     TokenTotals,
     decimal_string,
@@ -71,6 +72,11 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "plan_types": sorted(item.plan_types),
         "subscription_plans": subscription_plan_payload(item.plan_types),
         "usage_sources": sorted(item.usage_sources),
+        "model_sources": sorted(item.model_sources),
+        "fallback_model_events": item.fallback_model_events,
+        "model_breakdowns": [
+            model_breakdown_to_dict(row) for row in sorted_model_breakdowns(item)
+        ],
         "session_count": len(item.session_ids),
         "sessions": sorted(item.session_ids),
         "project_paths": sorted(item.project_paths),
@@ -96,11 +102,85 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
     }
 
 
+def sorted_model_breakdowns(item: Aggregate) -> list[ModelBreakdown]:
+    return sorted(
+        item.model_breakdowns.values(),
+        key=lambda row: (
+            -row.costs.adjusted_credits,
+            row.model,
+            row.service_tier,
+        ),
+    )
+
+
+def model_breakdown_to_dict(item: ModelBreakdown) -> dict:
+    return {
+        "key": item.key,
+        "model": item.model,
+        "service_tier": item.service_tier,
+        "events": item.totals.events,
+        "input_tokens": item.totals.input_tokens,
+        "cached_input_tokens": item.totals.cached_input_tokens,
+        "uncached_input_tokens": item.totals.uncached_input_tokens,
+        "output_tokens": item.totals.output_tokens,
+        "reasoning_output_tokens": item.totals.reasoning_output_tokens,
+        "total_tokens": item.totals.total_tokens,
+        "credits": float(item.costs.adjusted_credits),
+        "standard_credits": float(item.costs.standard_credits),
+        "api_dollars": float(item.costs.api_dollars),
+        "credits_exact": decimal_string(item.costs.adjusted_credits),
+        "standard_credits_exact": decimal_string(item.costs.standard_credits),
+        "api_dollars_exact": decimal_string(item.costs.api_dollars),
+        "cache_savings_credits": float(item.cache_savings.adjusted_credits),
+        "cache_savings_standard_credits": float(item.cache_savings.standard_credits),
+        "cache_savings_api_dollars": float(item.cache_savings.api_dollars),
+        "cache_savings_credits_exact": decimal_string(item.cache_savings.adjusted_credits),
+        "cache_savings_standard_credits_exact": decimal_string(
+            item.cache_savings.standard_credits
+        ),
+        "cache_savings_api_dollars_exact": decimal_string(item.cache_savings.api_dollars),
+        "plan_types": sorted(item.plan_types),
+        "usage_sources": sorted(item.usage_sources),
+        "model_sources": sorted(item.model_sources),
+        "long_context_events": item.long_context_events,
+        "unknown_model_events": item.unknown_model_events,
+        "unknown_tier_events": item.unknown_tier_events,
+        "fallback_model_events": item.fallback_model_events,
+        "pricing_status": model_breakdown_pricing_status(item),
+        "unpriced_events": item.costs.unpriced_events,
+        "api_unpriced_events": item.costs.api_unpriced_events,
+        "credit_unpriced_events": item.costs.credit_unpriced_events,
+        "estimated_events": model_breakdown_estimated_events(item),
+        "ambiguous_reasoning_events": item.costs.ambiguous_reasoning_events,
+        "local_rate_override_events": item.costs.local_override_events,
+        "first_seen": iso_z(item.first_seen) if item.first_seen else None,
+        "last_seen": iso_z(item.last_seen) if item.last_seen else None,
+    }
+
+
+def model_breakdown_estimated_events(item: ModelBreakdown) -> int:
+    return (
+        item.costs.estimated_events
+        + item.unknown_tier_events
+        + item.costs.ambiguous_reasoning_events
+        + item.fallback_model_events
+    )
+
+
+def model_breakdown_pricing_status(item: ModelBreakdown) -> str:
+    if item.costs.unpriced_events or item.unknown_model_events:
+        return "partial"
+    if model_breakdown_estimated_events(item):
+        return "estimated"
+    return "exact"
+
+
 def pricing_estimated_events(item: Aggregate) -> int:
     return (
         item.costs.estimated_events
         + item.unknown_tier_events
         + item.costs.ambiguous_reasoning_events
+        + item.fallback_model_events
     )
 
 
@@ -131,6 +211,11 @@ def pricing_warnings(item: Aggregate) -> list[str]:
     if item.costs.ambiguous_reasoning_events:
         warnings.append(
             f"{item.costs.ambiguous_reasoning_events:,} events had ambiguous reasoning token shape."
+        )
+    if item.fallback_model_events:
+        warnings.append(
+            f"{item.fallback_model_events:,} events used the configured default model because "
+            "no model was recorded."
         )
     return warnings
 

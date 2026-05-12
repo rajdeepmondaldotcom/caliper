@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import tomllib
 from pathlib import Path
 
@@ -8,11 +9,27 @@ from codex_meter.models import RuntimeOptions
 from codex_meter.pricing import normalize_service_tier
 from codex_meter.timeutil import load_timezone, local_timezone, parse_datetime
 
-DEFAULT_SESSION_ROOT = Path.home() / ".codex" / "sessions"
-DEFAULT_STATE_DB = Path.home() / ".codex" / "state_5.sqlite"
-DEFAULT_CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
 USER_CONFIG = Path.home() / ".config" / "codex-meter" / "config.toml"
 LOCAL_CONFIG = Path(".codex-meter.toml")
+
+
+def default_codex_home() -> Path:
+    raw = os.environ.get("CODEX_HOME", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".codex"
+
+
+def default_session_root() -> Path:
+    return default_codex_home() / "sessions"
+
+
+def default_state_db() -> Path:
+    return default_codex_home() / "state_5.sqlite"
+
+
+def default_codex_config() -> Path:
+    return default_codex_home() / "config.toml"
 
 
 def load_config(explicit_path: Path | None = None) -> dict:
@@ -142,9 +159,9 @@ def build_options(
     no_parse_cache_value = cfg_bool(loaded, "no_parse_cache", no_parse_cache, False)
 
     return RuntimeOptions(
-        session_root=cfg_path(loaded, "session_root", session_root, DEFAULT_SESSION_ROOT),
-        state_db=cfg_path(loaded, "state_db", state_db, DEFAULT_STATE_DB),
-        config_path=cfg_path(loaded, "codex_config", codex_config, DEFAULT_CODEX_CONFIG),
+        session_root=cfg_path(loaded, "session_root", session_root, default_session_root()),
+        state_db=cfg_path(loaded, "state_db", state_db, default_state_db()),
+        config_path=cfg_path(loaded, "codex_config", codex_config, default_codex_config()),
         start=start,
         end=end,
         timezone=timezone_value,

@@ -27,6 +27,8 @@ def _event(
     total_tokens: int = 1100,
     model: str = "gpt-5.5",
     service_tier: str = "standard",
+    model_source: str = "turn_context",
+    model_is_fallback: bool = False,
     cwd: str = "/repo/a",
     session_id: str = "sess-a",
     git_origin_url: str = "https://github.com/example/repo-a",
@@ -47,6 +49,8 @@ def _event(
         model=model,
         service_tier=service_tier,
         tier_source="logged",
+        model_source=model_source,
+        model_is_fallback=model_is_fallback,
         thread=ThreadMeta(
             cwd=cwd,
             git_origin_url=git_origin_url,
@@ -166,8 +170,43 @@ def test_aggregate_rows_keep_project_provenance(tmp_path) -> None:
     assert row.git_shas == {"abc123"}
     assert row.agent_roles == {"worker"}
     assert row.sources == {"cli"}
+    assert row.model_sources == {"turn_context"}
+    assert row.fallback_model_events == 0
+    assert len(row.model_breakdowns) == 1
+    breakdown = next(iter(row.model_breakdowns.values()))
+    assert breakdown.model == "gpt-5.5"
+    assert breakdown.service_tier == "standard"
+    assert breakdown.totals.events == 2
     assert row.first_seen == base
     assert row.last_seen == base + dt.timedelta(minutes=5)
+
+
+def test_aggregate_model_breakdowns_track_model_tier_and_fallback(tmp_path) -> None:
+    now = dt.datetime.now(tz=dt.UTC)
+    events = [
+        _event(now, model="gpt-5.5", service_tier="standard"),
+        _event(now, model="gpt-5.5", service_tier="fast"),
+        _event(
+            now,
+            model="gpt-5.4",
+            service_tier="standard",
+            model_source="default",
+            model_is_fallback=True,
+        ),
+    ]
+
+    total = aggregate_total(_result(events), _options(tmp_path))
+
+    assert total.model_sources == {"turn_context", "default"}
+    assert total.fallback_model_events == 1
+    assert set(total.model_breakdowns) == {
+        "gpt-5.5\0standard",
+        "gpt-5.5\0fast",
+        "gpt-5.4\0standard",
+    }
+    fallback = total.model_breakdowns["gpt-5.4\0standard"]
+    assert fallback.model_sources == {"default"}
+    assert fallback.fallback_model_events == 1
 
 
 def test_aggregate_model_mode_keys_combine_model_and_tier(tmp_path) -> None:
