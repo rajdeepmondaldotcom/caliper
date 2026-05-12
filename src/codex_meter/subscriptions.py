@@ -13,9 +13,7 @@ class SubscriptionPlan:
 
 
 PLAN_CATALOG: tuple[SubscriptionPlan, ...] = (
-    SubscriptionPlan(
-        "free", "ChatGPT Free", token_rate_card=False, limited_time_access=True
-    ),
+    SubscriptionPlan("free", "ChatGPT Free", token_rate_card=False, limited_time_access=True),
     SubscriptionPlan("go", "ChatGPT Go", token_rate_card=False, limited_time_access=True),
     SubscriptionPlan("plus", "ChatGPT Plus"),
     SubscriptionPlan("pro", "ChatGPT Pro"),

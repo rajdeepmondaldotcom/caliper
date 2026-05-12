@@ -74,9 +74,7 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "usage_sources": sorted(item.usage_sources),
         "model_sources": sorted(item.model_sources),
         "fallback_model_events": item.fallback_model_events,
-        "model_breakdowns": [
-            model_breakdown_to_dict(row) for row in sorted_model_breakdowns(item)
-        ],
+        "model_breakdowns": [model_breakdown_to_dict(row) for row in sorted_model_breakdowns(item)],
         "session_count": len(item.session_ids),
         "sessions": sorted(item.session_ids),
         "project_paths": sorted(item.project_paths),
@@ -135,9 +133,7 @@ def model_breakdown_to_dict(item: ModelBreakdown) -> dict:
         "cache_savings_standard_credits": float(item.cache_savings.standard_credits),
         "cache_savings_api_dollars": float(item.cache_savings.api_dollars),
         "cache_savings_credits_exact": decimal_string(item.cache_savings.adjusted_credits),
-        "cache_savings_standard_credits_exact": decimal_string(
-            item.cache_savings.standard_credits
-        ),
+        "cache_savings_standard_credits_exact": decimal_string(item.cache_savings.standard_credits),
         "cache_savings_api_dollars_exact": decimal_string(item.cache_savings.api_dollars),
         "plan_types": sorted(item.plan_types),
         "usage_sources": sorted(item.usage_sources),
