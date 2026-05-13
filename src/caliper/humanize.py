@@ -38,3 +38,24 @@ def short_table_label(text: str) -> str:
     if clean.startswith(("/", "~")):
         return Path(clean).name or clean
     return clean
+
+
+_SPARKLINE_BARS = "▁▂▃▄▅▆▇█"
+
+
+def sparkline(values: list[float]) -> str:
+    """Render a list of numbers as a Unicode block sparkline.
+
+    Returns the empty string for an empty input. All-equal inputs render
+    as the lowest bar repeated. Used by ``caliper live``, ``caliper
+    forecast``, and the Textual TUI.
+    """
+    if not values:
+        return ""
+    low = min(values)
+    high = max(values)
+    if high == low:
+        return _SPARKLINE_BARS[0] * len(values)
+    span = high - low
+    last = len(_SPARKLINE_BARS) - 1
+    return "".join(_SPARKLINE_BARS[round((value - low) / span * last)] for value in values)

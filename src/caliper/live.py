@@ -18,6 +18,7 @@ from rich.table import Table
 from rich.text import Text
 
 from caliper.aggregation import aggregate_total, event_cost
+from caliper.humanize import sparkline
 from caliper.models import LoadResult, RuntimeOptions
 from caliper.parser import load_usage
 from caliper.pricing import RateCard, load_rate_card
@@ -225,14 +226,10 @@ def _help_panel() -> Panel:
 
 
 def _sparkline(values: list[float]) -> str:
-    if not values:
-        return ""
-    bars = "▁▂▃▄▅▆▇█"
-    low = min(values)
-    high = max(values)
-    if high == low:
-        return bars[0] * len(values)
-    return "".join(bars[round((value - low) / (high - low) * (len(bars) - 1))] for value in values)
+    # Kept as a thin alias for in-module callers and any external code
+    # that imports the private name. New callers should import
+    # ``caliper.humanize.sparkline`` directly.
+    return sparkline(values)
 
 
 def _read_key() -> str:
