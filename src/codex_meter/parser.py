@@ -535,70 +535,139 @@ def _parse_session(
     previous_total_usage: Usage | None = None
     with handle:
         for line in handle:
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
+            event = _json_event_from_line(line)
+            if event is None:
                 continue
             current_meta, logged_tier, model_seen = update_context_from_event(
                 event, current_meta, logged_tier
             )
             if model_seen:
                 current_model_source = "turn_context"
-            if event.get("type") != "event_msg":
-                continue
-            payload = event.get("payload") or {}
-            if payload.get("type") != "token_count":
-                continue
-            event_time = parse_event_timestamp(event.get("timestamp") or "")
-            if event_time is None:
-                continue
-            info = payload.get("info") or {}
-            usage, previous_total_usage, usage_source, model_context_window, total_reset = (
-                token_usage_from_info(info if isinstance(info, dict) else {}, previous_total_usage)
-            )
-
-            rate_limits = payload.get("rate_limits") or {}
-            sample = (
-                rate_limit_sample(path=path, event_time=event_time, rate_limits=rate_limits)
-                if rate_limits
-                else None
-            )
-
-            if usage.is_zero():
-                yield ParsedSessionRecord(counter_reset=total_reset, sample=sample)
-                continue
-
-            model, model_source, model_is_fallback = model_for_event(
+            record, previous_total_usage = _record_from_token_count_event(
+                event,
+                path=path,
+                thread_meta=thread_meta,
                 current_meta=current_meta,
                 current_model_source=current_model_source,
-                thread_meta=thread_meta,
-                default_model=options.default_model,
-            )
-            tier, tier_source = service_tier_for_event(
-                path=path,
-                event_time=event_time,
-                logged_tier=logged_tier,
+                previous_total_usage=previous_total_usage,
                 options=options,
+                logged_tier=logged_tier,
                 config_tier=config_tier,
                 overrides=overrides,
             )
-            usage_event = UsageEvent(
-                timestamp=event_time,
+            if record is not None:
+                yield record
+
+
+def _json_event_from_line(line: str) -> dict | None:
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return event if isinstance(event, dict) else None
+
+
+def _record_from_token_count_event(
+    event: dict,
+    *,
+    path: Path,
+    thread_meta: ThreadMeta,
+    current_meta: ThreadMeta,
+    current_model_source: str,
+    previous_total_usage: Usage | None,
+    options: RuntimeOptions,
+    logged_tier: str,
+    config_tier: str,
+    overrides: list[TierOverride],
+) -> tuple[ParsedSessionRecord | None, Usage | None]:
+    if event.get("type") != "event_msg":
+        return None, previous_total_usage
+    payload = _event_payload(event)
+    if payload.get("type") != "token_count":
+        return None, previous_total_usage
+    event_time = parse_event_timestamp(event.get("timestamp") or "")
+    if event_time is None:
+        return None, previous_total_usage
+
+    info = payload.get("info") or {}
+    usage, new_total_usage, usage_source, model_context_window, total_reset = token_usage_from_info(
+        info if isinstance(info, dict) else {}, previous_total_usage
+    )
+    rate_limits = payload.get("rate_limits") or {}
+    sample = (
+        rate_limit_sample(path=path, event_time=event_time, rate_limits=rate_limits)
+        if rate_limits
+        else None
+    )
+    if usage.is_zero():
+        return ParsedSessionRecord(counter_reset=total_reset, sample=sample), new_total_usage
+
+    return (
+        ParsedSessionRecord(
+            event=_usage_event_from_token_count(
                 path=path,
-                session_id=session_id_from_path(path),
+                event_time=event_time,
                 usage=usage,
-                model=model,
-                service_tier=tier,
-                tier_source=tier_source,
-                thread=current_meta,
-                model_source=model_source,
-                model_is_fallback=model_is_fallback,
                 usage_source=usage_source,
                 model_context_window=model_context_window,
-                **rate_limit_fields(rate_limits),
-            )
-            yield ParsedSessionRecord(
-                event=usage_event,
-                counter_reset=total_reset,
-                sample=sample,
-            )
+                rate_limits=rate_limits,
+                thread_meta=thread_meta,
+                current_meta=current_meta,
+                current_model_source=current_model_source,
+                options=options,
+                logged_tier=logged_tier,
+                config_tier=config_tier,
+                overrides=overrides,
+            ),
+            counter_reset=total_reset,
+            sample=sample,
+        ),
+        new_total_usage,
+    )
+
+
+def _usage_event_from_token_count(
+    *,
+    path: Path,
+    event_time: dt.datetime,
+    usage: Usage,
+    usage_source: str,
+    model_context_window: int,
+    rate_limits: dict,
+    thread_meta: ThreadMeta,
+    current_meta: ThreadMeta,
+    current_model_source: str,
+    options: RuntimeOptions,
+    logged_tier: str,
+    config_tier: str,
+    overrides: list[TierOverride],
+) -> UsageEvent:
+    model, model_source, model_is_fallback = model_for_event(
+        current_meta=current_meta,
+        current_model_source=current_model_source,
+        thread_meta=thread_meta,
+        default_model=options.default_model,
+    )
+    tier, tier_source = service_tier_for_event(
+        path=path,
+        event_time=event_time,
+        logged_tier=logged_tier,
+        options=options,
+        config_tier=config_tier,
+        overrides=overrides,
+    )
+    return UsageEvent(
+        timestamp=event_time,
+        path=path,
+        session_id=session_id_from_path(path),
+        usage=usage,
+        model=model,
+        service_tier=tier,
+        tier_source=tier_source,
+        thread=current_meta,
+        model_source=model_source,
+        model_is_fallback=model_is_fallback,
+        usage_source=usage_source,
+        model_context_window=model_context_window,
+        **rate_limit_fields(rate_limits),
+    )
