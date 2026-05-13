@@ -109,6 +109,30 @@ def rates_payload(rates) -> dict | None:
     }
 
 
+def rate_card_payload(age_days: int) -> dict:
+    return {
+        "checked": [
+            {"name": source.name, "url": source.url, "checked": source.checked}
+            for source in PRICING_SOURCES
+        ],
+        "age_days": age_days,
+        "stale": age_days > 90,
+        "models": embedded_rate_snapshot(),
+    }
+
+
+def rate_card_records(payload: dict) -> list[dict]:
+    return [
+        {
+            "model": card["name"],
+            "fast_multiplier": card["fast_multiplier"],
+            "api_input": (card["api"] or {}).get("input", ""),
+            "credits_input": (card["credits"] or {}).get("input", ""),
+        }
+        for card in payload["models"]
+    ]
+
+
 def embedded_rate_snapshot() -> list[dict]:
     return [
         {

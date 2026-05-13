@@ -75,7 +75,12 @@ from codex_meter.pricing import (
     RateCard,
 )
 from codex_meter.prom_snapshot import build_prometheus_snapshot
-from codex_meter.rate_audit import fetch_rate_sources, fetched_rates_path, rates_payload
+from codex_meter.rate_audit import (
+    fetch_rate_sources,
+    fetched_rates_path,
+    rate_card_payload,
+    rate_card_records,
+)
 from codex_meter.render import format_int, pricing_status, pricing_warnings, render, render_limits
 from codex_meter.scenarios import (
     aggregate_interval,
@@ -853,53 +858,20 @@ def rates_show(
     _validate_format(output_format)
 
     age = rate_card_age_days()
-    stale = age > 90
-
-    payload = {
-        "checked": [
-            {"name": source.name, "url": source.url, "checked": source.checked}
-            for source in PRICING_SOURCES
-        ],
-        "age_days": age,
-        "stale": stale,
-        "models": [
-            {
-                "name": card.name,
-                "api": rates_payload(card.api_rates),
-                "credits": rates_payload(card.credit_rates),
-                "fast_multiplier": card.fast_multiplier,
-                "long_context": (
-                    {
-                        "threshold": card.long_context.threshold,
-                        "input_mult": card.long_context.input_mult,
-                        "output_mult": card.long_context.output_mult,
-                    }
-                    if card.long_context
-                    else None
-                ),
-            }
-            for card in MODEL_CARDS
-        ],
-    }
+    payload = rate_card_payload(age)
     if output_format == "json":
         typer.echo(json_dumps(payload))
         return
     if output_format in {"csv", "markdown"}:
-        records = [
-            {
-                "model": card["name"],
-                "fast_multiplier": card["fast_multiplier"],
-                "api_input": (card["api"] or {}).get("input", ""),
-                "credits_input": (card["credits"] or {}).get("input", ""),
-            }
-            for card in payload["models"]
-        ]
+        records = rate_card_records(payload)
         text = records_to_csv(records) if output_format == "csv" else records_to_markdown(records)
         typer.echo(text, nl=False)
         return
 
     console.print("[bold]Codex Meter - Rate Card[/bold]")
-    console.print(f"Age: {age} days{'  [red](stale; consider refreshing)[/red]' if stale else ''}")
+    console.print(
+        f"Age: {age} days{'  [red](stale; consider refreshing)[/red]' if payload['stale'] else ''}"
+    )
     for source in PRICING_SOURCES:
         console.print(f"- {source.name} (checked {source.checked}) — {source.url}")
     console.print()
