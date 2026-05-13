@@ -7,7 +7,12 @@ BudgetAlert results.
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
+
+from codex_meter.aggregation import aggregate_total
+from codex_meter.models import LoadResult, RuntimeOptions, decimal_string
+from codex_meter.pricing import RateCard
 
 VALID_PERIODS = ("daily", "weekly", "monthly")
 VALID_METRICS = ("credits", "api_dollars", "tokens")
@@ -60,6 +65,59 @@ def evaluate(budgets: list[Budget], usage: dict[str, float]) -> list[BudgetAlert
             )
         )
     return alerts
+
+
+def current_period_intervals(now: dt.datetime) -> dict[str, tuple[dt.datetime, dt.datetime]]:
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = day_start - dt.timedelta(days=day_start.weekday())
+    month_start = day_start.replace(day=1)
+    return {
+        "daily": (day_start, now),
+        "weekly": (week_start, now),
+        "monthly": (month_start, now),
+    }
+
+
+def usage_for_periods(
+    events, options: RuntimeOptions, rate_card: RateCard, now: dt.datetime
+) -> dict[str, float]:
+    usage: dict[str, float] = {}
+    for period, (start, end) in current_period_intervals(now).items():
+        scoped = [event for event in events if start <= event.timestamp < end]
+        result = LoadResult(
+            events=scoped,
+            duplicates=0,
+            tier_sources={},
+            plan_types=set(),
+            credit_samples=[],
+            warnings=[],
+        )
+        aggregate = aggregate_total(result, options, label=period, rate_card=rate_card)
+        usage[f"{period}.credits"] = aggregate.costs.adjusted_credits
+        usage[f"{period}.api_dollars"] = aggregate.costs.api_dollars
+        usage[f"{period}.tokens"] = float(aggregate.totals.total_tokens)
+    return usage
+
+
+def alert_records(
+    alerts: list[BudgetAlert],
+    usage: dict[str, float],
+    pricing_status: str,
+) -> list[dict]:
+    return [
+        {
+            "period": alert.budget.period,
+            "metric": alert.budget.metric,
+            "limit": alert.budget.limit,
+            "warn_at": alert.budget.warn_at,
+            "used": alert.used,
+            "used_exact": decimal_string(usage.get(alert.budget.key(), alert.used)),
+            "used_percent": alert.used_percent,
+            "severity": alert.severity,
+            "pricing_status": pricing_status,
+        }
+        for alert in alerts
+    ]
 
 
 def max_severity(alerts: list[BudgetAlert]) -> str:

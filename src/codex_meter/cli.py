@@ -27,10 +27,10 @@ from codex_meter.budgets import (
     SEVERITY_BREACH,
     SEVERITY_EXIT_CODE,
     SEVERITY_WARN,
-    Budget,
-    BudgetAlert,
+    alert_records,
     max_severity,
     parse_budgets_table,
+    usage_for_periods,
 )
 from codex_meter.budgets import (
     evaluate as evaluate_budgets,
@@ -59,7 +59,6 @@ from codex_meter.models import (
     Aggregate,
     LoadResult,
     RuntimeOptions,
-    decimal_string,
 )
 from codex_meter.output import (
     amount_fields,
@@ -1585,47 +1584,70 @@ budgets_app = typer.Typer(help="Inspect budget alerts (warn/breach) for the acti
 app.add_typer(budgets_app, name="budgets")
 
 
-def _current_period_intervals(now: dt.datetime) -> dict[str, tuple[dt.datetime, dt.datetime]]:
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = day_start - dt.timedelta(days=day_start.weekday())
-    month_start = day_start.replace(day=1)
-    return {
-        "daily": (day_start, now),
-        "weekly": (week_start, now),
-        "monthly": (month_start, now),
-    }
-
-
-def _usage_for_periods(
-    events, options: RuntimeOptions, rate_card: RateCard, now: dt.datetime
-) -> dict[str, float]:
-    from codex_meter.aggregation import aggregate_total
-
-    intervals = _current_period_intervals(now)
-    usage: dict[str, float] = {}
-    for period, (start, end) in intervals.items():
-        scoped = [event for event in events if start <= event.timestamp < end]
-        result = LoadResult(
-            events=scoped,
-            duplicates=0,
-            tier_sources={},
-            plan_types=set(),
-            credit_samples=[],
-            warnings=[],
-        )
-        aggregate = aggregate_total(result, options, label=period, rate_card=rate_card)
-        usage[f"{period}.credits"] = aggregate.costs.adjusted_credits
-        usage[f"{period}.api_dollars"] = aggregate.costs.api_dollars
-        usage[f"{period}.tokens"] = float(aggregate.totals.total_tokens)
-    return usage
-
-
 def _severity_style(severity: str) -> str:
     if severity == SEVERITY_BREACH:
         return "[red]breach[/red]"
     if severity == SEVERITY_WARN:
         return "[yellow]warn[/yellow]"
     return "[green]ok[/green]"
+
+
+def _render_budget_report(
+    *,
+    output_format: str,
+    records: list[dict],
+    alerts,
+    worst: str,
+    pricing_status_value: str,
+    warnings: list[str],
+) -> None:
+    if output_format == "json":
+        typer.echo(
+            json_dumps(
+                {
+                    "alerts": records,
+                    "max_severity": worst,
+                    "pricing_status": pricing_status_value,
+                    "pricing_warnings": warnings,
+                }
+            )
+        )
+        raise typer.Exit(SEVERITY_EXIT_CODE[worst])
+
+    if output_format == "csv":
+        typer.echo(records_to_csv(records), nl=False)
+        raise typer.Exit(SEVERITY_EXIT_CODE[worst])
+
+    if output_format == "markdown":
+        typer.echo(records_to_markdown(records), nl=False)
+        raise typer.Exit(SEVERITY_EXIT_CODE[worst])
+
+    _render_budget_table(alerts, worst, warnings)
+    raise typer.Exit(SEVERITY_EXIT_CODE[worst])
+
+
+def _render_budget_table(alerts, worst: str, warnings: list[str]) -> None:
+    console.print("[bold]Codex Meter - Budgets[/bold]")
+    for warning in warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
+    table = Table()
+    table.add_column("Period")
+    table.add_column("Metric")
+    table.add_column("Used", justify="right")
+    table.add_column("Limit", justify="right")
+    table.add_column("%", justify="right")
+    table.add_column("Status")
+    for alert in alerts:
+        table.add_row(
+            alert.budget.period,
+            alert.budget.metric,
+            f"{alert.used:,.2f}",
+            f"{alert.budget.limit:,.2f}",
+            f"{alert.used_percent:,.1f}%",
+            _severity_style(alert.severity),
+        )
+    console.print(table)
+    console.print(f"Max severity: {_severity_style(worst)}")
 
 
 @budgets_app.command("check")
@@ -1648,7 +1670,7 @@ def budgets_check(
         raise _exit_error(str(exc)) from exc
     raw = loaded.get("budgets") or {}
     try:
-        budget_list: list[Budget] = parse_budgets_table(raw if isinstance(raw, dict) else {})
+        budget_list = parse_budgets_table(raw if isinstance(raw, dict) else {})
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
@@ -1681,67 +1703,18 @@ def budgets_check(
     status = pricing_status(total)
     warnings = pricing_warnings(total)
     now = dt.datetime.now(tz=local_timezone())
-    usage = _usage_for_periods(result.events, options, rate_card, now)
-    alerts: list[BudgetAlert] = evaluate_budgets(budget_list, usage)
+    usage = usage_for_periods(result.events, options, rate_card, now)
+    alerts = evaluate_budgets(budget_list, usage)
     worst = max_severity(alerts)
-    alert_records = [
-        {
-            "period": alert.budget.period,
-            "metric": alert.budget.metric,
-            "limit": alert.budget.limit,
-            "warn_at": alert.budget.warn_at,
-            "used": alert.used,
-            "used_exact": decimal_string(usage.get(alert.budget.key(), alert.used)),
-            "used_percent": alert.used_percent,
-            "severity": alert.severity,
-            "pricing_status": status,
-        }
-        for alert in alerts
-    ]
-
-    if output_format == "json":
-        typer.echo(
-            json_dumps(
-                {
-                    "alerts": alert_records,
-                    "max_severity": worst,
-                    "pricing_status": status,
-                    "pricing_warnings": warnings,
-                }
-            )
-        )
-        raise typer.Exit(SEVERITY_EXIT_CODE[worst])
-
-    if output_format == "csv":
-        typer.echo(records_to_csv(alert_records), nl=False)
-        raise typer.Exit(SEVERITY_EXIT_CODE[worst])
-
-    if output_format == "markdown":
-        typer.echo(records_to_markdown(alert_records), nl=False)
-        raise typer.Exit(SEVERITY_EXIT_CODE[worst])
-
-    console.print("[bold]Codex Meter - Budgets[/bold]")
-    for warning in warnings:
-        console.print(f"[yellow]Warning:[/yellow] {warning}")
-    table = Table()
-    table.add_column("Period")
-    table.add_column("Metric")
-    table.add_column("Used", justify="right")
-    table.add_column("Limit", justify="right")
-    table.add_column("%", justify="right")
-    table.add_column("Status")
-    for alert in alerts:
-        table.add_row(
-            alert.budget.period,
-            alert.budget.metric,
-            f"{alert.used:,.2f}",
-            f"{alert.budget.limit:,.2f}",
-            f"{alert.used_percent:,.1f}%",
-            _severity_style(alert.severity),
-        )
-    console.print(table)
-    console.print(f"Max severity: {_severity_style(worst)}")
-    raise typer.Exit(SEVERITY_EXIT_CODE[worst])
+    records = alert_records(alerts, usage, status)
+    _render_budget_report(
+        output_format=output_format,
+        records=records,
+        alerts=alerts,
+        worst=worst,
+        pricing_status_value=status,
+        warnings=warnings,
+    )
 
 
 @app.command()
