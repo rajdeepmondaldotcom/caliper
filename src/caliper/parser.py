@@ -26,6 +26,7 @@ from caliper.models import (
 )
 from caliper.normalize import normalize_model, normalize_tier
 from caliper.parse_cache import ParseCache
+from caliper.progress import NULL_PROGRESS, ParseProgress
 from caliper.timeutil import parse_datetime, parse_event_timestamp
 
 PARSER_CACHE_VERSION = 6
@@ -498,7 +499,10 @@ def _rate_limit_window_fields(prefix: str, raw_window: object) -> dict:
     }
 
 
-def load_codex_usage(options: RuntimeOptions) -> LoadResult:
+def load_codex_usage(
+    options: RuntimeOptions,
+    progress: ParseProgress = NULL_PROGRESS,
+) -> LoadResult:
     start_utc = options.start.astimezone(dt.UTC)
     end_utc = options.end.astimezone(dt.UTC)
     config_tier = current_config_service_tier(options.config_path)
@@ -518,6 +522,7 @@ def load_codex_usage(options: RuntimeOptions) -> LoadResult:
             )
             signature = _parse_cache_signature(options, config_tier, overrides, thread_meta)
             parsed = None
+            cache_used = False
             if cache:
                 get_records = getattr(cache, "get_records", None)
                 if get_records is not None:
@@ -526,6 +531,7 @@ def load_codex_usage(options: RuntimeOptions) -> LoadResult:
                     parsed = cache.get(path, signature)
                     if parsed is not None and get_records is not None:
                         cache.put_records(path, signature, parsed, vendor=VENDOR_OPENAI_CODEX)
+                cache_used = parsed is not None
             if parsed is None:
                 parsed = list(
                     _parse_session(
@@ -544,6 +550,10 @@ def load_codex_usage(options: RuntimeOptions) -> LoadResult:
                         cache.put(path, signature, parsed)
             for record in parsed:
                 accumulator.add_record(path, record)
+            if cache_used:
+                progress.cache_hit(path)
+            else:
+                progress.file_done(path)
     finally:
         if cache is not None:
             cache.close()
@@ -590,7 +600,10 @@ def _parse_cache_signature(
     return json.dumps(payload, sort_keys=True)
 
 
-def load_usage(options: RuntimeOptions) -> LoadResult:
+def load_usage(
+    options: RuntimeOptions,
+    progress: ParseProgress = NULL_PROGRESS,
+) -> LoadResult:
     from caliper.evidence import warnings_from_parser_issues
     from caliper.vendors import enabled_vendors
 
@@ -602,8 +615,16 @@ def load_usage(options: RuntimeOptions) -> LoadResult:
     warnings: list[str] = []
     parser_issues = []
     vendor_stats: dict[str, VendorParseStats] = {}
-    for vendor in enabled_vendors(options):
-        result = vendor.parse(options)
+    vendors = enabled_vendors(options)
+    total_files = 0
+    for vendor in vendors:
+        try:
+            total_files += sum(1 for _ in vendor.discover(options))
+        except OSError:
+            continue
+    progress.starting(total_files)
+    for vendor in vendors:
+        result = vendor.parse(options, progress=progress)
         events.extend(result.events)
         duplicates += result.duplicates
         for key, value in result.tier_sources.items():
@@ -620,6 +641,7 @@ def load_usage(options: RuntimeOptions) -> LoadResult:
     events.sort(key=lambda event: event.timestamp)
     credit_samples.sort(key=lambda sample: sample.timestamp)
     warnings.extend(warnings_from_parser_issues(parser_issues))
+    progress.finished()
     return LoadResult(
         events=events,
         duplicates=duplicates,

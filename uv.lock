@@ -55,7 +55,7 @@ dev = [
 requires-dist = [
     { name = "platformdirs", specifier = ">=4.3" },
     { name = "prometheus-client", marker = "extra == 'prom'", specifier = ">=0.20" },
-    { name = "rich", specifier = ">=13.7" },
+    { name = "rich", specifier = ">=14.2.0" },
     { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["prom"]

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from caliper.models import LoadResult, RuntimeOptions
+from caliper.progress import NULL_PROGRESS, ParseProgress
 
 
 class VendorParser(Protocol):
@@ -20,7 +21,11 @@ class VendorParser(Protocol):
 
     def discover(self, options: RuntimeOptions) -> Iterable[Path]: ...
 
-    def parse(self, options: RuntimeOptions) -> LoadResult: ...
+    def parse(
+        self,
+        options: RuntimeOptions,
+        progress: ParseProgress = NULL_PROGRESS,
+    ) -> LoadResult: ...
 
 
 VENDORS: dict[str, VendorParser] = {}

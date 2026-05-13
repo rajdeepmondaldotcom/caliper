@@ -19,6 +19,7 @@ from caliper.models import (
 )
 from caliper.normalize import normalize_model, normalize_tier
 from caliper.parse_cache import ParseCache
+from caliper.progress import NULL_PROGRESS, ParseProgress
 from caliper.timeutil import parse_event_timestamp
 
 SUPPORTED_SCHEMAS = ("1",)
@@ -41,7 +42,11 @@ class ClaudeCodeParser:
             files.extend(_jsonl_files(projects))
         return sorted(set(files))
 
-    def parse(self, options: RuntimeOptions) -> LoadResult:
+    def parse(
+        self,
+        options: RuntimeOptions,
+        progress: ParseProgress = NULL_PROGRESS,
+    ) -> LoadResult:
         start = options.start.astimezone(dt.UTC)
         end = options.end.astimezone(dt.UTC)
         events: list[UsageEvent] = []
@@ -62,6 +67,9 @@ class ClaudeCodeParser:
                     cached_events, _supported_paths, _unsupported_paths, paths_to_parse = cached
                     events.extend(cached_events)
                     files_with_events += len({event.path for event in cached_events})
+                    cached_paths = set(paths) - set(paths_to_parse)
+                    for cached_path in cached_paths:
+                        progress.cache_hit(cached_path)
             for path in paths_to_parse:
                 try:
                     parsed = _parse_cached_session(
@@ -73,9 +81,11 @@ class ClaudeCodeParser:
                     )
                 except OSError as exc:
                     warnings.append(f"Claude Code session unreadable: {path}: {exc}")
+                    progress.file_done(path)
                     continue
                 files_with_events += int(bool(parsed))
                 events.extend(parsed)
+                progress.file_done(path)
         finally:
             if cache is not None:
                 cache.close()

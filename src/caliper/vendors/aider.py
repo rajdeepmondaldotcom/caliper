@@ -19,6 +19,7 @@ from caliper.models import (
     VendorParseStats,
 )
 from caliper.parse_cache import ParseCache
+from caliper.progress import NULL_PROGRESS, ParseProgress
 
 SUPPORTED_VERSIONS = ("inline-cost-v1",)
 PARSER_CACHE_SIGNATURE = json.dumps(
@@ -45,7 +46,11 @@ class AiderParser:
             return []
         return sorted(root.glob("**/.aider.chat.history.md"))
 
-    def parse(self, options: RuntimeOptions) -> LoadResult:
+    def parse(
+        self,
+        options: RuntimeOptions,
+        progress: ParseProgress = NULL_PROGRESS,
+    ) -> LoadResult:
         start = options.start.astimezone(dt.UTC)
         end = options.end.astimezone(dt.UTC)
         cache = ParseCache.default() if options.parse_cache else None
@@ -68,6 +73,8 @@ class AiderParser:
                     events.extend(cached_events)
                     files_with_events += len({event.path for event in cached_events})
                     unsupported_paths.extend(sorted(cached_unsupported))
+                    for cached_path in set(paths) - set(paths_to_parse):
+                        progress.cache_hit(cached_path)
             for path in paths_to_parse:
                 parsed, _has_supported_usage, unsupported = _parse_cached_history(
                     path,
@@ -79,6 +86,7 @@ class AiderParser:
                     unsupported_paths.append(path)
                 files_with_events += int(bool(parsed))
                 events.extend(parsed)
+                progress.file_done(path)
         finally:
             if cache is not None:
                 cache.close()
