@@ -400,10 +400,11 @@ def render_table(
     rows: list[Aggregate],
     title: str,
     rate_card: RateCard | None = None,
+    total: Aggregate | None = None,
 ) -> str:
     buffer = io.StringIO()
     console = _make_console(buffer, options)
-    total = aggregate_total(result, options, rate_card=rate_card or _rate_card(options))
+    total = total or aggregate_total(result, options, rate_card=rate_card or _rate_card(options))
     _print_report_header(console, result, options, title, total)
     console.print(_usage_table(rows, total, options))
     console.print()
@@ -633,6 +634,7 @@ def render(
     command: str,
     output_format: str,
     output: Path | None,
+    total: Aggregate | None = None,
 ) -> None:
     card = _rate_card(options)
     if output_format == "json":
@@ -642,7 +644,14 @@ def render(
     elif output_format == "markdown":
         text = render_markdown(rows, options.show_prompts)
     else:
-        text = render_table(result, options, rows, f"Caliper - {command.title()}", rate_card=card)
+        text = render_table(
+            result,
+            options,
+            rows,
+            f"Caliper - {command.title()}",
+            rate_card=card,
+            total=total,
+        )
     write_output(text, output)
 
 

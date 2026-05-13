@@ -6,8 +6,10 @@ import datetime as dt
 import io
 import json
 import subprocess  # nosec
+import sys
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
@@ -23,6 +25,7 @@ from caliper.aggregation import (
     aggregate_daily_instances,
     aggregate_model_mode,
     aggregate_monthly,
+    aggregate_overview_windows,
     aggregate_projects,
     aggregate_sessions,
     aggregate_total,
@@ -726,24 +729,33 @@ def _run_overview(values: dict) -> None:
         longest_options = build_options(**option_values)
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
-    longest_result = load_usage(longest_options)
+    with _interactive_status("Loading 90 days of usage...", output_format, values["output"]):
+        longest_result = load_usage(longest_options)
     rate_card = load_rate_card(longest_options)
-    rows: list[Aggregate] = []
-    for days in (7, 30, 90):
-        start = now - dt.timedelta(days=days)
-        events = [event for event in longest_result.events if start <= event.timestamp < now]
-        window = LoadResult(
-            events=events,
-            duplicates=0,
-            tier_sources=longest_result.tier_sources,
-            plan_types=longest_result.plan_types,
-            credit_samples=[],
-            warnings=longest_result.warnings,
+    with _interactive_status("Aggregating overview windows...", output_format, values["output"]):
+        rows, total = aggregate_overview_windows(
+            longest_result,
+            longest_options,
+            [(f"Last {days} days", now - dt.timedelta(days=days)) for days in (7, 30, 90)],
+            rate_card=rate_card,
+            detailed=output_format == "json",
         )
-        rows.append(
-            aggregate_total(window, longest_options, label=f"Last {days} days", rate_card=rate_card)
-        )
-    render(longest_result, longest_options, rows, "overview", output_format, values["output"])
+    render(
+        longest_result,
+        longest_options,
+        rows,
+        "overview",
+        output_format,
+        values["output"],
+        total=total,
+    )
+
+
+def _interactive_status(message: str, output_format: str, output: Path | None):
+    if output is not None or output_format != "table" or not sys.stderr.isatty():
+        return nullcontext()
+    Console(stderr=True).print(f"[dim]{message}[/dim]")
+    return nullcontext()
 
 
 @app.command()

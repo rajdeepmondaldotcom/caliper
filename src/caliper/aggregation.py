@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Callable
 
 from caliper.models import (
@@ -137,6 +138,71 @@ def aggregate_total(
         result.events, lambda _event: ("total", label), options, rate_card=rate_card
     )
     return items[0] if items else Aggregate(key="total", label=label)
+
+
+def aggregate_overview_windows(
+    result: LoadResult,
+    options: RuntimeOptions,
+    windows: list[tuple[str, dt.datetime]],
+    rate_card: RateCard | None = None,
+    *,
+    detailed: bool = True,
+) -> tuple[list[Aggregate], Aggregate]:
+    card = rate_card or load_rate_card(options)
+    rows = [Aggregate(key="total", label=label) for label, _start in windows]
+    total = Aggregate(key="total", label="Total")
+    for event in result.events:
+        costs, long_context, unknown_model = event_cost(card, event)
+        cache_savings = event_cache_savings(card, event)
+        unknown_tier = event.tier_source in {"current-config", "assumed"}
+        add = _add_detailed_event if detailed else _add_summary_event
+        add(total, event, costs, cache_savings, long_context, unknown_model, unknown_tier)
+        for row, (_label, start) in zip(rows, windows, strict=True):
+            if start <= event.timestamp < options.end:
+                add(row, event, costs, cache_savings, long_context, unknown_model, unknown_tier)
+    return rows, total
+
+
+def _add_detailed_event(
+    item: Aggregate,
+    event: UsageEvent,
+    costs: CostTotals,
+    cache_savings: CostTotals,
+    long_context: bool,
+    unknown_model: bool,
+    unknown_tier: bool,
+) -> None:
+    item.add_event(event, costs, cache_savings, long_context, unknown_model, unknown_tier)
+
+
+def _add_summary_event(
+    item: Aggregate,
+    event: UsageEvent,
+    costs: CostTotals,
+    cache_savings: CostTotals,
+    long_context: bool,
+    unknown_model: bool,
+    unknown_tier: bool,
+) -> None:
+    item.totals.add_usage(event.usage)
+    item.costs.add(costs)
+    item.cache_savings.add(cache_savings)
+    if event.model:
+        item.models.add(event.model)
+    if event.vendor:
+        item.vendors.add(event.vendor)
+    if event.service_tier:
+        item.service_tiers.add(event.service_tier)
+    if event.plan_type:
+        item.plan_types.add(event.plan_type)
+    if event.usage_source:
+        item.usage_sources.add(event.usage_source)
+    if event.model_source:
+        item.model_sources.add(event.model_source)
+    item.long_context_events += int(long_context)
+    item.unknown_model_events += int(unknown_model)
+    item.unknown_tier_events += int(unknown_tier)
+    item.fallback_model_events += int(event.model_is_fallback)
 
 
 def aggregate_daily(
