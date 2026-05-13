@@ -1,0 +1,85 @@
+---
+title: Concepts
+description: The event model, pricing, tier inference, and privacy invariants behind Caliper.
+---
+
+This page exists because the numbers Caliper prints are only useful if you
+trust how they were produced. Five concepts. Each one is a constraint, not a
+feature.
+
+## The unified event
+
+Codex, Claude Code, Cursor, and Aider each write logs in different shapes.
+Caliper parses them and projects every line into the same frozen dataclass:
+
+```
+vendor, model, service_tier, project, session_id,
+timestamp, token counts, cache counts, pricing source,
+git SHA (where present), evidence source
+```
+
+Frozen means: once an event is built, it is not mutated. The aggregators
+group, sum, and price. They never edit. This is what makes "cost per PR"
+fall out of one filter.
+
+## Pricing is sourced, not guessed
+
+Money is computed in `Decimal`. The embedded rate card ships with a
+`checked` date for every source URL. `caliper doctor` warns when the rate
+card is more than 30 days old and fails past 90.
+
+When a source separates cached input, cache creation, output, and reasoning
+tokens, Caliper bills them separately. Long-context multipliers apply per
+model where the source documents them.
+
+Unknown or partial pricing is surfaced as a warning, not silently guessed.
+If you want to match an invoice exactly, pin a local rate card:
+
+```bash
+caliper daily --rate-card-file ./rates.json
+```
+
+## Service-tier precedence
+
+Cost depends on which tier the request was billed under. Caliper uses a
+fixed precedence chain to decide:
+
+1. CLI flag (`--service-tier`).
+2. `--tier-overrides` JSON file.
+3. Tier recorded in the log line.
+4. Tier in your current `~/.codex/config.toml`.
+5. The assumed standard tier.
+
+Every event records which source resolved its tier. `caliper doctor` and
+the JSON outputs show counts by source so you can see when too many events
+are running on assumed tiers.
+
+## Redaction is on by default
+
+Prompts and titles are redacted in default output. Pass `--show-prompts`
+when you want them. JSON output never leaks session titles when redaction
+is on. It falls back to session IDs.
+
+The privacy invariant is tested. If a future change accidentally leaks
+prompt content into the event representation, the test fails.
+
+## Offline is the default code path
+
+The only network call in the whole codebase is the opt-in pricing refresh,
+gated by `--allow-network`. There is no telemetry, no upload, no
+authentication step.
+
+If you do not trust the claim, read `src/caliper/parser.py` and
+`src/caliper/parse_cache.py`. They are short on purpose. The pricing
+refresh sits behind a single chokepoint in `src/caliper/pricing_catalog.py`.
+
+## Where this leaves you
+
+- You can attribute cost to a PR, a commit, or a project without a hosted
+  service.
+- You can match an invoice exactly by pinning a rate card.
+- You can fail CI when cost crosses a threshold.
+- You can do all of the above without logging in anywhere.
+
+If something on this page is wrong, open an issue. Each concept here is a
+claim you can verify by reading one short module.

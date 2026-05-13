@@ -1,0 +1,93 @@
+---
+title: Quickstart
+description: Install Caliper, run three commands, get a per-PR cost receipt.
+---
+
+This page is the fast path. Three commands, three real outputs. If anything
+looks wrong, run `caliper doctor` and the table will tell you what to fix.
+
+## 1. Install
+
+```bash
+uvx --from caliper-ai caliper           # zero-install, recommended
+uv tool install caliper-ai              # persistent install
+pipx install caliper-ai
+python -m pip install caliper-ai
+```
+
+Python 3.11 or newer. The PyPI distribution is `caliper-ai`. The command and
+the Python package are both `caliper`.
+
+## 2. Run the overview
+
+```bash
+caliper overview
+```
+
+This is the rolling 7, 30, and 90 day cost summary. It is the canonical
+"do I have a problem" view.
+
+## 3. See what each project cost
+
+```bash
+caliper project --lookback-days 30
+```
+
+Cost is grouped by working directory. The rows answer "which repo spent
+what" without naming anyone or reading any private file content.
+
+## 4. See what each PR cost
+
+```bash
+caliper pr 42
+```
+
+`caliper pr <N>` resolves the PR commits with `gh` and filters local events
+whose recorded git SHA matches those commits. If the PR cannot be resolved,
+pass an explicit range:
+
+```bash
+caliper pr --git-range main...feature-branch
+```
+
+The same shape works per commit:
+
+```bash
+caliper commit abc1234
+```
+
+## 5. Gate CI on cost
+
+Add a `[budgets]` table to `.caliper.toml`:
+
+```toml
+[budgets]
+daily_credits = 25000
+weekly_credits = 100000
+monthly_api_dollars = 500
+```
+
+Then in your CI step:
+
+```bash
+caliper budgets check
+```
+
+Exit `0` ok. Exit `1` warn. Exit `2` breach. The exit code is the contract.
+
+## 6. If something looks wrong
+
+```bash
+caliper doctor
+```
+
+`doctor` prints a table of every check Caliper runs against your local
+environment: data paths, rate-card age, clock skew, parser warnings. The
+overall row at the bottom is the verdict.
+
+## What to read next
+
+- [Concepts](/concepts) for how the event model, pricing, tier inference,
+  and redaction work.
+- [GitHub README](https://github.com/rajdeepmondaldotcom/caliper) for the
+  full command surface and FAQ.
