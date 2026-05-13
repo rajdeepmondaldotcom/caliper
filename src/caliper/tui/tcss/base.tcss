@@ -1,7 +1,43 @@
-/* Caliper TUI — base layer. Real themes register in a later commit. */
+/* Caliper TUI base stylesheet.
+
+   Tokens come from the active Textual theme; we layer typography and
+   spacing rules on top so every screen reads with the same rhythm.
+   Real themed colors (slate / parchment / colorblind / monochrome) are
+   registered in a later commit; for now the shell relies on Textual's
+   built-in palette via App.theme.
+*/
 
 Screen {
     background: $surface;
+}
+
+Header {
+    background: $primary 40%;
+    color: $foreground;
+}
+
+Footer {
+    background: $primary 20%;
+}
+
+#cards {
+    height: 7;
+    margin: 1 1 0 1;
+}
+
+#windows {
+    height: 9;
+    margin: 0 1;
+}
+
+#insights {
+    margin: 0 1 1 1;
+}
+
+#recent {
+    margin: 0 1 1 1;
+    padding: 1 2;
+    border: round $primary 30%;
 }
 
 .placeholder {
