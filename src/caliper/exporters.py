@@ -37,8 +37,7 @@ def session_compat_json(
             "inputTokens": event.usage.uncached_input_tokens,
             "outputTokens": event.usage.output_tokens,
             "cacheCreationTokens": (
-                event.usage.cache_creation_input_tokens
-                + event.usage.cache_creation_input_1h_tokens
+                event.usage.cache_creation_input_tokens + event.usage.cache_creation_input_1h_tokens
             ),
             "cacheReadTokens": event.usage.cache_read_input_tokens,
             "model": event.raw_model or event.model or "unknown",
