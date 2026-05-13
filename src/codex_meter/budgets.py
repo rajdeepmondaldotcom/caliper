@@ -146,27 +146,33 @@ def parse_budgets_table(table: dict) -> list[Budget]:
 
     budgets: list[Budget] = []
     for key, value in table.items():
-        if isinstance(value, dict) and key in VALID_PERIODS:
-            warn_at = float(value.get("warn_at", 0.8))
-            for metric, limit in value.items():
-                if metric == "warn_at":
-                    continue
-                if metric in VALID_METRICS:
-                    budgets.append(
-                        Budget(
-                            period=key,
-                            metric=metric,
-                            limit=float(limit),
-                            warn_at=warn_at,
-                        )
-                    )
-            continue
-        if not isinstance(value, (int, float)):
-            continue
-        period, metric = _split_flat_key(key)
-        if period and metric:
-            budgets.append(Budget(period=period, metric=metric, limit=float(value)))
+        budgets.extend(_budgets_from_table_entry(key, value))
     return budgets
+
+
+def _budgets_from_table_entry(key: str, value: object) -> list[Budget]:
+    if isinstance(value, dict) and key in VALID_PERIODS:
+        return _nested_budgets(key, value)
+    if isinstance(value, (int, float)):
+        budget = _flat_budget(key, value)
+        return [budget] if budget is not None else []
+    return []
+
+
+def _nested_budgets(period: str, value: dict) -> list[Budget]:
+    warn_at = float(value.get("warn_at", 0.8))
+    return [
+        Budget(period=period, metric=metric, limit=float(limit), warn_at=warn_at)
+        for metric, limit in value.items()
+        if metric in VALID_METRICS
+    ]
+
+
+def _flat_budget(key: str, value: float) -> Budget | None:
+    period, metric = _split_flat_key(key)
+    if not period or not metric:
+        return None
+    return Budget(period=period, metric=metric, limit=float(value))
 
 
 def _split_flat_key(key: str) -> tuple[str, str]:
