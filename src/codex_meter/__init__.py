@@ -29,7 +29,7 @@ class _CompatLoader(importlib.abc.Loader):
         sys.modules[spec.name] = target
         return target
 
-    def exec_module(self, module) -> None:
+    def exec_module(self, _module) -> None:
         return None
 
 
@@ -38,6 +38,8 @@ class _CompatFinder(importlib.abc.MetaPathFinder):
 
     def find_spec(self, fullname: str, path=None, target=None):
         if not fullname.startswith(_COMPAT_PREFIX):
+            return None
+        if fullname == f"{_COMPAT_PREFIX}__main__":
             return None
         target_name = f"{_TARGET_PREFIX}{fullname.removeprefix(_COMPAT_PREFIX)}"
         target_spec = importlib.util.find_spec(target_name)

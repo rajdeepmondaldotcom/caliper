@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib
+import subprocess
+import sys
 
 import caliper
 import caliper.cli
@@ -31,3 +33,15 @@ def test_codex_meter_cli_aliases_caliper_cli() -> None:
 
     assert legacy_cli is caliper.cli
     assert legacy_cli.app is caliper.cli.app
+
+
+def test_codex_meter_module_entrypoint_runs_help() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "codex_meter", "--help"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Usage" in result.stdout
