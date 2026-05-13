@@ -310,3 +310,20 @@ def test_parse_cache_event_decode_ignores_future_metadata_keys() -> None:
 
     assert event.model == "gpt-5.5"
     assert event.model_source == "turn_context"
+
+
+def test_parse_cache_clear_removes_rows(tmp_path) -> None:
+    cache = ParseCache(tmp_path / "cache.sqlite")
+    session_path = tmp_path / "session.jsonl"
+    session_path.write_text("{}\n")
+    cache.put(session_path, "sig", [])
+    removed = cache.clear()
+    assert removed >= 1
+    assert cache.get(session_path, "sig") is None
+    cache.close()
+
+
+def test_parse_cache_clear_on_empty_cache_returns_zero(tmp_path) -> None:
+    cache = ParseCache(tmp_path / "empty.sqlite")
+    assert cache.clear() == 0
+    cache.close()

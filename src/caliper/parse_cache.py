@@ -495,6 +495,28 @@ class ParseCache:
     def stats(self) -> CacheStats:
         return CacheStats(path=self.path, hits=self.hits, misses=self.misses)
 
+    def clear(self) -> int:
+        """Drop every cached row across all tables and vacuum the file.
+
+        Returns the number of rows removed. Used by the doctor "Rebuild
+        parse cache" action in the Textual TUI and by users who want to
+        force a re-parse without removing the cache file by hand.
+        """
+        tables = (
+            "parsed_sessions",
+            "parsed_vendor_events",
+            "indexed_parse_files",
+            "indexed_parse_events",
+            "indexed_parse_samples",
+        )
+        removed = 0
+        with self._conn:
+            for table in tables:
+                cursor = self._conn.execute(f"delete from {table}")
+                removed += cursor.rowcount if cursor.rowcount > 0 else 0
+        self._conn.execute("vacuum")
+        return removed
+
     def close(self) -> None:
         if self._closed:
             return
