@@ -285,19 +285,33 @@ def load_tier_overrides(path: Path | None) -> list[TierOverride]:
 def _tier_override_from_dict(item: object) -> TierOverride:
     if not isinstance(item, dict):
         raise ValueError("Each tier override must be an object")
+    start, end = _override_bounds(item)
+    return TierOverride(
+        service_tier=_override_tier(item),
+        session=str(item["session"]) if item.get("session") else None,
+        start=_utc_or_none(start),
+        end=_utc_or_none(end),
+    )
+
+
+def _override_tier(item: dict) -> str:
     tier = normalize_service_tier(str(item.get("service_tier") or item.get("tier") or ""))
     if tier not in {"standard", "fast"}:
         raise ValueError("Each tier override must set service_tier to standard or fast")
+    return tier
+
+
+def _override_bounds(item: dict) -> tuple[dt.datetime | None, dt.datetime | None]:
     start = parse_datetime(str(item["start"])) if item.get("start") else None
     end = parse_datetime(str(item["end"])) if item.get("end") else None
     if start and end and start >= end:
         raise ValueError("Tier override start must be before end")
-    return TierOverride(
-        service_tier=tier,
-        session=str(item["session"]) if item.get("session") else None,
-        start=start.astimezone(dt.UTC) if start else None,
-        end=end.astimezone(dt.UTC) if end else None,
-    )
+    return start, end
+
+
+def _utc_or_none(value: dt.datetime | None) -> dt.datetime | None:
+    return value.astimezone(dt.UTC) if value else None
+
 
 def tier_override_for(path: Path, event_time: dt.datetime, overrides: list[TierOverride]) -> str:
     path_text = str(path)
@@ -372,22 +386,29 @@ def _update_from_turn_context(
     current_tier: str,
 ) -> tuple[ThreadMeta, str, bool]:
     model_seen = bool(str(payload.get("model") or "").strip())
-    collaboration = payload.get("collaboration_mode") or {}
-    settings = collaboration.get("settings") if isinstance(collaboration, dict) else {}
-    if not isinstance(settings, dict):
-        settings = {}
     updated = replace(
         current,
         cwd=str(payload.get("cwd") or current.cwd or ""),
         model=str(payload.get("model") or current.model or ""),
-        reasoning_effort=str(
-            settings.get("reasoning_effort")
-            or payload.get("effort")
-            or current.reasoning_effort
-            or ""
-        ),
+        reasoning_effort=_turn_context_reasoning_effort(payload, current),
     )
     return updated, _tier_from_payload(payload, current_tier), model_seen
+
+
+def _turn_context_reasoning_effort(payload: dict, current: ThreadMeta) -> str:
+    settings = _turn_context_settings(payload)
+    return str(
+        settings.get("reasoning_effort")
+        or payload.get("effort")
+        or current.reasoning_effort
+        or ""
+    )
+
+
+def _turn_context_settings(payload: dict) -> dict:
+    collaboration = payload.get("collaboration_mode") or {}
+    settings = collaboration.get("settings") if isinstance(collaboration, dict) else {}
+    return settings if isinstance(settings, dict) else {}
 
 
 def _tier_from_payload(payload: dict, fallback: str) -> str:
