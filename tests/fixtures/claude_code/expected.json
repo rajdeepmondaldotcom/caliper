@@ -1,0 +1,12 @@
+{
+  "events": 1,
+  "input_tokens": 350,
+  "cache_creation_input_tokens": 50,
+  "cache_read_input_tokens": 200,
+  "cached_input_tokens": 250,
+  "output_tokens": 25,
+  "total_tokens": 375,
+  "model": "claude-sonnet-4.6",
+  "vendor": "claude-code",
+  "git_branch": "feature/caliper"
+}
