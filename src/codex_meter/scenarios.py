@@ -25,6 +25,110 @@ class WhatIfTotals:
     dollar_pct: float
 
 
+@dataclass(frozen=True)
+class WhatIfReport:
+    days: int
+    tier: str | None
+    model: str | None
+    events_evaluated: int
+    pricing_status: str
+    pricing_warnings: list[str]
+    totals: WhatIfTotals | None = None
+    noop_message: str = ""
+
+    @property
+    def noop(self) -> bool:
+        return self.noop_message != ""
+
+    @property
+    def label(self) -> str:
+        parts = []
+        if self.tier:
+            parts.append(f"tier={self.tier}")
+        if self.model:
+            parts.append(f"model={self.model}")
+        return ", ".join(parts) or "no-op"
+
+    def json_payload(self) -> dict:
+        payload = {
+            "days": self.days,
+            "hypothetical": {"tier": self.tier, "model": self.model},
+        }
+        if self.noop:
+            payload.update(
+                {
+                    "noop": True,
+                    "message": self.noop_message,
+                    "events_evaluated": self.events_evaluated,
+                    "pricing_status": self.pricing_status,
+                    "pricing_warnings": self.pricing_warnings,
+                }
+            )
+            return payload
+
+        totals = self._require_totals()
+        payload.update(
+            {
+                "actual": {
+                    **amount_fields("credits", totals.actual_credits),
+                    **amount_fields("api_dollars", totals.actual_dollars),
+                },
+                "projected": {
+                    **amount_fields("credits", totals.hypothetical_credits),
+                    **amount_fields("api_dollars", totals.hypothetical_dollars),
+                },
+                "delta": {
+                    **amount_fields("credits", totals.credit_delta),
+                    "credits_pct": totals.credit_pct,
+                    **amount_fields("api_dollars", totals.dollar_delta),
+                    "api_dollars_pct": totals.dollar_pct,
+                },
+                "events_evaluated": self.events_evaluated,
+                "pricing_status": self.pricing_status,
+                "pricing_warnings": self.pricing_warnings,
+            }
+        )
+        return payload
+
+    def records(self) -> list[dict]:
+        if self.noop:
+            return [
+                {
+                    "days": self.days,
+                    "tier": self.tier or "",
+                    "model": self.model or "",
+                    "noop": True,
+                    "message": self.noop_message,
+                    "events_evaluated": self.events_evaluated,
+                    "pricing_status": self.pricing_status,
+                }
+            ]
+        totals = self._require_totals()
+        return [
+            {
+                "metric": "credits",
+                "actual": totals.actual_credits,
+                "projected": totals.hypothetical_credits,
+                "delta": totals.credit_delta,
+                "pct": totals.credit_pct,
+                "pricing_status": self.pricing_status,
+            },
+            {
+                "metric": "api_dollars",
+                "actual": totals.actual_dollars,
+                "projected": totals.hypothetical_dollars,
+                "delta": totals.dollar_delta,
+                "pct": totals.dollar_pct,
+                "pricing_status": self.pricing_status,
+            },
+        ]
+
+    def _require_totals(self) -> WhatIfTotals:
+        if self.totals is None:
+            raise ValueError("what-if totals are unavailable for no-op reports")
+        return self.totals
+
+
 def events_in_interval(events, interval: Interval):
     return [event for event in events if interval.start <= event.timestamp < interval.end]
 
@@ -124,3 +228,46 @@ def calculate_whatif_totals(
         credit_pct=float(credit_delta / actual_credits * Decimal("100")) if actual_credits else 0.0,
         dollar_pct=float(dollar_delta / actual_dollars * Decimal("100")) if actual_dollars else 0.0,
     )
+
+
+def build_whatif_report(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    *,
+    days: int,
+    tier: str | None,
+    model: str | None,
+) -> WhatIfReport:
+    actual_total = aggregate_total(result, options, rate_card=rate_card)
+    actual_status = pricing_status(actual_total)
+    actual_warnings = pricing_warnings(actual_total)
+    if is_whatif_noop(result.events, tier=tier, model=model):
+        label = _whatif_label(tier=tier, model=model)
+        return WhatIfReport(
+            days=days,
+            tier=tier,
+            model=model,
+            events_evaluated=len(result.events),
+            pricing_status=actual_status,
+            pricing_warnings=actual_warnings,
+            noop_message=f"All {len(result.events):,} events are already at {label}; no change.",
+        )
+    return WhatIfReport(
+        days=days,
+        tier=tier,
+        model=model,
+        events_evaluated=len(result.events),
+        pricing_status=actual_status,
+        pricing_warnings=actual_warnings,
+        totals=calculate_whatif_totals(result.events, rate_card, tier=tier, model=model),
+    )
+
+
+def _whatif_label(*, tier: str | None, model: str | None) -> str:
+    parts = []
+    if tier:
+        parts.append(f"tier={tier}")
+    if model:
+        parts.append(f"model={model}")
+    return ", ".join(parts)

@@ -80,9 +80,8 @@ from codex_meter.render import format_int, pricing_status, pricing_warnings, ren
 from codex_meter.scenarios import (
     aggregate_interval,
     amount_delta,
-    calculate_whatif_totals,
+    build_whatif_report,
     interval_summary,
-    is_whatif_noop,
     sparse_comparison_warning,
 )
 from codex_meter.statusline import (
@@ -1317,6 +1316,66 @@ def compare(
         console.print(f"[yellow]{sparse_warning}[/yellow]")
 
 
+def _validate_whatif_inputs(tier: str | None, model: str | None, output_format: str) -> None:
+    if tier is None and model is None:
+        raise _exit_error("Provide --tier and/or --model to evaluate a hypothetical.")
+    if tier is not None and tier not in {"standard", "fast"}:
+        raise _exit_error("--tier must be one of: standard, fast")
+    if model is not None and model not in MODELS_BY_NAME:
+        raise _exit_error(
+            f"--model {model!r} is not in the embedded rate card. "
+            f"Use one of: {', '.join(sorted(MODELS_BY_NAME))}"
+        )
+    _validate_format(output_format)
+
+
+def _render_whatif_report(report, output_format: str) -> None:
+    if output_format == "json":
+        typer.echo(json_dumps(report.json_payload()))
+        return
+    if output_format == "csv":
+        typer.echo(records_to_csv(report.records()), nl=False)
+        return
+    if output_format == "markdown":
+        typer.echo(records_to_markdown(report.records()), nl=False)
+        return
+    if report.noop:
+        console.print(report.noop_message)
+        return
+    _render_whatif_table(report)
+
+
+def _render_whatif_table(report) -> None:
+    totals = report.totals
+    if totals is None:
+        raise _exit_error("what-if totals are unavailable")
+    console.print(f"[bold]Codex Meter - What If ({report.label})[/bold]")
+    console.print(f"Trailing {report.days} days · {report.events_evaluated:,} events")
+    for warning in report.pricing_warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
+    table = Table()
+    table.add_column("Metric")
+    table.add_column("Actual", justify="right")
+    table.add_column("Projected", justify="right")
+    table.add_column("Δ", justify="right")
+    table.add_column("%", justify="right")
+    table.add_row(
+        "Credits",
+        f"{totals.actual_credits:,.2f}",
+        f"{totals.hypothetical_credits:,.2f}",
+        f"{totals.credit_delta:+,.2f}",
+        f"{totals.credit_pct:+.1f}%",
+    )
+    table.add_row(
+        "API $",
+        f"${totals.actual_dollars:,.2f}",
+        f"${totals.hypothetical_dollars:,.2f}",
+        f"{totals.dollar_delta:+,.2f}",
+        f"{totals.dollar_pct:+.1f}%",
+    )
+    console.print(table)
+
+
 @app.command()
 def whatif(
     days: Annotated[
@@ -1342,16 +1401,7 @@ def whatif(
     pricing_mode: PricingModeOpt = "model",
 ) -> None:
     """Re-cost the window under a hypothetical tier or model swap."""
-    if tier is None and model is None:
-        raise _exit_error("Provide --tier and/or --model to evaluate a hypothetical.")
-    if tier is not None and tier not in {"standard", "fast"}:
-        raise _exit_error("--tier must be one of: standard, fast")
-    if model is not None and model not in MODELS_BY_NAME:
-        raise _exit_error(
-            f"--model {model!r} is not in the embedded rate card. "
-            f"Use one of: {', '.join(sorted(MODELS_BY_NAME))}"
-        )
-    _validate_format(output_format)
+    _validate_whatif_inputs(tier, model, output_format)
 
     try:
         options = build_options(
@@ -1370,135 +1420,15 @@ def whatif(
 
     result = load_usage(options)
     rate_card = RateCard.load(options.rates_file, options.pricing_mode)
-    actual_total = aggregate_total(result, options, rate_card=rate_card)
-    actual_pricing_status = pricing_status(actual_total)
-    actual_pricing_warnings = pricing_warnings(actual_total)
-    if is_whatif_noop(result.events, tier=tier, model=model):
-        label_parts = []
-        if tier:
-            label_parts.append(f"tier={tier}")
-        if model:
-            label_parts.append(f"model={model}")
-        label = ", ".join(label_parts)
-        message = f"All {len(result.events):,} events are already at {label}; no change."
-        noop_record = {
-            "days": days,
-            "tier": tier or "",
-            "model": model or "",
-            "noop": True,
-            "message": message,
-            "events_evaluated": len(result.events),
-            "pricing_status": actual_pricing_status,
-        }
-        if output_format == "json":
-            typer.echo(
-                json_dumps(
-                    {
-                        "days": days,
-                        "hypothetical": {"tier": tier, "model": model},
-                        "noop": True,
-                        "message": message,
-                        "events_evaluated": len(result.events),
-                        "pricing_status": actual_pricing_status,
-                        "pricing_warnings": actual_pricing_warnings,
-                    }
-                )
-            )
-            return
-        if output_format == "csv":
-            typer.echo(records_to_csv([noop_record]), nl=False)
-            return
-        if output_format == "markdown":
-            typer.echo(records_to_markdown([noop_record]), nl=False)
-            return
-        console.print(message)
-        return
-    totals = calculate_whatif_totals(result.events, rate_card, tier=tier, model=model)
-
-    if output_format == "json":
-        typer.echo(
-            json_dumps(
-                {
-                    "days": days,
-                    "hypothetical": {"tier": tier, "model": model},
-                    "actual": {
-                        **amount_fields("credits", totals.actual_credits),
-                        **amount_fields("api_dollars", totals.actual_dollars),
-                    },
-                    "projected": {
-                        **amount_fields("credits", totals.hypothetical_credits),
-                        **amount_fields("api_dollars", totals.hypothetical_dollars),
-                    },
-                    "delta": {
-                        **amount_fields("credits", totals.credit_delta),
-                        "credits_pct": totals.credit_pct,
-                        **amount_fields("api_dollars", totals.dollar_delta),
-                        "api_dollars_pct": totals.dollar_pct,
-                    },
-                    "events_evaluated": len(result.events),
-                    "pricing_status": actual_pricing_status,
-                    "pricing_warnings": actual_pricing_warnings,
-                }
-            )
-        )
-        return
-
-    whatif_records = [
-        {
-            "metric": "credits",
-            "actual": totals.actual_credits,
-            "projected": totals.hypothetical_credits,
-            "delta": totals.credit_delta,
-            "pct": totals.credit_pct,
-            "pricing_status": actual_pricing_status,
-        },
-        {
-            "metric": "api_dollars",
-            "actual": totals.actual_dollars,
-            "projected": totals.hypothetical_dollars,
-            "delta": totals.dollar_delta,
-            "pct": totals.dollar_pct,
-            "pricing_status": actual_pricing_status,
-        },
-    ]
-    if output_format == "csv":
-        typer.echo(records_to_csv(whatif_records), nl=False)
-        return
-    if output_format == "markdown":
-        typer.echo(records_to_markdown(whatif_records), nl=False)
-        return
-
-    label_parts = []
-    if tier:
-        label_parts.append(f"tier={tier}")
-    if model:
-        label_parts.append(f"model={model}")
-    label = ", ".join(label_parts) or "no-op"
-    console.print(f"[bold]Codex Meter - What If ({label})[/bold]")
-    console.print(f"Trailing {days} days · {len(result.events):,} events")
-    for warning in actual_pricing_warnings:
-        console.print(f"[yellow]Warning:[/yellow] {warning}")
-    table = Table()
-    table.add_column("Metric")
-    table.add_column("Actual", justify="right")
-    table.add_column("Projected", justify="right")
-    table.add_column("Δ", justify="right")
-    table.add_column("%", justify="right")
-    table.add_row(
-        "Credits",
-        f"{totals.actual_credits:,.2f}",
-        f"{totals.hypothetical_credits:,.2f}",
-        f"{totals.credit_delta:+,.2f}",
-        f"{totals.credit_pct:+.1f}%",
+    report = build_whatif_report(
+        result,
+        options,
+        rate_card,
+        days=days,
+        tier=tier,
+        model=model,
     )
-    table.add_row(
-        "API $",
-        f"${totals.actual_dollars:,.2f}",
-        f"${totals.hypothetical_dollars:,.2f}",
-        f"{totals.dollar_delta:+,.2f}",
-        f"{totals.dollar_pct:+.1f}%",
-    )
-    console.print(table)
+    _render_whatif_report(report, output_format)
 
 
 export_app = typer.Typer(help="Generate external artifacts: receipts, Grafana dashboards, etc.")
