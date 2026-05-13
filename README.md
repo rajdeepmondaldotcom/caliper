@@ -180,6 +180,28 @@ caliper insights                     # cache and tier signals
 The first run parses everything and writes a sidecar cache. Later runs reuse
 it. Pass `--disable-parse-cache` when you want to bypass the cache.
 
+## Interactive workspace (opt-in)
+
+If you prefer to live inside the data:
+
+```bash
+pip install 'caliper-ai[tui]'
+caliper tui                              # against your real logs
+caliper tui --demo                       # synthetic fixture, zero disk reads
+```
+
+The TUI is a single Python process built on
+[Textual](https://github.com/Textualize/textual). It reuses every pure
+module the classic CLI uses (parser, pricing, aggregation, windows,
+insights) and adds only presentation: a Home overview with cost
+cards, primary/secondary limit panels, the insights feed, and recent
+sessions. The remaining screens (Sessions, Projects, Models, Limits,
+Live, Forecast, What-If, Budgets, Doctor, Receipt) navigate via `1..9`
+and fill in over subsequent releases.
+
+Offline by default. No login. No telemetry. The classic CLI keeps
+working unchanged whether or not the `[tui]` extra is installed.
+
 ## Privacy is a constraint, not a feature
 
 - No login, ever.

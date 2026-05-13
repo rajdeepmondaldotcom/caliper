@@ -121,10 +121,14 @@ tui  = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/caliper"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/caliper/tui/tcss" = "caliper/tui/tcss"
+artifacts = ["src/caliper/tui/tcss/*.tcss"]
 ```
+
+*Phase 9 correction.* An earlier draft of this section used
+`[tool.hatch.build.targets.wheel.force-include]`, which under
+hatchling 1.26 emitted the `.tcss` files twice because the package
+auto-include already picked them up. `artifacts` is the right knob
+for non-Python files inside a discovered package directory.
 
 `pyperclip` is **not** in the `tui` extra. OSC52 is the primary
 clipboard path; pyperclip is only used when the user already has it
