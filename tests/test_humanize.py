@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from codex_meter.humanize import compact_number
+from caliper.humanize import compact_number
 
 
 def test_compact_number_uses_readable_suffixes() -> None:

@@ -4,7 +4,7 @@ import datetime as dt
 
 import pytest
 
-from codex_meter.intervals import parse_interval
+from caliper.intervals import parse_interval
 
 NOW = dt.datetime(2026, 5, 12, 15, 30, tzinfo=dt.UTC)  # Tuesday
 

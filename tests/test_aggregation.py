@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-from codex_meter.aggregation import (
+from caliper.aggregation import (
     aggregate_daily,
     aggregate_model_mode,
     aggregate_monthly,
@@ -14,8 +14,8 @@ from codex_meter.aggregation import (
     aggregate_total,
     aggregate_weekly,
 )
-from codex_meter.config import build_options
-from codex_meter.models import LoadResult, ThreadMeta, Usage, UsageEvent
+from caliper.config import build_options
+from caliper.models import LoadResult, ThreadMeta, Usage, UsageEvent
 
 
 def _event(

@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import datetime as dt
 
-from codex_meter.aggregation import aggregate_total
-from codex_meter.models import LoadResult, RuntimeOptions
-from codex_meter.parser import load_usage
-from codex_meter.pricing import RateCard
-from codex_meter.timeutil import local_timezone
-from codex_meter.windows import compute_window_state
+from caliper.aggregation import aggregate_total
+from caliper.models import LoadResult, RuntimeOptions
+from caliper.parser import load_usage
+from caliper.pricing import RateCard
+from caliper.timeutil import local_timezone
+from caliper.windows import compute_window_state
 
 
 def build_prometheus_snapshot(options: RuntimeOptions):
     """Construct a Prometheus MetricsSnapshot from a freshly loaded usage window."""
-    from codex_meter.prom_export import MetricsSnapshot
+    from caliper.prom_export import MetricsSnapshot
 
     result = load_usage(options)
     rate_card = RateCard.load(options.rates_file, options.pricing_mode)

@@ -56,6 +56,18 @@ def parse_interval(expression: str, now: dt.datetime) -> Interval:
         raise ValueError("window expression must be non-empty")
     raw = expression.strip().lower()
 
+    named = _named_interval(raw, now)
+    if named is not None:
+        return named
+
+    relative = _relative_interval(raw, now)
+    if relative is not None:
+        return relative
+
+    return _iso_interval(raw, now)
+
+
+def _named_interval(raw: str, now: dt.datetime) -> Interval | None:
     if raw == "today":
         start = _start_of_day(now)
         return Interval(start=start, end=now, label="today")
@@ -78,7 +90,10 @@ def parse_interval(expression: str, now: dt.datetime) -> Interval:
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
         return Interval(start=prev_start, end=prev_end, label="last month")
+    return None
 
+
+def _relative_interval(raw: str, now: dt.datetime) -> Interval | None:
     match = _LAST_N_DAYS.match(raw)
     if match:
         days = int(match.group(1))
@@ -94,7 +109,10 @@ def parse_interval(expression: str, now: dt.datetime) -> Interval:
     if match:
         hours = int(match.group(1))
         return Interval(start=now - dt.timedelta(hours=hours), end=now, label=raw)
+    return None
 
+
+def _iso_interval(raw: str, now: dt.datetime) -> Interval:
     if ".." in raw:
         left, _, right = raw.partition("..")
         return Interval(
@@ -111,18 +129,28 @@ def parse_interval(expression: str, now: dt.datetime) -> Interval:
 
 
 def _iso_to_dt(raw: str, tz: dt.tzinfo | None, *, end_of_day: bool) -> dt.datetime:
-    text = raw.strip()
-    if len(text) == 10 and text[4] == "-" and text[7] == "-":
-        text = text + (" 23:59:59" if end_of_day else " 00:00:00")
-    elif len(text) == 8 and text.isdigit():
-        head = f"{text[:4]}-{text[4:6]}-{text[6:8]}"
-        text = head + (" 23:59:59" if end_of_day else " 00:00:00")
+    text = _iso_text_with_boundary(raw, end_of_day=end_of_day)
     try:
         parsed = dt.datetime.fromisoformat(text)
     except ValueError as exc:
         raise ValueError(f"Unrecognized window expression: {raw!r}. {WINDOW_EXAMPLES}") from exc
+    return _with_timezone(parsed, tz)
+
+
+def _iso_text_with_boundary(raw: str, *, end_of_day: bool) -> str:
+    text = raw.strip()
+    boundary = "23:59:59" if end_of_day else "00:00:00"
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return f"{text} {boundary}"
+    if len(text) == 8 and text.isdigit():
+        head = f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+        return f"{head} {boundary}"
+    return text
+
+
+def _with_timezone(parsed: dt.datetime, tz: dt.tzinfo | None) -> dt.datetime:
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=tz or dt.UTC)
+        return parsed.replace(tzinfo=tz or dt.UTC)
     return parsed
 
 

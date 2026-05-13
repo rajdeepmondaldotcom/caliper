@@ -8,13 +8,14 @@ import shutil
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
 
-from codex_meter.aggregation import aggregate_model_mode, aggregate_projects, aggregate_total
-from codex_meter.humanize import compact_number, format_int, redact, short_table_label
-from codex_meter.models import (
+from caliper.aggregation import aggregate_model_mode, aggregate_projects, aggregate_total
+from caliper.humanize import compact_number, format_int, redact, short_table_label
+from caliper.models import (
     Aggregate,
     CostTotals,
     LoadResult,
@@ -23,9 +24,9 @@ from codex_meter.models import (
     TokenTotals,
     decimal_string,
 )
-from codex_meter.pricing import PRICING_SOURCES, RateCard
-from codex_meter.subscriptions import subscription_plan_payload, subscription_warnings
-from codex_meter.timeutil import iso_z, window_label
+from caliper.pricing import PRICING_SOURCES, RateCard
+from caliper.subscriptions import subscription_plan_payload, subscription_warnings
+from caliper.timeutil import iso_z, window_label
 
 __all__ = ["format_int", "redact", "render", "render_limits"]
 
@@ -413,12 +414,13 @@ def _table_int(value: int, options: RuntimeOptions) -> str:
     return compact_number(value) if options.compact else format_int(value)
 
 
-def _table_float(value: float, options: RuntimeOptions, prefix: str = "") -> str:
+def _table_float(value: Any, options: RuntimeOptions, prefix: str = "") -> str:
     if options.compact:
         return compact_number(value, prefix=prefix)
+    amount = float(value)
     if prefix:
-        return f"{prefix}{value:,.2f}"
-    return f"{value:,.2f}"
+        return f"{prefix}{amount:,.2f}"
+    return f"{amount:,.2f}"
 
 
 def render_json(
@@ -630,11 +632,11 @@ def _limits_table(samples: list, options: RuntimeOptions) -> Table:
     return table
 
 
-def _percent(value: object) -> str:
+def _percent(value: Any) -> str:
     return "-" if value is None else f"{float(value):.1f}%"
 
 
-def _reset_epoch(value: object) -> str:
+def _reset_epoch(value: Any) -> str:
     if value in {None, ""}:
         return "-"
     try:

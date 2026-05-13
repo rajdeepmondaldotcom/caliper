@@ -9,7 +9,7 @@ import json
 
 from typer.testing import CliRunner
 
-from codex_meter.cli import app
+from caliper.cli import app
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 

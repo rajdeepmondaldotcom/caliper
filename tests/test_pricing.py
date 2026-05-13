@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from codex_meter.models import Usage
-from codex_meter.pricing import (
+from caliper.models import Usage
+from caliper.pricing import (
     estimate_event_cost,
     normalize_model,
     normalize_service_tier,
@@ -93,7 +93,7 @@ def test_ambiguous_reasoning_shape_is_marked_and_not_double_counted() -> None:
 
 def test_long_context_rule_lives_on_model_card() -> None:
     """Long-context rules live on model cards."""
-    from codex_meter.pricing import MODELS_BY_NAME
+    from caliper.pricing import MODELS_BY_NAME
 
     assert MODELS_BY_NAME["gpt-5.5"].long_context is not None
     assert MODELS_BY_NAME["gpt-5.5"].long_context.threshold == 272_000

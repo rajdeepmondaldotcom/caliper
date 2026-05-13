@@ -9,9 +9,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from codex_meter import __version__
-from codex_meter.pricing import MODEL_CARDS, MODELS_BY_NAME, PRICING_SOURCES, normalize_model
-from codex_meter.timeutil import iso_z
+from caliper import __version__
+from caliper.pricing import MODEL_CARDS, MODELS_BY_NAME, PRICING_SOURCES, normalize_model
+from caliper.timeutil import iso_z
 
 ALLOWED_RATE_SOURCE_SCHEMES = {"http", "https"}
 
@@ -22,13 +22,13 @@ def fetched_rates_path() -> Path:
         return Path(override).expanduser() / "rates-fetched.json"
     xdg = os.environ.get("XDG_DATA_HOME")
     if xdg:
-        return Path(xdg).expanduser() / "codex-meter" / "rates-fetched.json"
-    return Path.home() / ".local" / "share" / "codex-meter" / "rates-fetched.json"
+        return Path(xdg).expanduser() / "caliper" / "rates-fetched.json"
+    return Path.home() / ".local" / "share" / "caliper" / "rates-fetched.json"
 
 
 def fetch_rate_sources() -> dict:
-    sources = []
-    observed = []
+    sources: list[dict[str, object]] = []
+    observed: list[dict] = []
     for source in PRICING_SOURCES:
         try:
             url = _validated_source_url(source.url)
@@ -40,7 +40,7 @@ def fetch_rate_sources() -> dict:
 
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": f"codex-meter/{__version__}"},
+            headers={"User-Agent": f"caliper/{__version__}"},
         )
         try:
             with urllib.request.urlopen(request, timeout=5) as response:  # nosec B310

@@ -6,9 +6,9 @@ from io import BytesIO
 
 from typer.testing import CliRunner
 
-from codex_meter.cli import app
-from codex_meter.models import Usage
-from codex_meter.pricing import MODEL_CARDS, MODELS_BY_NAME, estimate_event_cost
+from caliper.cli import app
+from caliper.models import Usage
+from caliper.pricing import MODEL_CARDS, MODELS_BY_NAME, estimate_event_cost
 
 runner = CliRunner()
 

@@ -1,138 +1,150 @@
-# codex-meter
+<div align="center">
 
-[![CI](https://github.com/rajdeepmondaldotcom/codex-meter/actions/workflows/ci.yml/badge.svg)](https://github.com/rajdeepmondaldotcom/codex-meter/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/codex-meter.svg)](https://pypi.org/project/codex-meter/)
+# Caliper
+
+**Measure every line of AI-written code.**
+
+Offline-first usage, cost, and ROI intelligence for AI coding tools.
+
+[![CI](https://github.com/rajdeepmondaldotcom/caliper/actions/workflows/ci.yml/badge.svg)](https://github.com/rajdeepmondaldotcom/caliper/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/caliper-ai.svg)](https://pypi.org/project/caliper-ai/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Understand your Codex work locally.
+</div>
 
-`codex-meter` turns local Codex logs into a clear record of how your coding work
-happened: sessions, projects, models, tiers, cache reuse, tokens, credits,
-API-equivalent dollars, and rate-limit windows.
+---
 
-No cloud sync. No account login. No billing scrape. Just local evidence you can
-inspect, export, and trust.
+## What is Caliper?
+
+Caliper is a single command that turns the trail your AI coding tools already
+leave on your machine into a clear, finance-grade record of what you actually
+spent and what you actually got.
+
+- **Local by default.** No login, no upload, no billing scrape, no telemetry.
+- **Per-session, per-project, per-model, per-tier.** Tokens, credits,
+  API-equivalent dollars, cache savings, rate-limit windows, burn rate.
+- **Live TUI, statusline, forecasts, budgets, receipts, Prometheus, Grafana.**
+- **Vendor-neutral architecture.** Ships today with OpenAI Codex CLI
+  coverage; Claude Code, Cursor, Aider, and Copilot parsers land in the next
+  releases. Same record format, same reports, same pricing engine.
+
+If you pay for AI coding tools and cannot answer *"what did the last PR cost?"*
+or *"is Opus actually carrying its weight on this repo?"* — Caliper is the
+fastest path to an honest answer.
+
+---
 
 ## Install
 
 Requires Python 3.11+.
 
 ```bash
-uvx codex-meter
+# Zero-install run
+uvx caliper-ai
+
+# Persistent install
+uv tool install caliper-ai
+caliper
+
+# pipx
+pipx install caliper-ai
+caliper
+
+# pip
+python -m pip install caliper-ai
+
+# Prometheus exporter extra
+uv tool install 'caliper-ai[prom]'
+
+# Homebrew
+brew install rajdeepmondaldotcom/tap/caliper
 ```
 
-Persistent install:
+The `codex-meter` command remains available as an alias for users upgrading
+from the original release. Both binaries dispatch to the same CLI.
+
+---
+
+## 30 seconds in
 
 ```bash
-uv tool install codex-meter
-codex-meter
+caliper                              # 7 / 30 / 90 day overview
+caliper doctor                       # sanity-check local data and assumptions
+caliper live                         # watch usage while you work
+caliper statusline                   # one-line snapshot for prompts and editors
+caliper project --days 30            # per-repo activity and cost
+caliper models --days 30             # model and tier mix
+caliper forecast --days 14           # linear + EWMA projection with ±1σ band
+caliper compare --a "last 7 days" --b "previous 7 days"
+caliper whatif --tier standard       # what-if pricing scenarios
+caliper export receipt --month 2026-05 --format html > receipt.html
 ```
 
-With `pipx`:
-
-```bash
-pipx install codex-meter
-codex-meter
-```
-
-With `pip`:
-
-```bash
-python -m pip install codex-meter
-codex-meter
-```
-
-Prometheus exporter:
-
-```bash
-uv tool install 'codex-meter[prom]'
-```
-
-Homebrew:
-
-```bash
-brew install rajdeepmondaldotcom/tap/codex-meter
-```
-
-## Start Here
-
-```bash
-codex-meter                         # 7 / 30 / 90 day overview
-codex-meter doctor                  # check local data and assumptions
-codex-meter live                    # watch usage while you work
-codex-meter statusline              # compact one-line usage snapshot
-codex-meter project --days 30       # see project activity
-codex-meter models --days 30        # inspect model and tier mix
-```
-
-The first run parses local session files. Later runs use a sidecar parse cache.
+First run parses local session files. Later runs use a sidecar parse cache.
 Use `--no-parse-cache` when debugging parser behavior.
 
-## Why It Exists
+---
 
-Codex already leaves a detailed trail on your machine. The problem is that the
-trail is split across JSONL sessions, SQLite metadata, config, rate-limit
-samples, and pricing assumptions. `codex-meter` turns that trail into one local
-view.
+## Why it exists
 
-It answers:
+AI coding tools changed how software ships. Every paid developer now burns
+between $20 and $2,000 a month across Codex, Claude Code, Cursor, Copilot,
+Aider, and friends. Two questions are getting louder every week:
 
-- What did I use?
-- Where did it go?
-- Which model and tier drove it?
-- How much input was cached?
-- What changed across sessions, projects, and days?
+1. **What did this actually cost?** Vendor dashboards show what *they* charged
+   you. They do not show what each PR, each repo, or each session actually
+   consumed — and they certainly do not show it across vendors in one view.
+2. **Did the spend ship code?** Tokens are not value. Caliper makes the link
+   between AI spend and the code that left your machine inspectable.
 
-This is not an OpenAI billing ledger. It is local usage intelligence.
+Caliper is the local instrument that answers both. The data already exists on
+your laptop. Caliper turns it into evidence you can audit, export, share with
+finance, or push to Prometheus.
 
-## Commands
+This is not a vendor billing ledger. It is local usage intelligence.
 
-| Need | Command |
+---
+
+## What you get
+
+### Reports
+
+| Report | Command |
 | --- | --- |
-| Overview | `codex-meter` |
-| Daily / weekly / monthly | `codex-meter daily`, `weekly`, `monthly` |
-| Sessions | `codex-meter session --top 20` |
-| Projects | `codex-meter project --days 30` |
-| Models and tiers | `codex-meter models --days 30` |
-| Recent events | `codex-meter tail --n 20` |
-| Rate limits | `codex-meter limits` |
-| Statusline | `codex-meter statusline` |
-| Insights | `codex-meter insights` |
-| Forecast | `codex-meter forecast --days 14` |
-| Compare windows | `codex-meter compare --a "last 7 days" --b "previous 7 days"` |
-| What-if pricing | `codex-meter whatif --tier standard` |
-| Optional budgets | `codex-meter budgets check` |
-| Receipt | `codex-meter export receipt --month 2026-05 --format html` |
-| Prometheus | `codex-meter export prometheus --port 9090` |
-| Grafana | `codex-meter export grafana > dashboard.json` |
+| Rolling 7 / 30 / 90 day overview | `caliper` |
+| Daily / weekly / monthly | `caliper daily`, `weekly`, `monthly` |
+| Per session | `caliper session --top 20` |
+| Per project / repo | `caliper project --days 30` |
+| Per model and tier | `caliper models --days 30` |
+| Recent events | `caliper tail --n 20` |
+| Rate-limit windows | `caliper limits` |
+| Statusline snapshot | `caliper statusline` |
+| Insights (cache, concentration, tier confidence, trend) | `caliper insights` |
+| Forecast with ±1σ band and ETA-to-cap | `caliper forecast --days 14` |
+| Window comparison | `caliper compare --a "last 7 days" --b "previous 7 days"` |
+| What-if pricing | `caliper whatif --tier standard` |
+| Budgets (warn/breach) | `caliper budgets check` |
+| Receipt (HTML / Markdown) | `caliper export receipt --month 2026-05 --format html` |
+| Prometheus exporter | `caliper export prometheus --port 9090` |
+| Grafana dashboard JSON | `caliper export grafana > dashboard.json` |
 
-Most report commands support:
+Every grouped report supports `--format table|json|csv|markdown`,
+`--output FILE`, `--since YYYY-MM-DD`, `--days N`, and `--top N`.
 
-```bash
---format table|json|csv|markdown
---output report.json
---since 2026-05-01
---days 30
---top 20
-```
+JSON exports include a `projects` inventory for the window and row-level
+`model_breakdowns` — paths, session counts, first/last seen, models, tiers,
+model source/fallback flags, git branches/remotes when Codex recorded them,
+plus the same token and cost fields as the primary breakdown.
 
-JSON reports also include a `projects` inventory for the selected window and
-row-level `model_breakdowns` for each total/breakdown row. Those inventories keep
-project paths, session counts, first/last seen timestamps, models, tiers, model
-source/fallback flags, git branches/remotes when Codex recorded them, and the
-same token and cost fields as the primary breakdown.
-
-## Live View
+### Live view
 
 ```bash
-codex-meter live
+caliper live
 ```
 
-Shows today's usage, trailing 7-day usage, 5-hour and weekly windows, burn rate,
-and ETA to 100% when enough samples exist.
-
-Hotkeys:
+A three-panel Rich TUI: today's usage, trailing 7-day usage, 5-hour and weekly
+rate-limit windows, burn rate, and ETA-to-100% when enough samples exist.
 
 | Key | Action |
 | --- | --- |
@@ -141,26 +153,23 @@ Hotkeys:
 | `r` | Refresh |
 | `p` | Pause |
 
-## Statusline
+### Statusline
 
 ```bash
-codex-meter statusline
-codex-meter statusline --format json
+caliper statusline
+caliper statusline --format json
 ```
 
-Prints one compact snapshot for prompts, editor hooks, and scripts: latest
-model/tier, top project, today's credits and API-equivalent dollars, trailing
-7-day credits, 5-hour and weekly reset windows, cache ratio, and pricing status.
+One compact line for shell prompts, editor hooks, and scripts: latest
+model/tier, top project, today's credits and API-equivalent dollars,
+trailing 7-day credits, 5-hour and weekly reset windows, cache ratio, and
+pricing status.
 
-## Budgets
-
-Create a config:
+### Budgets that gate CI
 
 ```bash
-codex-meter init
+caliper init
 ```
-
-Add limits:
 
 ```toml
 [budgets]
@@ -170,13 +179,11 @@ monthly_credits = 400000
 weekly_api_dollars = 50.0
 ```
 
-Check them:
-
 ```bash
-codex-meter budgets check
+caliper budgets check
 ```
 
-Exit codes are built for automation:
+Exit codes are designed for CI:
 
 | Exit | Meaning |
 | ---: | --- |
@@ -184,79 +191,98 @@ Exit codes are built for automation:
 | `1` | warning |
 | `2` | breached or failed |
 
-## Exports
+### Receipts you can hand to finance
 
 ```bash
-codex-meter export receipt --month 2026-05 --format markdown
-codex-meter export receipt --month 2026-05 --format html > receipt.html
-codex-meter export prometheus --host 127.0.0.1 --port 9090
-codex-meter export grafana > dashboard.json
+caliper export receipt --month 2026-05 --format markdown
+caliper export receipt --month 2026-05 --format html > receipt.html
 ```
 
 Receipts redact local session and project labels by default. Use
 `--show-sensitive` only for private artifacts.
 
-Prometheus exposes credits, burn rate, rate-limit window percent, event count,
-long-context event count, and tokens by model/tier/kind.
+### Prometheus and Grafana
 
-## Data Sources
+```bash
+caliper export prometheus --host 127.0.0.1 --port 9090
+caliper export grafana > dashboard.json
+```
 
-`codex-meter` reads:
+Exposes credits, burn rate, rate-limit window percent, event count,
+long-context event count, and tokens by model/tier/kind. Drop the dashboard
+JSON into Grafana and you have a real-time view in under a minute.
+
+---
+
+## Data sources
+
+Caliper reads:
 
 - `~/.codex/sessions/**/*.jsonl`
 - `~/.codex/state_5.sqlite`
 - `~/.codex/config.toml`
 
-If `CODEX_HOME` is set, those defaults move under that directory, matching Codex
-itself. Explicit `--session-root`, `--state-db`, `--codex-config`, and config
-file paths still take precedence.
+If `CODEX_HOME` is set, those defaults move under that directory, matching
+Codex itself. Explicit `--session-root`, `--state-db`, `--codex-config`, and
+config file paths still take precedence.
 
 Workspace attribution is local and evidence-based. For each usage event,
-`codex-meter` uses:
+Caliper uses:
 
 1. JSONL `turn_context.cwd`
 2. SQLite `threads.cwd`
 3. `Unknown Project`
 
-Normal reports do not touch the network. The only networked command is explicit:
+Normal reports never touch the network. The only networked command is
+explicit:
 
 ```bash
-codex-meter rates refresh --allow-network
+caliper rates refresh --allow-network
 ```
 
-That writes a local pricing-source audit snapshot, including observed token
-rates, fast multipliers, long-context rules, and discrepancies. It does not
-rewrite the embedded rate card.
+This writes a local pricing-source audit snapshot (observed token rates, fast
+multipliers, long-context rules, discrepancies). It does not rewrite the
+embedded rate card.
 
-## Accuracy
+---
+
+## Accuracy is the point
 
 The hard part is not adding tokens. It is making assumptions visible.
 
-`codex-meter` tracks cached input separately, applies per-model long-context
-rules, uses exact decimal math internally, and reports whether service tiers
-came from logs, config, overrides, or assumptions. If a model or credit rate is
-not source-verified, reports mark pricing as partial instead of silently using a
-fallback as exact.
+Caliper:
 
-Model identity is also source-tracked. JSON exports show whether a model came
-from JSONL `turn_context`, SQLite thread metadata, or the configured default
-model. When the default model is used because a legacy session recorded tokens
-without model metadata, JSON marks those events as fallback model events and
-pricing is treated as estimated.
+- Tracks cached input tokens separately and rebates them at the cached rate.
+- Applies per-model long-context input/output multipliers when the model card
+  declares a `long_context` rule.
+- Uses **exact Decimal math** internally; floats only appear at output
+  boundaries.
+- Reports whether each event's service tier came from logs, config, an
+  override file, or an assumption — with per-source counts in JSON output.
+- Surfaces pricing as **exact**, **estimated**, or **unpriced** so a
+  fallback never silently masquerades as a billing receipt.
 
-Codex subscription plans are treated as limit metadata, not as hidden pricing
-multipliers. Reports preserve the raw `plan_type`, add normalized subscription
-plan details for Free, Go, Plus, Pro, Business, Enterprise, Edu, Health, Gov,
-and ChatGPT for Teachers, and use the logged `codex` rate-limit bucket for
+### Model identity provenance
+
+JSON exports record whether each event's model came from JSONL
+`turn_context`, SQLite thread metadata, or the configured default model.
+When the default model is used because a legacy session recorded tokens
+without model metadata, those events are marked as fallback model events
+and pricing is treated as estimated.
+
+### Subscription plans are treated as metadata, not pricing magic
+
+Caliper preserves the raw `plan_type`, adds normalized subscription plan
+details for Free, Go, Plus, Pro, Business, Enterprise, Edu, Health, Gov, and
+ChatGPT for Teachers, and uses the logged `codex` rate-limit bucket for
 remaining-window math when multiple buckets are present. Free/Go promotional
-access and Enterprise-family legacy-rate-card ambiguity are surfaced as
-warnings instead of being guessed.
+access and Enterprise-family legacy-rate-card ambiguity surface as warnings
+instead of being guessed.
 
-Reasoning tokens are only billed separately when the Codex token log shows they
-are not already included in output tokens. This prevents double-counting on
-current local Codex logs.
+Reasoning tokens are only billed separately when the token log shows they
+are not already included in output tokens. No double counting.
 
-Service-tier precedence:
+### Service-tier precedence
 
 1. `--service-tier standard|fast`
 2. `--tier-overrides overrides.json`
@@ -264,17 +290,12 @@ Service-tier precedence:
 4. current `~/.codex/config.toml`
 5. `--unknown-service-tier`
 
-Inspect pricing:
+Inspect or override pricing:
 
 ```bash
-codex-meter rates show
-codex-meter rates show --format json
-```
-
-Use local overrides when needed:
-
-```bash
-codex-meter daily --rates-file ./rates.json
+caliper rates show
+caliper rates show --format json
+caliper daily --rates-file ./rates.json
 ```
 
 Schemas:
@@ -282,17 +303,39 @@ Schemas:
 - [`schemas/rates.schema.json`](schemas/rates.schema.json)
 - [`schemas/tier-overrides.schema.json`](schemas/tier-overrides.schema.json)
 
+---
+
 ## Privacy
 
-The default posture is local and conservative.
+Default posture is local and conservative.
 
-- Reports read local files.
-- Prompt and session labels are redacted unless requested.
+- Reports read local files only.
+- Prompt and session labels are redacted unless explicitly requested.
 - Receipts hide full session IDs and project paths by default.
-- JSON, CSV, Markdown, and HTML exports may still contain local metadata,
-  including local paths and git remotes when those fields are available.
+- JSON, CSV, Markdown, and HTML exports may still contain local metadata
+  (paths, git remotes) when those fields are present in the source data.
 
-Treat exports as sensitive unless you made them for sharing.
+Treat exports as sensitive unless you made them to be shared.
+
+---
+
+## Roadmap
+
+Caliper 1.0 ships with full OpenAI Codex CLI coverage. The pipeline ahead:
+
+| Milestone | What lands |
+| --- | --- |
+| 1.1 | Claude Code parser (`~/.claude/projects/**/*.jsonl`) — same record shape, same reports |
+| 1.2 | Cursor + Aider parsers; cross-vendor model and tier normalization |
+| 1.3 | Per-PR / per-commit attribution via local `git log` join — every PR carries its real AI cost |
+| 1.4 | Model-arbitrage advisor — flags spend where a smaller model would have shipped the same work |
+| 1.5 | VS Code / Cursor / Zed extension surfacing live cost in the editor |
+| 2.0 | Opt-in team aggregator — workspace rollups, Slack/Linear digests, finance export |
+
+The local CLI stays free, MIT, and offline-first. Team and enterprise
+features are strictly opt-in and operate on data you explicitly export.
+
+---
 
 ## Development
 
@@ -301,18 +344,20 @@ uv sync --dev
 uv run ruff check .
 uv run ruff format --check .
 PYTHONWARNINGS=error::ResourceWarning uv run pytest
-uv run pytest --cov=src/codex_meter --cov-report=term
+uv run pytest --cov=src/caliper --cov-report=term
 uv run python -m build
 ```
 
 Smoke test against your own logs:
 
 ```bash
-uv run codex-meter doctor
-uv run codex-meter overview
-uv run codex-meter rates show
+uv run caliper doctor
+uv run caliper overview
+uv run caliper rates show
 ```
+
+---
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from codex_meter.subscriptions import (
+from caliper.subscriptions import (
     normalize_subscription_plan,
     subscription_plan_payload,
     subscription_warnings,

@@ -1,6 +1,10 @@
-# codex-meter Context
+# Caliper Context
 
-`codex-meter` is an offline-first Python CLI/library that turns local Codex session data into usage intelligence. It reads local JSONL session logs, optional Codex SQLite metadata, user config, embedded pricing assumptions, and rate-limit samples. It does not scrape billing pages, require account login, or upload local usage.
+`caliper` is an offline-first Python CLI/library that turns local AI coding
+session data into usage intelligence. Today its deepest source integration is
+Codex: local JSONL session logs, optional Codex SQLite metadata, user config,
+embedded pricing assumptions, and rate-limit samples. It does not scrape billing
+pages, require account login, or upload local usage.
 
 ## Core Invariants
 
@@ -11,9 +15,22 @@
 - Parser cache rows must remain backward compatible unless the cache version is deliberately bumped.
 - Report commands should separate loading, aggregation, pricing, rendering, and CLI orchestration.
 
+## Vendors
+
+Caliper is built around a vendor-neutral record. Every `UsageEvent` and
+`RateLimitSample` carries a `vendor` field. Today's only shipped parser is
+`openai-codex` (the OpenAI Codex CLI). Planned parsers — `claude-code`,
+`cursor`, `aider`, `copilot` — populate the same record shape, so reports,
+pricing, budgets, forecasts, and exports work cross-vendor without
+restructuring.
+
+Known vendor constants live in `caliper.models`:
+`VENDOR_OPENAI_CODEX`, `VENDOR_CLAUDE_CODE`, `VENDOR_CURSOR`,
+`VENDOR_AIDER`, `VENDOR_COPILOT`, `VENDOR_UNKNOWN`.
+
 ## Domain Terms
 
-- Usage event: one parsed Codex usage delta tied to a session, timestamp, model, tier, project, and source metadata.
+- Usage event: one parsed usage delta tied to a vendor, session, timestamp, model, tier, project, and source metadata.
 - Rate-limit sample: a parsed snapshot of primary/secondary Codex rate-limit windows.
 - Aggregate: token totals, cost totals, cache savings, model breakdowns, source counts, and project attribution for a selected window.
 - API-equivalent dollars: an estimate based on OpenAI API model pricing.

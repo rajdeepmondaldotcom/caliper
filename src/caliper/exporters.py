@@ -7,8 +7,9 @@ import html
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
-from codex_meter.models import Aggregate
+from caliper.models import Aggregate
 
 DEFAULT_DASHBOARD_TITLE = "Codex Meter"
 
@@ -46,12 +47,12 @@ def month_bounds(month: str, tz: dt.tzinfo) -> tuple[dt.datetime, dt.datetime]:
     return start, end
 
 
-def _format_money(value: float) -> str:
-    return f"${value:,.2f}"
+def _format_money(value: Any) -> str:
+    return f"${float(value):,.2f}"
 
 
-def _format_credits(value: float) -> str:
-    return f"{value:,.2f}"
+def _format_credits(value: Any) -> str:
+    return f"{float(value):,.2f}"
 
 
 def _format_int(value: int) -> str:
@@ -225,12 +226,12 @@ def _html_section(title: str, rows: Iterable[Aggregate]) -> str:
 
 
 def grafana_dashboard(title: str = DEFAULT_DASHBOARD_TITLE, datasource: str = "Prometheus") -> dict:
-    """Generate a Grafana dashboard JSON tied to codex-meter Prometheus metrics."""
+    """Generate a Grafana dashboard JSON tied to caliper Prometheus metrics."""
     return {
         "annotations": {"list": []},
         "editable": True,
         "schemaVersion": 39,
-        "tags": ["codex-meter"],
+        "tags": ["caliper"],
         "title": title,
         "timezone": "",
         "time": {"from": "now-24h", "to": "now"},
@@ -239,7 +240,7 @@ def grafana_dashboard(title: str = DEFAULT_DASHBOARD_TITLE, datasource: str = "P
             _stat_panel(
                 id_=1,
                 title="Credits used (current 5h)",
-                expr="codex_meter_credits_used",
+                expr="caliper_credits_used",
                 unit="none",
                 datasource=datasource,
                 grid={"h": 5, "w": 6, "x": 0, "y": 0},
@@ -247,7 +248,7 @@ def grafana_dashboard(title: str = DEFAULT_DASHBOARD_TITLE, datasource: str = "P
             _stat_panel(
                 id_=2,
                 title="Burn rate (credits/hour)",
-                expr="codex_meter_burn_per_hour",
+                expr="caliper_burn_per_hour",
                 unit="none",
                 datasource=datasource,
                 grid={"h": 5, "w": 6, "x": 6, "y": 0},
@@ -255,21 +256,21 @@ def grafana_dashboard(title: str = DEFAULT_DASHBOARD_TITLE, datasource: str = "P
             _gauge_panel(
                 id_=3,
                 title="Primary window %",
-                expr='codex_meter_window_used_percent{window="primary"}',
+                expr='caliper_window_used_percent{window="primary"}',
                 datasource=datasource,
                 grid={"h": 5, "w": 6, "x": 12, "y": 0},
             ),
             _gauge_panel(
                 id_=4,
                 title="Secondary window %",
-                expr='codex_meter_window_used_percent{window="secondary"}',
+                expr='caliper_window_used_percent{window="secondary"}',
                 datasource=datasource,
                 grid={"h": 5, "w": 6, "x": 18, "y": 0},
             ),
             _timeseries_panel(
                 id_=5,
                 title="Tokens by model / tier / kind",
-                expr="sum by (model, tier, kind) (codex_meter_tokens_total)",
+                expr="sum by (model, tier, kind) (caliper_tokens_total)",
                 datasource=datasource,
                 grid={"h": 10, "w": 24, "x": 0, "y": 5},
             ),

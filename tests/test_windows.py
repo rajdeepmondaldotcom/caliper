@@ -3,8 +3,8 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-from codex_meter.models import RateLimitSample
-from codex_meter.windows import (
+from caliper.models import RateLimitSample
+from caliper.windows import (
     compute_window_state,
     format_burn_rate,
     format_seconds_remaining,

@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from codex_meter.exporters import (
+from caliper.exporters import (
     ReceiptInputs,
     grafana_dashboard,
     month_bounds,
@@ -13,7 +13,7 @@ from codex_meter.exporters import (
     render_receipt_html,
     render_receipt_markdown,
 )
-from codex_meter.models import Aggregate, CostTotals, TokenTotals
+from caliper.models import Aggregate, CostTotals, TokenTotals
 
 
 def _aggregate(label: str, credits: float = 10.0, dollars: float = 1.0) -> Aggregate:
@@ -101,5 +101,5 @@ def test_grafana_dashboard_serializable_json() -> None:
     parsed = json.loads(text)
     assert parsed["title"] == "Codex Meter Test"
     expressions = {panel["targets"][0]["expr"] for panel in parsed["panels"]}
-    assert 'codex_meter_window_used_percent{window="primary"}' in expressions
-    assert any("codex_meter_tokens_total" in expr for expr in expressions)
+    assert 'caliper_window_used_percent{window="primary"}' in expressions
+    assert any("caliper_tokens_total" in expr for expr in expressions)

@@ -4,9 +4,10 @@ import datetime as dt
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 
-def _safe_int(value: object) -> int:
+def _safe_int(value: Any) -> int:
     try:
         return int(value or 0)
     except (TypeError, ValueError):
@@ -27,6 +28,24 @@ def decimal_string(value: object) -> str:
 
 
 UNKNOWN_PROJECT = "Unknown Project"
+
+VENDOR_OPENAI_CODEX = "openai-codex"
+VENDOR_CLAUDE_CODE = "claude-code"
+VENDOR_CURSOR = "cursor"
+VENDOR_AIDER = "aider"
+VENDOR_COPILOT = "copilot"
+VENDOR_UNKNOWN = "unknown"
+
+KNOWN_VENDORS = frozenset(
+    {
+        VENDOR_OPENAI_CODEX,
+        VENDOR_CLAUDE_CODE,
+        VENDOR_CURSOR,
+        VENDOR_AIDER,
+        VENDOR_COPILOT,
+        VENDOR_UNKNOWN,
+    }
+)
 
 
 def project_name_from_path(value: str) -> str:
@@ -69,19 +88,28 @@ class Usage:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Rates:
-    input: Decimal | float
-    cached_input: Decimal | float
-    output: Decimal | float
-    reasoning_output: Decimal | float | None = None
+    input: Decimal
+    cached_input: Decimal
+    output: Decimal
+    reasoning_output: Decimal | None
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "input", decimal_value(self.input))
-        object.__setattr__(self, "cached_input", decimal_value(self.cached_input))
-        object.__setattr__(self, "output", decimal_value(self.output))
-        if self.reasoning_output is not None:
-            object.__setattr__(self, "reasoning_output", decimal_value(self.reasoning_output))
+    def __init__(
+        self,
+        input: object,
+        cached_input: object,
+        output: object,
+        reasoning_output: object | None = None,
+    ) -> None:
+        object.__setattr__(self, "input", decimal_value(input))
+        object.__setattr__(self, "cached_input", decimal_value(cached_input))
+        object.__setattr__(self, "output", decimal_value(output))
+        object.__setattr__(
+            self,
+            "reasoning_output",
+            None if reasoning_output is None else decimal_value(reasoning_output),
+        )
 
     @property
     def effective_reasoning_output(self) -> Decimal:
@@ -180,6 +208,7 @@ class UsageEvent:
     secondary_window_minutes: object = None
     secondary_resets_at: object = None
     rate_limit_reached_type: str = ""
+    vendor: str = VENDOR_OPENAI_CODEX
 
 
 @dataclass(frozen=True)
@@ -198,6 +227,7 @@ class RateLimitSample:
     secondary_window_minutes: object = None
     secondary_resets_at: object = None
     rate_limit_reached_type: str = ""
+    vendor: str = VENDOR_OPENAI_CODEX
 
 
 @dataclass(frozen=True)
@@ -207,21 +237,36 @@ class ParsedSessionRecord:
     sample: RateLimitSample | None = None
 
 
-@dataclass
+@dataclass(init=False)
 class CostTotals:
-    api_dollars: Decimal | float = Decimal("0")
-    standard_credits: Decimal | float = Decimal("0")
-    adjusted_credits: Decimal | float = Decimal("0")
-    api_unpriced_events: int = 0
-    credit_unpriced_events: int = 0
-    estimated_events: int = 0
-    ambiguous_reasoning_events: int = 0
-    local_override_events: int = 0
+    api_dollars: Decimal
+    standard_credits: Decimal
+    adjusted_credits: Decimal
+    api_unpriced_events: int
+    credit_unpriced_events: int
+    estimated_events: int
+    ambiguous_reasoning_events: int
+    local_override_events: int
 
-    def __post_init__(self) -> None:
-        self.api_dollars = decimal_value(self.api_dollars)
-        self.standard_credits = decimal_value(self.standard_credits)
-        self.adjusted_credits = decimal_value(self.adjusted_credits)
+    def __init__(
+        self,
+        api_dollars: object = Decimal("0"),
+        standard_credits: object = Decimal("0"),
+        adjusted_credits: object = Decimal("0"),
+        api_unpriced_events: int = 0,
+        credit_unpriced_events: int = 0,
+        estimated_events: int = 0,
+        ambiguous_reasoning_events: int = 0,
+        local_override_events: int = 0,
+    ) -> None:
+        self.api_dollars = decimal_value(api_dollars)
+        self.standard_credits = decimal_value(standard_credits)
+        self.adjusted_credits = decimal_value(adjusted_credits)
+        self.api_unpriced_events = api_unpriced_events
+        self.credit_unpriced_events = credit_unpriced_events
+        self.estimated_events = estimated_events
+        self.ambiguous_reasoning_events = ambiguous_reasoning_events
+        self.local_override_events = local_override_events
 
     @property
     def unpriced_events(self) -> int:

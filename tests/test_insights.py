@@ -5,7 +5,7 @@ import json
 
 from typer.testing import CliRunner
 
-from codex_meter.cli import app
+from caliper.cli import app
 
 from .conftest import make_state_db, token_event, write_session
 
@@ -87,4 +87,4 @@ def test_insights_markdown_renders_actions(tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "| Severity | Insight | Detail | Action |" in result.output
-    assert "codex-meter project" in result.output
+    assert "caliper project" in result.output

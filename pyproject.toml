@@ -3,20 +3,33 @@ requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "codex-meter"
-version = "0.3.0"
-description = "Local Codex usage intelligence for sessions, projects, models, cache, and rate-limit windows."
+name = "caliper-ai"
+version = "0.4.0"
+description = "Measure every line of AI-written code. Offline-first usage, cost, and ROI intelligence for AI coding tools."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
   { name = "Rajdeep Mondal" }
 ]
-keywords = ["codex", "openai", "usage", "tokens", "cli", "credits"]
+keywords = [
+  "ai",
+  "codex",
+  "claude-code",
+  "cursor",
+  "copilot",
+  "usage",
+  "tokens",
+  "cli",
+  "credits",
+  "cost",
+  "observability",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
@@ -24,6 +37,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development",
+  "Topic :: System :: Monitoring",
   "Topic :: Utilities",
   "Typing :: Typed"
 ]
@@ -36,13 +50,14 @@ dependencies = [
 prom = ["prometheus-client>=0.20"]
 
 [project.urls]
-Homepage = "https://github.com/rajdeepmondaldotcom/codex-meter"
-Repository = "https://github.com/rajdeepmondaldotcom/codex-meter"
-Issues = "https://github.com/rajdeepmondaldotcom/codex-meter/issues"
-Changelog = "https://github.com/rajdeepmondaldotcom/codex-meter/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/rajdeepmondaldotcom/caliper"
+Repository = "https://github.com/rajdeepmondaldotcom/caliper"
+Issues = "https://github.com/rajdeepmondaldotcom/caliper/issues"
+Changelog = "https://github.com/rajdeepmondaldotcom/caliper/blob/main/CHANGELOG.md"
 
 [project.scripts]
-codex-meter = "codex_meter.cli:app"
+caliper = "caliper.cli:app"
+codex-meter = "caliper.cli:app"
 
 [dependency-groups]
 dev = [
@@ -61,11 +76,11 @@ include = [
   "/README.md",
   "/pyproject.toml",
   "/schemas",
-  "/src/codex_meter",
+  "/src/caliper",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/codex_meter"]
+packages = ["src/caliper"]
 
 [tool.ruff]
 line-length = 100
@@ -80,7 +95,7 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.coverage.run]
-source = ["src/codex_meter"]
+source = ["src/caliper"]
 branch = true
 
 [tool.coverage.report]

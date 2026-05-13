@@ -5,7 +5,7 @@ import json
 
 from typer.testing import CliRunner
 
-from codex_meter.cli import app
+from caliper.cli import app
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 
@@ -13,7 +13,7 @@ runner = CliRunner()
 
 
 def test_init_writes_template(tmp_path) -> None:
-    target = tmp_path / ".codex-meter.toml"
+    target = tmp_path / ".caliper.toml"
     result = runner.invoke(app, ["init", "--path", str(target)])
     assert result.exit_code == 0, result.output
     text = target.read_text()
@@ -27,7 +27,7 @@ def test_init_writes_template(tmp_path) -> None:
 
 
 def test_init_refuses_to_overwrite_without_force(tmp_path) -> None:
-    target = tmp_path / ".codex-meter.toml"
+    target = tmp_path / ".caliper.toml"
     target.write_text("preserved = 1\n")
     result = runner.invoke(app, ["init", "--path", str(target)])
     assert result.exit_code == 2
@@ -36,7 +36,7 @@ def test_init_refuses_to_overwrite_without_force(tmp_path) -> None:
 
 
 def test_init_with_force_overwrites(tmp_path) -> None:
-    target = tmp_path / ".codex-meter.toml"
+    target = tmp_path / ".caliper.toml"
     target.write_text("old = 1\n")
     result = runner.invoke(app, ["init", "--path", str(target), "--force"])
     assert result.exit_code == 0, result.output

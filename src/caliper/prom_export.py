@@ -1,7 +1,7 @@
 """Prometheus exporter. Opt-in via the `[prom]` extra.
 
 Why a separate module? `prometheus_client` is an optional dependency. Importing
-this module triggers the dependency check; the rest of codex-meter stays import-clean.
+this module triggers the dependency check; the rest of caliper stays import-clean.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ try:
     from prometheus_client import CollectorRegistry, Gauge, generate_latest
 except ImportError as exc:  # pragma: no cover - import guard tested via integration only
     raise ImportError(
-        "prometheus-client is not installed. Install with: pip install 'codex-meter[prom]'"
+        "prometheus-client is not installed. Install with: pip install 'caliper-ai[prom]'"
     ) from exc
 
 
@@ -36,21 +36,21 @@ def build_metrics_text(snapshot: MetricsSnapshot) -> bytes:
     """Render a Prometheus text-format payload from a snapshot."""
     registry = CollectorRegistry()
     credits = Gauge(
-        "codex_meter_credits_used",
+        "caliper_credits_used",
         "Adjusted credits in the current rolling window.",
         registry=registry,
     )
     credits.set(snapshot.credits_used)
 
     burn = Gauge(
-        "codex_meter_burn_per_hour",
+        "caliper_burn_per_hour",
         "Burn rate (credits per hour) for the active window.",
         registry=registry,
     )
     burn.set(snapshot.burn_per_hour)
 
     window_pct = Gauge(
-        "codex_meter_window_used_percent",
+        "caliper_window_used_percent",
         "Rate-limit window used percent (0..100).",
         ["window"],
         registry=registry,
@@ -59,7 +59,7 @@ def build_metrics_text(snapshot: MetricsSnapshot) -> bytes:
     window_pct.labels(window="secondary").set(snapshot.secondary_window_percent)
 
     tokens = Gauge(
-        "codex_meter_tokens_total",
+        "caliper_tokens_total",
         "Token counts by model, tier, and kind (input|cached|output|reasoning).",
         ["model", "tier", "kind"],
         registry=registry,
@@ -68,14 +68,14 @@ def build_metrics_text(snapshot: MetricsSnapshot) -> bytes:
         tokens.labels(model=model, tier=tier, kind=kind).set(count)
 
     events = Gauge(
-        "codex_meter_events_total",
+        "caliper_events_total",
         "Token-count events observed in the current window.",
         registry=registry,
     )
     events.set(snapshot.events_total)
 
     long_ctx = Gauge(
-        "codex_meter_long_context_events_total",
+        "caliper_long_context_events_total",
         "Long-context events (>=threshold input tokens) observed in the current window.",
         registry=registry,
     )

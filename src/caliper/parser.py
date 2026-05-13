@@ -10,8 +10,9 @@ from collections.abc import Iterable
 from contextlib import closing
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
-from codex_meter.models import (
+from caliper.models import (
     LoadResult,
     ParsedSessionRecord,
     RateLimitSample,
@@ -21,9 +22,9 @@ from codex_meter.models import (
     Usage,
     UsageEvent,
 )
-from codex_meter.parse_cache import ParseCache
-from codex_meter.pricing import normalize_model, normalize_service_tier
-from codex_meter.timeutil import parse_datetime, parse_event_timestamp
+from caliper.parse_cache import ParseCache
+from caliper.pricing import normalize_model, normalize_service_tier
+from caliper.timeutil import parse_datetime, parse_event_timestamp
 
 PARSER_CACHE_VERSION = 5
 
@@ -99,7 +100,7 @@ def session_id_from_path(path: Path) -> str:
     return path.stem.removeprefix("rollout-")
 
 
-def _safe_int(value: object) -> int:
+def _safe_int(value: Any) -> int:
     try:
         return int(value or 0)
     except (TypeError, ValueError):
@@ -398,10 +399,7 @@ def _update_from_turn_context(
 def _turn_context_reasoning_effort(payload: dict, current: ThreadMeta) -> str:
     settings = _turn_context_settings(payload)
     return str(
-        settings.get("reasoning_effort")
-        or payload.get("effort")
-        or current.reasoning_effort
-        or ""
+        settings.get("reasoning_effort") or payload.get("effort") or current.reasoning_effort or ""
     )
 
 

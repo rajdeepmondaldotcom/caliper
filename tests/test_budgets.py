@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from codex_meter.budgets import (
+from caliper.budgets import (
     SEVERITY_BREACH,
     SEVERITY_OK,
     SEVERITY_WARN,

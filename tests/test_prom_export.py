@@ -6,14 +6,14 @@ import json
 
 from typer.testing import CliRunner
 
-from codex_meter.cli import app
-from codex_meter.prom_export import (
+from caliper.cli import app
+from caliper.prom_export import (
     MetricsSnapshot,
     build_metrics_text,
     make_handler,
     serve_forever,
 )
-from codex_meter.timeutil import local_timezone
+from caliper.timeutil import local_timezone
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 
@@ -60,12 +60,12 @@ def test_metrics_text_includes_all_expected_metric_names() -> None:
     )
     body = build_metrics_text(snapshot).decode()
     for metric in (
-        "codex_meter_credits_used",
-        "codex_meter_burn_per_hour",
-        "codex_meter_window_used_percent",
-        "codex_meter_tokens_total",
-        "codex_meter_events_total",
-        "codex_meter_long_context_events_total",
+        "caliper_credits_used",
+        "caliper_burn_per_hour",
+        "caliper_window_used_percent",
+        "caliper_tokens_total",
+        "caliper_events_total",
+        "caliper_long_context_events_total",
     ):
         assert metric in body
     assert 'window="primary"' in body
@@ -84,7 +84,7 @@ def test_metrics_text_handles_empty_tokens_dict() -> None:
         long_context_events_total=0,
     )
     body = build_metrics_text(snapshot).decode()
-    assert "codex_meter_credits_used 0.0" in body
+    assert "caliper_credits_used 0.0" in body
 
 
 def test_metrics_handler_serves_metrics_and_404s() -> None:
@@ -123,7 +123,7 @@ def test_metrics_handler_serves_metrics_and_404s() -> None:
     ok.do_GET()
     assert ok.status == 200
     assert ok.headers["Content-Type"].startswith("text/plain")
-    assert b"codex_meter_credits_used 1.0" in ok.wfile.getvalue()
+    assert b"caliper_credits_used 1.0" in ok.wfile.getvalue()
 
     missing = TestHandler("/")
     missing.do_GET()

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from codex_meter.config import build_options
+from caliper.config import build_options
 
 
 def test_cli_paths_override_config_paths(tmp_path) -> None:

@@ -9,10 +9,10 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-from codex_meter.humanize import format_int
-from codex_meter.models import LoadResult, RuntimeOptions
-from codex_meter.parse_cache import default_cache_path
-from codex_meter.pricing import PRICING_SOURCES, RateCard
+from caliper.humanize import format_int
+from caliper.models import LoadResult, RuntimeOptions
+from caliper.parse_cache import default_cache_path
+from caliper.pricing import PRICING_SOURCES, RateCard
 
 HEALTH_STATUS_STYLES = {"ok": "green", "warn": "yellow", "fail": "red"}
 HEALTH_EXIT_CODES = {"ok": 0, "warn": 1, "fail": 2}
@@ -145,7 +145,7 @@ def check_rate_card_age() -> HealthCheck:
     return doctor_check(
         "Rate card",
         "fail",
-        f"checked {age} days ago — run `codex-meter rates show` and consider updating.",
+        f"checked {age} days ago — run `caliper rates show` and consider updating.",
     )
 
 

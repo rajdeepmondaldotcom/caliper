@@ -4,8 +4,8 @@ import datetime as dt
 import sqlite3
 from contextlib import closing
 
-from codex_meter.config import build_options
-from codex_meter.parser import load_usage
+from caliper.config import build_options
+from caliper.parser import load_usage
 
 from .conftest import (
     make_state_db,

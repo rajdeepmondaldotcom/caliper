@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repo live in GitHub Issues for `rajdeepmondaldotcom/codex-meter`.
+Issues and PRDs for this repo live in GitHub Issues for `rajdeepmondaldotcom/caliper`.
 
 Use the `gh` CLI or the GitHub connector for issue operations:
 

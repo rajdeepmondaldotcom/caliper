@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 REDACTION_LIMIT = 72
 
@@ -11,9 +12,10 @@ def format_int(value: int) -> str:
     return f"{value:,}"
 
 
-def compact_number(value: float, prefix: str = "") -> str:
-    sign = "-" if value < 0 else ""
-    amount = abs(float(value))
+def compact_number(value: Any, prefix: str = "") -> str:
+    numeric = float(value)
+    sign = "-" if numeric < 0 else ""
+    amount = abs(numeric)
     for threshold, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
         if amount >= threshold:
             return f"{sign}{prefix}{amount / threshold:.3g}{suffix}"

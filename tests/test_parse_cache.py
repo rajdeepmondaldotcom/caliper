@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from codex_meter import parser
-from codex_meter.config import build_options
-from codex_meter.models import ParsedSessionRecord, RateLimitSample, ThreadMeta, Usage, UsageEvent
-from codex_meter.parse_cache import (
+from caliper import parser
+from caliper.config import build_options
+from caliper.models import ParsedSessionRecord, RateLimitSample, ThreadMeta, Usage, UsageEvent
+from caliper.parse_cache import (
     ParseCache,
     _decode_payload,
     _encode_payload,

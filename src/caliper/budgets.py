@@ -1,6 +1,6 @@
 """Budgets and threshold-based alerts.
 
-Pure-function evaluation. Reads `.codex-meter.toml` `[budgets]` tables via the
+Pure-function evaluation. Reads `.caliper.toml` `[budgets]` tables via the
 CLI layer; this module just takes Budget dataclasses + a usage dict and emits
 BudgetAlert results.
 """
@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from typing import Any
 
-from codex_meter.aggregation import aggregate_total
-from codex_meter.models import LoadResult, RuntimeOptions, decimal_string
-from codex_meter.pricing import RateCard
+from caliper.aggregation import aggregate_total
+from caliper.models import LoadResult, RuntimeOptions, decimal_string
+from caliper.pricing import RateCard
 
 VALID_PERIODS = ("daily", "weekly", "monthly")
 VALID_METRICS = ("credits", "api_dollars", "tokens")
@@ -50,7 +51,7 @@ def severity_for(used_percent: float, warn_at_percent: float) -> str:
     return SEVERITY_OK
 
 
-def evaluate(budgets: list[Budget], usage: dict[str, float]) -> list[BudgetAlert]:
+def evaluate(budgets: list[Budget], usage: dict[str, Any]) -> list[BudgetAlert]:
     """Score each budget against the matching usage value. Missing usage → 0."""
     alerts: list[BudgetAlert] = []
     for budget in budgets:
@@ -80,8 +81,8 @@ def current_period_intervals(now: dt.datetime) -> dict[str, tuple[dt.datetime, d
 
 def usage_for_periods(
     events, options: RuntimeOptions, rate_card: RateCard, now: dt.datetime
-) -> dict[str, float]:
-    usage: dict[str, float] = {}
+) -> dict[str, Any]:
+    usage: dict[str, Any] = {}
     for period, (start, end) in current_period_intervals(now).items():
         scoped = [event for event in events if start <= event.timestamp < end]
         result = LoadResult(
@@ -101,7 +102,7 @@ def usage_for_periods(
 
 def alert_records(
     alerts: list[BudgetAlert],
-    usage: dict[str, float],
+    usage: dict[str, Any],
     pricing_status: str,
 ) -> list[dict]:
     return [

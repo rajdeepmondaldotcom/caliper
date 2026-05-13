@@ -8,7 +8,7 @@ from contextlib import closing
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
-from codex_meter.models import (
+from caliper.models import (
     ParsedSessionRecord,
     RateLimitSample,
     ThreadMeta,
@@ -23,8 +23,8 @@ def default_cache_path() -> Path:
         return Path(override).expanduser() / "parse_cache.sqlite"
     xdg = os.environ.get("XDG_CACHE_HOME")
     if xdg:
-        return Path(xdg).expanduser() / "codex-meter" / "parse_cache.sqlite"
-    return Path.home() / ".cache" / "codex-meter" / "parse_cache.sqlite"
+        return Path(xdg).expanduser() / "caliper" / "parse_cache.sqlite"
+    return Path.home() / ".cache" / "caliper" / "parse_cache.sqlite"
 
 
 @dataclass(frozen=True)
@@ -169,6 +169,16 @@ def _encode_payload(parsed) -> bytes:
 
 
 def _decode_payload(raw) -> list[ParsedSessionRecord] | None:
+    payload = _payload_from_json(raw)
+    if payload is None:
+        return None
+    records = payload.get("records")
+    if not isinstance(records, list):
+        return None
+    return _records_from_payload(records)
+
+
+def _payload_from_json(raw) -> dict | None:
     try:
         text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
         payload = json.loads(text)
@@ -176,26 +186,26 @@ def _decode_payload(raw) -> list[ParsedSessionRecord] | None:
         return None
     if not isinstance(payload, dict) or payload.get("version") != 1:
         return None
-    records = payload.get("records")
-    if not isinstance(records, list):
-        return None
-    parsed: list[ParsedSessionRecord] = []
+    return payload
+
+
+def _records_from_payload(records: list) -> list[ParsedSessionRecord] | None:
     try:
-        for record in records:
-            if not isinstance(record, dict):
-                return None
-            event_raw = record.get("event")
-            sample_raw = record.get("sample")
-            parsed.append(
-                ParsedSessionRecord(
-                    event=_event_from_dict(event_raw) if isinstance(event_raw, dict) else None,
-                    counter_reset=bool(record.get("reset")),
-                    sample=_sample_from_dict(sample_raw) if isinstance(sample_raw, dict) else None,
-                )
-            )
+        return [_record_from_dict(record) for record in records]
     except (KeyError, TypeError, ValueError):
         return None
-    return parsed
+
+
+def _record_from_dict(record: object) -> ParsedSessionRecord:
+    if not isinstance(record, dict):
+        raise TypeError("cached record must be an object")
+    event_raw = record.get("event")
+    sample_raw = record.get("sample")
+    return ParsedSessionRecord(
+        event=_event_from_dict(event_raw) if isinstance(event_raw, dict) else None,
+        counter_reset=bool(record.get("reset")),
+        sample=_sample_from_dict(sample_raw) if isinstance(sample_raw, dict) else None,
+    )
 
 
 def _coerce_record(record) -> ParsedSessionRecord:

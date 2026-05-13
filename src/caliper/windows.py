@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from typing import Any
 
-from codex_meter.models import RateLimitSample
+from caliper.models import RateLimitSample
 
 BURN_RATE_LOOKBACK_HOURS = 6
 MIN_BURN_RATE_SAMPLES = 3
@@ -28,14 +29,14 @@ class WindowState:
     limit_name: str = ""
 
 
-def _coerce_float(value: object) -> float | None:
+def _coerce_float(value: Any) -> float | None:
     try:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
 
 
-def _coerce_int(value: object) -> int | None:
+def _coerce_int(value: Any) -> int | None:
     try:
         return int(value) if value is not None else None
     except (TypeError, ValueError):

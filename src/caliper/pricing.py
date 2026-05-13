@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 
-from codex_meter.models import (
+from caliper.models import (
     CostTotals,
     LongContextRule,
     PricingSource,
@@ -197,9 +197,7 @@ class RateCard:
         normalized = normalize_model(model)
         flat = self.pricing_mode == "flat"
         card = MODELS_BY_NAME.get(normalized)
-        long_context, input_mult, output_mult = self._long_context_multipliers(
-            usage, card, flat
-        )
+        long_context, input_mult, output_mult = self._long_context_multipliers(usage, card, flat)
         billable_usage, ambiguous_reasoning = _billable_usage(usage)
         api_rates, api_unpriced, api_local = self._resolve_api_rates(normalized, card, flat)
         credit_rates, credit_unpriced, credit_local = self._resolve_credit_rates(

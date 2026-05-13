@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from codex_meter.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions, UsageEvent
-from codex_meter.pricing import RateCard
-from codex_meter.timeutil import day_key, load_timezone, month_key, week_key
+from caliper.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions, UsageEvent
+from caliper.pricing import RateCard
+from caliper.timeutil import day_key, load_timezone, month_key, week_key
 
 
 def aggregate_events(

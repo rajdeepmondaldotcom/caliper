@@ -1,11 +1,14 @@
-"""Codex Meter — offline-first Codex usage analytics."""
+"""Caliper.
+
+Measure every line of AI-written code with offline-first usage intelligence.
+"""
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("codex-meter")
+    __version__ = version("caliper-ai")
 except PackageNotFoundError:
     __version__ = "0.0.0+local"
 

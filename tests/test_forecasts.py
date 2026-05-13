@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from codex_meter.forecasts import (
+from caliper.forecasts import (
     daily_mean,
     daily_stdev,
     ewma,

@@ -5,7 +5,7 @@ import io
 import json
 from decimal import Decimal
 
-from codex_meter.models import decimal_string
+from caliper.models import decimal_string
 
 
 def json_default(value: object) -> float:

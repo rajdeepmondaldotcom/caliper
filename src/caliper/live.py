@@ -1,4 +1,4 @@
-"""Live TUI for codex-meter. Re-parses JSONL on each tick (cache is Phase 3)."""
+"""Live TUI for caliper. Re-parses JSONL on each tick (cache is Phase 3)."""
 
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ from rich.progress_bar import ProgressBar
 from rich.table import Table
 from rich.text import Text
 
-from codex_meter.aggregation import aggregate_total
-from codex_meter.models import LoadResult, RuntimeOptions
-from codex_meter.parser import load_usage
-from codex_meter.pricing import RateCard
-from codex_meter.render import pricing_status, pricing_warnings
-from codex_meter.timeutil import local_timezone
-from codex_meter.windows import (
+from caliper.aggregation import aggregate_total
+from caliper.models import LoadResult, RuntimeOptions
+from caliper.parser import load_usage
+from caliper.pricing import RateCard
+from caliper.render import pricing_status, pricing_warnings
+from caliper.timeutil import local_timezone
+from caliper.windows import (
     WindowState,
     compute_window_state,
     format_burn_rate,
@@ -46,6 +46,14 @@ class LiveFrame:
     refresh_ms: float = 0.0
     pricing_status: str = "exact"
     pricing_warnings: tuple[str, ...] = ()
+
+
+@dataclass
+class LiveLoopState:
+    frame: LiveFrame
+    show_help: bool = False
+    paused: bool = False
+    ticks: int = 0
 
 
 def _window_subset(events, start: dt.datetime, end: dt.datetime):
@@ -250,37 +258,73 @@ def run_live(
 
     original = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, _on_signal)
-    ticks = 0
-    show_help = False
-    paused = False
     try:
         target = console or Console()
-        frame = collect_frame(options)
+        state = LiveLoopState(frame=collect_frame(options))
         width = target.size.width
         with Live(
-            render_frame(frame, show_help=show_help, paused=paused, width=width),
+            _render_live_state(state, width),
             console=target,
             refresh_per_second=4,
             screen=False,
         ) as live:
-            while not stop["flag"]:
-                key = _read_key()
-                if key == "q":
-                    break
-                if key == "?":
-                    show_help = not show_help
-                if key == "p":
-                    paused = not paused
-                if key == "r" and not paused:
-                    frame = collect_frame(options)
-                time.sleep(interval)
-                ticks += 1
-                if max_ticks is not None and ticks >= max_ticks:
-                    break
-                if stop["flag"]:
-                    break
-                if not paused and not show_help:
-                    frame = collect_frame(options)
-                live.update(render_frame(frame, show_help=show_help, paused=paused, width=width))
+            _run_live_loop(live, state, options, interval, max_ticks, stop, width)
     finally:
         signal.signal(signal.SIGINT, original)
+
+
+def _run_live_loop(
+    live: Live,
+    state: LiveLoopState,
+    options: RuntimeOptions,
+    interval: float,
+    max_ticks: int | None,
+    stop: dict,
+    width: int,
+) -> None:
+    while not stop["flag"]:
+        if _handle_live_key(state, options):
+            break
+        _sleep_one_tick(state, interval)
+        if _should_stop(state, stop, max_ticks):
+            break
+        if _auto_refresh_enabled(state):
+            state.frame = collect_frame(options)
+        live.update(_render_live_state(state, width))
+
+
+def _handle_live_key(state: LiveLoopState, options: RuntimeOptions) -> bool:
+    key = _read_key()
+    if key == "q":
+        return True
+    if key == "?":
+        state.show_help = not state.show_help
+    if key == "p":
+        state.paused = not state.paused
+    if key == "r" and not state.paused:
+        state.frame = collect_frame(options)
+    return False
+
+
+def _sleep_one_tick(state: LiveLoopState, interval: float) -> None:
+    time.sleep(interval)
+    state.ticks += 1
+
+
+def _should_stop(state: LiveLoopState, stop: dict, max_ticks: int | None) -> bool:
+    if max_ticks is not None and state.ticks >= max_ticks:
+        return True
+    return bool(stop["flag"])
+
+
+def _auto_refresh_enabled(state: LiveLoopState) -> bool:
+    return not state.paused and not state.show_help
+
+
+def _render_live_state(state: LiveLoopState, width: int) -> RenderableType:
+    return render_frame(
+        state.frame,
+        show_help=state.show_help,
+        paused=state.paused,
+        width=width,
+    )

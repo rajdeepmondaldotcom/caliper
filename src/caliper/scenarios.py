@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from codex_meter.aggregation import aggregate_total
-from codex_meter.intervals import Interval
-from codex_meter.models import Aggregate, LoadResult, RuntimeOptions, UsageEvent, decimal_value
-from codex_meter.output import amount_fields
-from codex_meter.pricing import RateCard
-from codex_meter.render import pricing_status, pricing_warnings
-from codex_meter.timeutil import iso_z
+from caliper.aggregation import aggregate_total
+from caliper.intervals import Interval
+from caliper.models import Aggregate, LoadResult, RuntimeOptions, UsageEvent, decimal_value
+from caliper.output import amount_fields
+from caliper.pricing import RateCard
+from caliper.render import pricing_status, pricing_warnings
+from caliper.timeutil import iso_z
 
 
 @dataclass(frozen=True)

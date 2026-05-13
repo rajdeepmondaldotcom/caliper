@@ -1,5 +1,61 @@
 # Changelog
 
+Caliper follows **[Semantic Versioning](https://semver.org/)** with a
+deliberately conservative pre-1.0 cadence:
+
+- `0.x.y` — public API may still move between minor versions while the
+  cross-vendor surface stabilizes. Every release documents breakage in this
+  changelog and provides a one-step upgrade path.
+- `1.0.0` — reserved for the release where the CLI surface, the
+  vendor-neutral record format, and the multi-vendor parser set are all
+  considered frozen. Caliper will not reach `1.0` until at least three
+  vendor parsers (Codex, Claude Code, Cursor) ship together.
+
+## 0.4.0 - 2026-05-13
+
+### Caliper — rebrand and vendor-neutral foundation
+
+This release rebrands the project from `codex-meter` to **Caliper**, lays
+down the vendor-neutral record that the next milestones build on, and ships
+under a new PyPI distribution name. Existing users see a stable upgrade:
+every command, option, output field, and exit code is preserved.
+
+### Added
+- New CLI entry point: `caliper`. The original `codex-meter` command is
+  retained as a permanent alias and dispatches to the same Typer app.
+- Vendor-neutral record: `UsageEvent` and `RateLimitSample` now carry a
+  `vendor` field. Today's parser populates `openai-codex`; planned parsers
+  (`claude-code`, `cursor`, `aider`, `copilot`) will populate the same shape
+  so reports, pricing, budgets, forecasts, and exports work cross-vendor
+  without restructuring.
+- Vendor constants exposed via `caliper.models`: `VENDOR_OPENAI_CODEX`,
+  `VENDOR_CLAUDE_CODE`, `VENDOR_CURSOR`, `VENDOR_AIDER`, `VENDOR_COPILOT`,
+  `VENDOR_UNKNOWN`, plus the `KNOWN_VENDORS` frozenset.
+
+### Changed
+- Distribution name: `codex-meter` → `caliper-ai` on PyPI. Install with
+  `pip install caliper-ai` (or `uvx caliper-ai`, `pipx install caliper-ai`).
+  Python import path remains `caliper`.
+- Internal package: `src/codex_meter/` → `src/caliper/`. All public Python
+  imports now use `from caliper import ...`.
+- Local config file: `.codex-meter.toml` → `.caliper.toml`.
+- User config directory: `~/.config/codex-meter/` → `~/.config/caliper/`.
+- Parse-cache and rate-audit sidecar directories migrated from
+  `codex-meter` to `caliper` under XDG cache/data dirs.
+- README rewritten for the Caliper product narrative; roadmap publishes the
+  cross-vendor and ROI sequence ahead of 1.0.
+- Release CI smoke-tests both `caliper` and `codex-meter` entry points from
+  the built wheel; PyPI environment URL now points at `caliper-ai`.
+
+### Upgrade notes
+- Reinstall: `uv tool install caliper-ai` (or `pipx install caliper-ai`).
+  The `codex-meter` command still works after the upgrade.
+- Existing `.codex-meter.toml` files: rename to `.caliper.toml` (same
+  schema). Existing parse caches under `~/.cache/codex-meter/` can be
+  deleted; Caliper rebuilds them on first run under `~/.cache/caliper/`.
+- `--cov=src/codex_meter` becomes `--cov=src/caliper` for downstream
+  tooling.
+
 ## 0.3.0 - 2026-05-13
 
 ### Added

@@ -5,10 +5,10 @@ import datetime as dt
 from rich.console import Console
 from typer.testing import CliRunner
 
-from codex_meter.cli import app
-from codex_meter.config import build_options
-from codex_meter.live import LiveFrame, collect_frame, render_frame
-from codex_meter.windows import WindowState
+from caliper.cli import app
+from caliper.config import build_options
+from caliper.live import LiveFrame, collect_frame, render_frame
+from caliper.windows import WindowState
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 

@@ -10,12 +10,12 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
-from codex_meter import cli, prom_snapshot, rate_audit
-from codex_meter.config import build_options
-from codex_meter.health import check_rates_file, check_state_db_readable
-from codex_meter.models import LoadResult, RateLimitSample, ThreadMeta, Usage, UsageEvent
-from codex_meter.output import records_to_csv, records_to_markdown
-from codex_meter.rate_audit import dedupe_models, extract_models_from_text, fetch_rate_sources
+from caliper import cli, prom_snapshot, rate_audit
+from caliper.config import build_options
+from caliper.health import check_rates_file, check_state_db_readable
+from caliper.models import LoadResult, RateLimitSample, ThreadMeta, Usage, UsageEvent
+from caliper.output import records_to_csv, records_to_markdown
+from caliper.rate_audit import dedupe_models, extract_models_from_text, fetch_rate_sources
 
 runner = CliRunner()
 
@@ -232,7 +232,7 @@ def test_whatif_non_noop_csv_markdown_and_table(monkeypatch, tmp_path) -> None:
 
 def test_budgets_check_formats_and_table(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cli, "load_usage", lambda _options: _result(_event()))
-    config = tmp_path / ".codex-meter.toml"
+    config = tmp_path / ".caliper.toml"
     config.write_text("[budgets]\ndaily_tokens = 1_000_000\n")
     base_args = [
         "budgets",

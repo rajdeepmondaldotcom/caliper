@@ -5,12 +5,12 @@ import os
 import tomllib
 from pathlib import Path
 
-from codex_meter.models import RuntimeOptions
-from codex_meter.pricing import normalize_service_tier
-from codex_meter.timeutil import load_timezone, local_timezone, parse_datetime
+from caliper.models import RuntimeOptions
+from caliper.pricing import normalize_service_tier
+from caliper.timeutil import load_timezone, local_timezone, parse_datetime
 
-USER_CONFIG = Path.home() / ".config" / "codex-meter" / "config.toml"
-LOCAL_CONFIG = Path(".codex-meter.toml")
+USER_CONFIG = Path.home() / ".config" / "caliper" / "config.toml"
+LOCAL_CONFIG = Path(".caliper.toml")
 
 
 def default_codex_home() -> Path:
@@ -107,20 +107,7 @@ def build_options(
     top_threads: int = 10,
 ) -> RuntimeOptions:
     loaded = load_config(config)
-    end = parse_datetime(until, dt.datetime.now(tz=local_timezone()))
-    if since:
-        start = parse_datetime(since)
-    elif days is not None:
-        if days <= 0:
-            raise ValueError("--days must be greater than 0")
-        start = end - dt.timedelta(days=days)
-    else:
-        default_days = float(loaded.get("default_days", 30))
-        if default_days <= 0:
-            raise ValueError("default_days must be greater than 0")
-        start = end - dt.timedelta(days=default_days)
-    if start >= end:
-        raise ValueError("--since/--start must be before --until/--end")
+    start, end = _time_window(loaded, since=since, until=until, days=days)
 
     timezone_value = str(cfg(loaded, "timezone", timezone, "local"))
     load_timezone(timezone_value)
@@ -129,32 +116,13 @@ def build_options(
         str(cfg(loaded, "pricing_mode", pricing_mode, "model")),
         {"flat", "model"},
     )
-    service_tier_value = str(cfg(loaded, "service_tier", service_tier, "auto"))
-    if service_tier_value != "auto":
-        service_tier_value = normalize_service_tier(service_tier_value)
-    service_tier_value = validate_choice(
-        "--service-tier",
-        service_tier_value,
-        {"auto", "fast", "standard"},
+    service_tier_value = _service_tier(loaded, service_tier)
+    unknown_service_tier_value = _unknown_service_tier(loaded, unknown_service_tier)
+    top_threads_value = _positive_int(
+        cfg(loaded, "top_threads", top_threads, 10),
+        "--top-threads",
     )
-    unknown_service_tier_value = str(
-        cfg(loaded, "unknown_service_tier", unknown_service_tier, "current-config")
-    )
-    if unknown_service_tier_value != "current-config":
-        unknown_service_tier_value = normalize_service_tier(unknown_service_tier_value)
-    unknown_service_tier_value = validate_choice(
-        "--unknown-service-tier",
-        unknown_service_tier_value,
-        {"current-config", "fast", "standard"},
-    )
-    top_threads_value = int(cfg(loaded, "top_threads", top_threads, 10))
-    if top_threads_value <= 0:
-        raise ValueError("--top-threads must be greater than 0")
-    width_value = cfg(loaded, "width", width, None)
-    if width_value is not None:
-        width_value = int(width_value)
-        if width_value <= 0:
-            raise ValueError("--width must be greater than 0")
+    width_value = _positive_optional_int(cfg(loaded, "width", width, None), "--width")
     no_dedupe_value = cfg_bool(loaded, "no_dedupe", no_dedupe, False)
     no_parse_cache_value = cfg_bool(loaded, "no_parse_cache", no_parse_cache, False)
 
@@ -179,3 +147,67 @@ def build_options(
         width=width_value,
         top_threads=top_threads_value,
     )
+
+
+def _time_window(
+    loaded: dict,
+    *,
+    since: str | None,
+    until: str | None,
+    days: float | None,
+) -> tuple[dt.datetime, dt.datetime]:
+    end = parse_datetime(until, dt.datetime.now(tz=local_timezone()))
+    start = _start_time(loaded, since=since, days=days, end=end)
+    if start >= end:
+        raise ValueError("--since/--start must be before --until/--end")
+    return start, end
+
+
+def _start_time(
+    loaded: dict,
+    *,
+    since: str | None,
+    days: float | None,
+    end: dt.datetime,
+) -> dt.datetime:
+    if since:
+        return parse_datetime(since)
+    if days is not None:
+        if days <= 0:
+            raise ValueError("--days must be greater than 0")
+        return end - dt.timedelta(days=days)
+    default_days = float(loaded.get("default_days", 30))
+    if default_days <= 0:
+        raise ValueError("default_days must be greater than 0")
+    return end - dt.timedelta(days=default_days)
+
+
+def _service_tier(loaded: dict, value: str) -> str:
+    tier = str(cfg(loaded, "service_tier", value, "auto"))
+    if tier != "auto":
+        tier = normalize_service_tier(tier)
+    return validate_choice("--service-tier", tier, {"auto", "fast", "standard"})
+
+
+def _unknown_service_tier(loaded: dict, value: str) -> str:
+    tier = str(cfg(loaded, "unknown_service_tier", value, "current-config"))
+    if tier != "current-config":
+        tier = normalize_service_tier(tier)
+    return validate_choice(
+        "--unknown-service-tier",
+        tier,
+        {"current-config", "fast", "standard"},
+    )
+
+
+def _positive_int(value, name: str) -> int:
+    coerced = int(value)
+    if coerced <= 0:
+        raise ValueError(f"{name} must be greater than 0")
+    return coerced
+
+
+def _positive_optional_int(value, name: str) -> int | None:
+    if value is None:
+        return None
+    return _positive_int(value, name)

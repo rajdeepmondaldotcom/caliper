@@ -4,13 +4,13 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 
-from codex_meter.aggregation import aggregate_projects, aggregate_total
-from codex_meter.models import LoadResult, RuntimeOptions, UsageEvent, decimal_string
-from codex_meter.pricing import RateCard
-from codex_meter.render import pricing_status, pricing_warnings
-from codex_meter.subscriptions import subscription_plan_payload, subscription_warnings
-from codex_meter.timeutil import iso_z, load_timezone
-from codex_meter.windows import WindowState, compute_window_state, format_seconds_remaining
+from caliper.aggregation import aggregate_projects, aggregate_total
+from caliper.models import LoadResult, RuntimeOptions, UsageEvent, decimal_string
+from caliper.pricing import RateCard
+from caliper.render import pricing_status, pricing_warnings
+from caliper.subscriptions import subscription_plan_payload, subscription_warnings
+from caliper.timeutil import iso_z, load_timezone
+from caliper.windows import WindowState, compute_window_state, format_seconds_remaining
 
 
 @dataclass(frozen=True)

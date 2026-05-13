@@ -45,7 +45,7 @@ jobs:
       - name: Tests
         run: PYTHONWARNINGS=error::ResourceWarning uv run pytest
       - name: Coverage
-        run: uv run pytest --cov=src/codex_meter --cov-report=term
+        run: uv run pytest --cov=src/caliper --cov-report=term
       - name: Build distributions
         run: |
           rm -rf dist
@@ -56,6 +56,8 @@ jobs:
         run: |
           set -euo pipefail
           wheel="$(ls dist/*.whl)"
+          uvx --from "$wheel" caliper --version
+          uvx --from "$wheel" caliper --help
           uvx --from "$wheel" codex-meter --version
           uvx --from "$wheel" codex-meter --help
       - name: Upload distributions
@@ -116,7 +118,7 @@ jobs:
     needs: github-draft
     environment:
       name: pypi
-      url: https://pypi.org/project/codex-meter/
+      url: https://pypi.org/project/caliper-ai/
     permissions:
       contents: read
     steps:

@@ -13,8 +13,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from codex_meter import __version__
-from codex_meter.aggregation import (
+from caliper import __version__
+from caliper.aggregation import (
     aggregate_daily,
     aggregate_model_mode,
     aggregate_monthly,
@@ -23,7 +23,7 @@ from codex_meter.aggregation import (
     aggregate_total,
     aggregate_weekly,
 )
-from codex_meter.budgets import (
+from caliper.budgets import (
     SEVERITY_BREACH,
     SEVERITY_EXIT_CODE,
     SEVERITY_WARN,
@@ -32,73 +32,75 @@ from codex_meter.budgets import (
     parse_budgets_table,
     usage_for_periods,
 )
-from codex_meter.budgets import (
+from caliper.budgets import (
     evaluate as evaluate_budgets,
 )
-from codex_meter.config import build_options, load_config
-from codex_meter.exporters import (
+from caliper.config import build_options, load_config
+from caliper.exporters import (
     ReceiptInputs,
     month_bounds,
     render_grafana_dashboard,
     render_receipt_html,
     render_receipt_markdown,
 )
-from codex_meter.forecasts import project as project_forecast
-from codex_meter.health import (
+from caliper.forecasts import project as project_forecast
+from caliper.health import (
     HEALTH_EXIT_CODES,
     HEALTH_STATUS_STYLES,
     build_health_report,
     rate_card_age_days,
     worst_health_status,
 )
-from codex_meter.humanize import short_table_label
-from codex_meter.insights import build_insights, insights_payload, render_insights_markdown
-from codex_meter.intervals import parse_interval
-from codex_meter.live import run_live
-from codex_meter.models import (
+from caliper.humanize import short_table_label
+from caliper.insights import build_insights, insights_payload, render_insights_markdown
+from caliper.intervals import parse_interval
+from caliper.live import run_live
+from caliper.models import (
     Aggregate,
     LoadResult,
+    Rates,
     RuntimeOptions,
 )
-from codex_meter.output import (
+from caliper.output import (
     amount_fields,
     json_dumps,
     records_to_csv,
     records_to_markdown,
 )
-from codex_meter.parser import load_usage
-from codex_meter.pricing import (
+from caliper.parser import load_usage
+from caliper.pricing import (
     MODEL_CARDS,
     MODELS_BY_NAME,
     PRICING_SOURCES,
     RateCard,
 )
-from codex_meter.prom_snapshot import build_prometheus_snapshot
-from codex_meter.rate_audit import (
+from caliper.prom_snapshot import build_prometheus_snapshot
+from caliper.rate_audit import (
     fetch_rate_sources,
     fetched_rates_path,
     rate_card_payload,
     rate_card_records,
 )
-from codex_meter.render import format_int, pricing_status, pricing_warnings, render, render_limits
-from codex_meter.scenarios import (
+from caliper.render import format_int, pricing_status, pricing_warnings, render, render_limits
+from caliper.scenarios import (
     aggregate_interval,
     amount_delta,
     build_whatif_report,
     interval_summary,
     sparse_comparison_warning,
 )
-from codex_meter.statusline import (
+from caliper.statusline import (
     build_statusline_snapshot,
     render_statusline_text,
     statusline_payload,
 )
-from codex_meter.timeutil import iso_z, local_timezone
+from caliper.timeutil import iso_z, local_timezone
 
 app = typer.Typer(
     help=(
-        "Local Codex usage intelligence for sessions, projects, models, cache, "
-        "and rate-limit windows."
+        "Caliper — measure every line of AI-written code. "
+        "Offline-first usage, cost, and ROI intelligence for AI coding tools "
+        "(OpenAI Codex CLI today; Claude Code, Cursor, Aider, Copilot next)."
     ),
     no_args_is_help=False,
 )
@@ -124,7 +126,7 @@ StateDbOpt = Annotated[Path | None, typer.Option("--state-db", help="Codex state
 CodexConfigOpt = Annotated[
     Path | None, typer.Option("--codex-config", help="Codex config.toml path.")
 ]
-ConfigOpt = Annotated[Path | None, typer.Option("--config", help="codex-meter config TOML path.")]
+ConfigOpt = Annotated[Path | None, typer.Option("--config", help="caliper config TOML path.")]
 PricingModeOpt = Annotated[str, typer.Option("--pricing-mode")]
 ServiceTierOpt = Annotated[str, typer.Option("--service-tier")]
 UnknownTierOpt = Annotated[str, typer.Option("--unknown-service-tier")]
@@ -772,20 +774,20 @@ def init(
     path: Annotated[
         Path,
         typer.Option("--path", help="Target file path."),
-    ] = Path(".codex-meter.toml"),
+    ] = Path(".caliper.toml"),
     force: Annotated[
         bool,
         typer.Option("--force", help="Overwrite an existing config."),
     ] = False,
 ) -> None:
-    """Scaffold a .codex-meter.toml config with commented defaults."""
+    """Scaffold a .caliper.toml config with commented defaults."""
     if path.exists() and not force:
         raise _exit_error(f"{path} already exists. Pass --force to overwrite.")
     template = (
-        "# codex-meter configuration.\n"
+        "# caliper configuration.\n"
         "# Tip: every key here can also be set per-invocation via a CLI flag.\n"
         "\n"
-        "# Default rolling window for `codex-meter` (days).\n"
+        "# Default rolling window for `caliper` (days).\n"
         "default_days = 30\n"
         '# timezone = "local"\n'
         "\n"
@@ -815,7 +817,7 @@ def init(
         "# no_dedupe = false\n"
         "# no_parse_cache = false\n"
         "\n"
-        "# Optional budgets — used by `codex-meter budgets check`.\n"
+        "# Optional budgets — used by `caliper budgets check`.\n"
         "# Severity: ok < 80%, warn at 80%, breach at 100%.\n"
         "[budgets]\n"
         "# daily_credits = 25000\n"
@@ -830,14 +832,14 @@ def init(
     )
     path.write_text(template)
     console.print(f"[green]Wrote[/green] {path}")
-    console.print("[dim]Edit it, then run `codex-meter budgets check` to verify.[/dim]")
+    console.print("[dim]Edit it, then run `caliper budgets check` to verify.[/dim]")
 
 
 rates_app = typer.Typer(help="Inspect and manage the embedded Codex rate card.")
 app.add_typer(rates_app, name="rates")
 
 
-def _format_rates_label(rates: object) -> str:
+def _format_rates_label(rates: Rates | None) -> str:
     if rates is None:
         return "—"
     return (
@@ -1424,10 +1426,10 @@ def export_prometheus(
 ) -> None:
     """Serve /metrics for Prometheus. Default bind 127.0.0.1 — pass --host 0.0.0.0 to expose."""
     try:
-        from codex_meter.prom_export import serve_forever
+        from caliper.prom_export import serve_forever
     except ImportError as exc:
         raise _exit_error(
-            "prometheus-client is not installed. Install with: pip install 'codex-meter[prom]'"
+            "prometheus-client is not installed. Install with: pip install 'caliper-ai[prom]'"
         ) from exc
     try:
         options = build_options(
@@ -1536,7 +1538,7 @@ def export_receipt(
         warnings=[],
     )
 
-    from codex_meter.aggregation import (
+    from caliper.aggregation import (
         aggregate_model_mode,
         aggregate_projects,
         aggregate_sessions,
@@ -1662,7 +1664,7 @@ def budgets_check(
     pricing_mode: PricingModeOpt = "model",
     output_format: FormatOpt = "table",
 ) -> None:
-    """Evaluate \\[budgets] from .codex-meter.toml against the current window."""
+    """Evaluate \\[budgets] from .caliper.toml against the current window."""
     _validate_format(output_format)
     try:
         loaded = load_config(config) if config else load_config()
@@ -1676,7 +1678,7 @@ def budgets_check(
 
     if not budget_list:
         console.print(
-            "No budgets defined. Add a [budgets] table to .codex-meter.toml. "
+            "No budgets defined. Add a [budgets] table to .caliper.toml. "
             "Example: daily_credits = 25000.",
             markup=False,
         )
