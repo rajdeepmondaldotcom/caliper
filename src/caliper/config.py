@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import tomllib
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from caliper.models import RuntimeOptions
@@ -55,6 +56,55 @@ def load_config(explicit_path: Path | None = None) -> dict:
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise ValueError(f"Could not load config {expanded}: {exc}") from exc
     return loaded
+
+
+VALID_TUI_THEMES = ("slate", "parchment", "colorblind", "monochrome")
+
+
+@dataclass(frozen=True)
+class TuiConfig:
+    """User-tweakable knobs for the Textual TUI.
+
+    Persisted under a ``[tui]`` section in ``caliper.toml``. Default
+    values match the "first sensible experience" — slate theme, privacy
+    on, demo wizard on first run, native filesystem watcher on.
+    """
+
+    theme: str = "slate"
+    redact: bool = True
+    show_demo_on_first_run: bool = True
+    no_watchdog: bool = False
+
+    def with_theme(self, theme: str) -> TuiConfig:
+        if theme not in VALID_TUI_THEMES:
+            raise ValueError(f"unknown tui theme {theme!r}; expected one of {VALID_TUI_THEMES}")
+        return replace(self, theme=theme)
+
+
+def load_tui_config(loaded: dict) -> TuiConfig:
+    """Read a previously loaded TOML dict and project its ``[tui]`` section."""
+    section = loaded.get("tui") or {}
+    defaults = TuiConfig()
+    theme_raw = str(section.get("theme", defaults.theme)).strip().lower()
+    theme = theme_raw if theme_raw in VALID_TUI_THEMES else defaults.theme
+    return TuiConfig(
+        theme=theme,
+        redact=bool(section.get("redact", defaults.redact)),
+        show_demo_on_first_run=bool(
+            section.get("show_demo_on_first_run", defaults.show_demo_on_first_run)
+        ),
+        no_watchdog=bool(section.get("no_watchdog", defaults.no_watchdog)),
+    )
+
+
+def serialize_tui_config(config: TuiConfig) -> dict:
+    """Inverse of :func:`load_tui_config` for the ``[tui]`` section."""
+    return {
+        "theme": config.theme,
+        "redact": config.redact,
+        "show_demo_on_first_run": config.show_demo_on_first_run,
+        "no_watchdog": config.no_watchdog,
+    }
 
 
 def cfg(config: dict, key: str, value, default):
