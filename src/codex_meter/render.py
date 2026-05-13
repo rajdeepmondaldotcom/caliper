@@ -280,13 +280,10 @@ def report_payload(
 
 
 def workspace_coverage(result: LoadResult) -> dict:
-    sessions = {event.session_id for event in result.events if event.session_id}
-    sessions_with_project = {
-        event.session_id for event in result.events if event.session_id and event.thread.cwd
-    }
-    project_paths = {event.thread.cwd for event in result.events if event.thread.cwd}
     events = len(result.events)
     events_with_project = sum(1 for event in result.events if event.thread.cwd)
+    sessions = _session_ids(result.events)
+    sessions_with_project = _session_ids_with_project(result.events)
     return {
         "events": events,
         "events_with_project": events_with_project,
@@ -294,8 +291,20 @@ def workspace_coverage(result: LoadResult) -> dict:
         "sessions": len(sessions),
         "sessions_with_project": len(sessions_with_project),
         "session_coverage": len(sessions_with_project) / len(sessions) if sessions else 0.0,
-        "project_count": len(project_paths),
+        "project_count": len(_project_paths(result.events)),
     }
+
+
+def _session_ids(events) -> set[str]:
+    return {event.session_id for event in events if event.session_id}
+
+
+def _session_ids_with_project(events) -> set[str]:
+    return {event.session_id for event in events if event.session_id and event.thread.cwd}
+
+
+def _project_paths(events) -> set[str]:
+    return {event.thread.cwd for event in events if event.thread.cwd}
 
 
 def write_output(text: str, output: Path | None) -> None:
@@ -315,6 +324,20 @@ def render_table(
     buffer = io.StringIO()
     console = _make_console(buffer, options)
     total = aggregate_total(result, options, rate_card=rate_card or _rate_card(options))
+    _print_report_header(console, result, options, title, total)
+    console.print(_usage_table(rows, total, options))
+    console.print()
+    _print_report_footer(console, result, total)
+    return buffer.getvalue()
+
+
+def _print_report_header(
+    console: Console,
+    result: LoadResult,
+    options: RuntimeOptions,
+    title: str,
+    total: Aggregate,
+) -> None:
     console.print(f"[bold]{title}[/bold]")
     console.print(f"Window: {window_label(options.start, options.end, options.timezone)}")
     console.print(f"Session root: {options.session_root}")
@@ -329,6 +352,8 @@ def render_table(
         console.print(f"[yellow]Subscription:[/yellow] {warning}")
     console.print()
 
+
+def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOptions) -> Table:
     table = Table(show_lines=False, expand=not options.compact)
     table.add_column("Group")
     table.add_column("Models")
@@ -360,8 +385,10 @@ def render_table(
         _table_float(total.costs.adjusted_credits, options),
         _table_float(total.costs.api_dollars, options, prefix="$"),
     )
-    console.print(table)
-    console.print()
+    return table
+
+
+def _print_report_footer(console: Console, result: LoadResult, total: Aggregate) -> None:
     events_text = format_int(total.totals.events)
     duplicates_text = format_int(result.duplicates)
     console.print(f"Events: {events_text} | Duplicates skipped: {duplicates_text}")
@@ -380,7 +407,6 @@ def render_table(
         console.print(f"Service-tier sources: {sources}")
     if result.plan_types:
         console.print(f"Plan types: {', '.join(sorted(result.plan_types))}")
-    return buffer.getvalue()
 
 
 def _table_int(value: int, options: RuntimeOptions) -> str:
@@ -562,16 +588,25 @@ def render_limits_table(result: LoadResult, options: RuntimeOptions) -> str:
         console.print("No rate-limit samples found.")
         return buffer.getvalue()
     if options.compact:
-        for sample in samples:
-            limit = sample.limit_name or sample.limit_id or "-"
-            console.print(
-                f"- {iso_z(sample.timestamp)} | limit={limit} | credits={sample.credits} | "
-                f"primary={sample.primary_used_percent}%/"
-                f"{sample.primary_window_minutes}m reset={sample.primary_resets_at} | "
-                f"secondary={sample.secondary_used_percent}%/"
-                f"{sample.secondary_window_minutes}m reset={sample.secondary_resets_at}"
-            )
+        _print_compact_limit_samples(console, samples)
         return buffer.getvalue()
+    console.print(_limits_table(samples, options))
+    return buffer.getvalue()
+
+
+def _print_compact_limit_samples(console: Console, samples: list) -> None:
+    for sample in samples:
+        limit = sample.limit_name or sample.limit_id or "-"
+        console.print(
+            f"- {iso_z(sample.timestamp)} | limit={limit} | credits={sample.credits} | "
+            f"primary={sample.primary_used_percent}%/"
+            f"{sample.primary_window_minutes}m reset={sample.primary_resets_at} | "
+            f"secondary={sample.secondary_used_percent}%/"
+            f"{sample.secondary_window_minutes}m reset={sample.secondary_resets_at}"
+        )
+
+
+def _limits_table(samples: list, options: RuntimeOptions) -> Table:
     table = Table(show_lines=False, expand=not options.compact)
     table.add_column("Time")
     table.add_column("Limit")
@@ -592,8 +627,7 @@ def render_limits_table(result: LoadResult, options: RuntimeOptions) -> str:
             _percent(sample.secondary_used_percent),
             _reset_epoch(sample.secondary_resets_at),
         )
-    console.print(table)
-    return buffer.getvalue()
+    return table
 
 
 def _percent(value: object) -> str:
