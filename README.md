@@ -13,7 +13,7 @@ Offline-first usage, cost, and ROI intelligence for AI coding tools.
 [![Coverage](https://img.shields.io/badge/coverage-88%25-brightgreen.svg)](#development)
 
 ```bash
-uvx caliper-ai
+uvx --from caliper-ai caliper
 ```
 
 That is the whole demo. Run it once. The next paragraph will make sense.
@@ -131,7 +131,7 @@ Requires Python 3.11+.
 
 ```bash
 # Zero-install run
-uvx caliper-ai
+uvx --from caliper-ai caliper
 
 # Persistent install
 uv tool install caliper-ai
@@ -151,9 +151,10 @@ uv tool install 'caliper-ai[prom]'
 brew install rajdeepmondaldotcom/tap/caliper
 ```
 
-The PyPI distribution name is `caliper-ai`. The Python import path and the
-CLI binary are both `caliper`. The `codex-meter` command is preserved as a
-permanent alias for users upgrading from the original release.
+The PyPI distribution name is `caliper-ai`. The canonical Python import path
+and CLI binary are both `caliper`. The `codex-meter` command and
+`codex_meter.*` Python imports are preserved as compatibility aliases for
+users upgrading from the original release.
 
 ---
 
