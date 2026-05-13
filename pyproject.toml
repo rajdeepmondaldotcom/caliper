@@ -55,6 +55,10 @@ dependencies = [
 
 [project.optional-dependencies]
 prom = ["prometheus-client>=0.20"]
+tui = [
+  "textual>=8.2,<9",
+  "watchdog>=4.0,<7",
+]
 
 [project.urls]
 Homepage = "https://github.com/rajdeepmondaldotcom/caliper"
