@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
+from caliper import cli
 from caliper.cli import app
 from caliper.models import Rates
 from caliper.pricing_catalog import CatalogModel, PricingCatalog
@@ -249,13 +250,18 @@ def test_help_surfaces_verbose_caliper_flags() -> None:
     result = runner.invoke(app, ["daily", "--help"], env={"COLUMNS": "160"})
 
     assert result.exit_code == 0, result.output
-    # Rich may abbreviate long option names differently across platforms,
-    # so assert the stable aliases that keep the same CLI behavior visible.
-    assert "--since" in result.output
-    assert "--days" in result.output
-    assert "--session-root" in result.output
-    assert "--format" in result.output
-    assert "--cost-mode" in result.output
+    # Rich may abbreviate or omit option text differently across platforms.
+    # The OptionInfo objects are the stable source for the public flag surface.
+    assert _option_decls(cli.SinceOpt) == {"--window-start", "--since", "-s"}
+    assert _option_decls(cli.DaysOpt) == {"--lookback-days", "--days"}
+    assert _option_decls(cli.SessionRootOpt) == {"--codex-session-root", "--session-root"}
+    assert _option_decls(cli.FormatOpt) == {"--output-format", "--format", "-f"}
+    assert _option_decls(cli.CostModeOpt) == {"--vendor-cost-mode", "--cost-mode", "-m"}
+
+
+def _option_decls(annotation) -> set[str]:
+    info = annotation.__metadata__[0]
+    return {str(info.default), *info.param_decls}
 
 
 def test_daily_compat_json_instances_and_output_file(tmp_path) -> None:
