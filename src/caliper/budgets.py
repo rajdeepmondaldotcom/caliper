@@ -131,6 +131,27 @@ def max_severity(alerts: list[BudgetAlert]) -> str:
     return worst
 
 
+def serialize_budgets(budgets: list[Budget]) -> dict:
+    """Inverse of :func:`parse_budgets_table`.
+
+    Emits the explicit ``{"items": [...]}`` shape so the output is
+    unambiguous regardless of how the user originally wrote their
+    config. ``parse_budgets_table(serialize_budgets(budgets))`` must
+    equal ``budgets``.
+    """
+    return {
+        "items": [
+            {
+                "period": budget.period,
+                "metric": budget.metric,
+                "limit": float(budget.limit),
+                "warn_at": float(budget.warn_at),
+            }
+            for budget in budgets
+        ]
+    }
+
+
 def parse_budgets_table(table: dict) -> list[Budget]:
     """Convert a parsed TOML `[budgets]` table into a list of Budget dataclasses.
 

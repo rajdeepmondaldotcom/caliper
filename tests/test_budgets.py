@@ -100,3 +100,21 @@ def test_parse_silently_skips_unknown_flat_keys() -> None:
     table = {"nonsense_key": 5, "daily_credits": 10}
     parsed = parse_budgets_table(table)
     assert [budget.key() for budget in parsed] == ["daily.credits"]
+
+
+def test_serialize_budgets_round_trips_through_parse_budgets_table():
+    from caliper.budgets import Budget, parse_budgets_table, serialize_budgets
+
+    budgets = [
+        Budget(period="daily", metric="credits", limit=25_000.0, warn_at=0.9),
+        Budget(period="weekly", metric="api_dollars", limit=12.5, warn_at=0.8),
+        Budget(period="monthly", metric="tokens", limit=1_000_000.0, warn_at=0.7),
+    ]
+    table = serialize_budgets(budgets)
+    assert parse_budgets_table(table) == budgets
+
+
+def test_serialize_budgets_empty_returns_items_list():
+    from caliper.budgets import serialize_budgets
+
+    assert serialize_budgets([]) == {"items": []}
