@@ -3483,3 +3483,76 @@ def live(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
     run_live(options, interval=interval, max_ticks=max_ticks)
+
+
+@app.command()
+def tui(
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    rates_file: RatesFileOpt = None,
+    tier_overrides: TierOverridesOpt = None,
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    default_model: DefaultModelOpt = "gpt-5.5",
+    no_parse_cache: NoParseCacheOpt = False,
+    vendors: VendorOpt = None,
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    demo: Annotated[
+        bool,
+        typer.Option(
+            "--demo",
+            help="Boot against a synthetic fixture instead of reading local logs.",
+        ),
+    ] = False,
+    no_watchdog: Annotated[
+        bool,
+        typer.Option(
+            "--no-watchdog",
+            help="Disable filesystem event watching; use polling instead.",
+        ),
+    ] = False,
+) -> None:
+    """Open the immersive Textual workspace (opt-in, needs the [tui] extra)."""
+    if not sys.stdout.isatty() and not demo:
+        raise _exit_error("caliper tui requires an interactive terminal.")
+    try:
+        from caliper import tui as caliper_tui
+    except ImportError as exc:  # textual / watchdog missing
+        raise _exit_error(
+            "caliper tui needs the optional 'tui' extra. "
+            "Install with: pip install 'caliper-ai[tui]'"
+        ) from exc
+    try:
+        options = build_options(
+            days=days if days is not None else (90.0 if since is None and until is None else None),
+            since=since,
+            until=until,
+            session_root=session_root,
+            state_db=state_db,
+            codex_config=codex_config,
+            config=config,
+            rates_file=rates_file,
+            tier_overrides=tier_overrides,
+            service_tier=service_tier,
+            unknown_service_tier=unknown_service_tier,
+            default_model=default_model,
+            no_parse_cache=no_parse_cache,
+            vendors=vendors,
+        )
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+    from caliper.config import TuiConfig, load_config, load_tui_config
+
+    tui_config = load_tui_config(load_config(options.config_path))
+    if no_watchdog:
+        tui_config = TuiConfig(
+            theme=tui_config.theme,
+            redact=tui_config.redact,
+            show_demo_on_first_run=tui_config.show_demo_on_first_run,
+            no_watchdog=True,
+        )
+    caliper_tui.run_tui(options, demo=demo, tui_config=tui_config)

@@ -1,1 +1,13 @@
-noop
+/* Caliper TUI — base layer. Real themes register in a later commit. */
+
+Screen {
+    background: $surface;
+}
+
+.placeholder {
+    width: 1fr;
+    height: 1fr;
+    content-align: center middle;
+    padding: 2 4;
+    color: $foreground;
+}
