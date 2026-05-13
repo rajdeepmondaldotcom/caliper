@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rajdeepmondaldotcom/caliper/schemas/model-taxonomy.schema.json",
+  "title": "Caliper model taxonomy",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["vendor", "raw_prefix", "canonical", "family", "generation", "variant", "tier"],
+    "additionalProperties": false,
+    "properties": {
+      "vendor": { "type": "string", "minLength": 1 },
+      "raw_prefix": { "type": "string", "minLength": 1 },
+      "canonical": { "type": "string", "minLength": 1 },
+      "family": { "type": "string", "minLength": 1 },
+      "generation": { "type": "string", "minLength": 1 },
+      "variant": { "type": "string" },
+      "tier": { "type": "string", "minLength": 1 }
+    }
+  }
+}
