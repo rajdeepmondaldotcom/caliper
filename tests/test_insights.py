@@ -5,10 +5,17 @@ import json
 
 from typer.testing import CliRunner
 
+from caliper.aggregation import aggregate_daily, aggregate_projects, aggregate_total
 from caliper.cli import app
 from caliper.config import build_options
-from caliper.insights import Insight, build_insights, render_insights_markdown
+from caliper.insights import (
+    Insight,
+    build_insights,
+    build_insights_from,
+    render_insights_markdown,
+)
 from caliper.models import LoadResult
+from caliper.pricing import load_rate_card
 
 from .conftest import make_state_db, token_event, write_session
 
@@ -109,6 +116,33 @@ def test_build_insights_returns_empty_for_empty_usage(tmp_path) -> None:
     )
 
     assert build_insights(result, options) == []
+
+
+def test_build_insights_from_matches_wrapper(tmp_path) -> None:
+    from caliper.parser import load_usage
+
+    session_root, state_db, missing_cfg = _fixture(tmp_path)
+    options = build_options(
+        session_root=session_root,
+        state_db=state_db,
+        codex_config=missing_cfg,
+        days=1,
+    )
+    result = load_usage(options)
+    card = load_rate_card(options)
+    total = aggregate_total(result, options, rate_card=card)
+    projects = aggregate_projects(result, options, rate_card=card)
+    daily = aggregate_daily(result, options, rate_card=card)
+
+    wrapper = build_insights(result, options, rate_card=card)
+    direct = build_insights_from(
+        result=result,
+        rate_card=card,
+        total=total,
+        projects=projects,
+        daily=daily,
+    )
+    assert wrapper == direct
 
 
 def test_insights_markdown_escapes_pipe_characters() -> None:

@@ -29,9 +29,32 @@ def build_insights(
     total = aggregate_total(result, options, rate_card=card)
     projects = aggregate_projects(result, options, rate_card=card)
     daily = aggregate_daily(result, options, rate_card=card)
+    return build_insights_from(
+        result=result,
+        rate_card=card,
+        total=total,
+        projects=projects,
+        daily=daily,
+    )
 
+
+def build_insights_from(
+    *,
+    result: LoadResult,
+    rate_card: RateCard,
+    total,
+    projects,
+    daily,
+) -> list[Insight]:
+    """Build insights from pre-computed aggregates.
+
+    Use this when the caller already has ``aggregate_total``,
+    ``aggregate_projects``, and ``aggregate_daily`` outputs at hand —
+    e.g. the Textual TUI's reactive AppSnapshot. ``build_insights`` is
+    the convenience wrapper that does the aggregation itself.
+    """
     candidates = [
-        _cache_reuse_insight(result, total, card),
+        _cache_reuse_insight(result, total, rate_card),
         _service_tier_insight(result),
         _project_concentration_insight(projects, total),
         _daily_acceleration_insight(daily),
