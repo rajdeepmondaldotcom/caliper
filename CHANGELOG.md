@@ -23,6 +23,9 @@ every command, option, output field, and exit code is preserved.
 ### Added
 - New CLI entry point: `caliper`. The original `codex-meter` command is
   retained as a permanent alias and dispatches to the same Typer app.
+- Compatibility Python package: legacy `codex_meter.*` imports lazily alias
+  to the canonical `caliper.*` modules, including private helper imports used
+  by older downstream tests.
 - Vendor-neutral record: `UsageEvent` and `RateLimitSample` now carry a
   `vendor` field. Today's parser populates `openai-codex`; planned parsers
   (`claude-code`, `cursor`, `aider`, `copilot`) will populate the same shape
@@ -34,10 +37,11 @@ every command, option, output field, and exit code is preserved.
 
 ### Changed
 - Distribution name: `codex-meter` → `caliper-ai` on PyPI. Install with
-  `pip install caliper-ai` (or `uvx caliper-ai`, `pipx install caliper-ai`).
-  Python import path remains `caliper`.
+  `pip install caliper-ai`, `pipx install caliper-ai`, or
+  `uvx --from caliper-ai caliper`. Python import path is `caliper`.
 - Internal package: `src/codex_meter/` → `src/caliper/`. All public Python
-  imports now use `from caliper import ...`.
+  imports now use `from caliper import ...`; `codex_meter` remains available
+  for compatibility.
 - Local config file: `.codex-meter.toml` → `.caliper.toml`.
 - User config directory: `~/.config/codex-meter/` → `~/.config/caliper/`.
 - Parse-cache and rate-audit sidecar directories migrated from

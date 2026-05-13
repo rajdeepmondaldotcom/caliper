@@ -77,10 +77,11 @@ include = [
   "/pyproject.toml",
   "/schemas",
   "/src/caliper",
+  "/src/codex_meter",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/caliper"]
+packages = ["src/caliper", "src/codex_meter"]
 
 [tool.ruff]
 line-length = 100
