@@ -197,22 +197,18 @@ class RateCard:
         normalized = normalize_model(model)
         flat = self.pricing_mode == "flat"
         card = MODELS_BY_NAME.get(normalized)
-        rule = card.long_context if (card and not flat) else None
-        long_context = rule is not None and usage.input_tokens > rule.threshold
-        input_mult = decimal_value(rule.input_mult if long_context and rule else 1)
-        output_mult = decimal_value(rule.output_mult if long_context and rule else 1)
+        long_context, input_mult, output_mult = self._long_context_multipliers(
+            usage, card, flat
+        )
         billable_usage, ambiguous_reasoning = _billable_usage(usage)
         api_rates, api_unpriced, api_local = self._resolve_api_rates(normalized, card, flat)
         credit_rates, credit_unpriced, credit_local = self._resolve_credit_rates(
             normalized, card, flat
         )
         standard_credits = _estimate(billable_usage, credit_rates, input_mult, output_mult)
-        adjusted_credits = standard_credits
-        estimated = flat
-        if service_tier == "fast" and card is not None and credit_rates is not None:
-            adjusted_credits = standard_credits * decimal_value(card.fast_multiplier)
-        elif service_tier == "fast" and credit_rates is not None:
-            estimated = True
+        adjusted_credits, tier_estimated = self._adjusted_credits(
+            standard_credits, service_tier, card, credit_rates
+        )
         return (
             CostTotals(
                 api_dollars=_estimate(billable_usage, api_rates, input_mult, output_mult),
@@ -220,13 +216,35 @@ class RateCard:
                 adjusted_credits=adjusted_credits,
                 api_unpriced_events=int(api_unpriced),
                 credit_unpriced_events=int(credit_unpriced),
-                estimated_events=int(estimated),
+                estimated_events=int(flat or tier_estimated),
                 ambiguous_reasoning_events=int(ambiguous_reasoning),
                 local_override_events=int(api_local or credit_local),
             ),
             long_context,
             card is None and api_unpriced and credit_unpriced,
         )
+
+    def _long_context_multipliers(
+        self, usage: Usage, card: ModelCard | None, flat: bool
+    ) -> tuple[bool, Decimal, Decimal]:
+        rule = card.long_context if (card and not flat) else None
+        long_context = rule is not None and usage.input_tokens > rule.threshold
+        if not long_context or rule is None:
+            return False, Decimal("1"), Decimal("1")
+        return True, decimal_value(rule.input_mult), decimal_value(rule.output_mult)
+
+    def _adjusted_credits(
+        self,
+        standard_credits: Decimal,
+        service_tier: str,
+        card: ModelCard | None,
+        credit_rates: Rates | None,
+    ) -> tuple[Decimal, bool]:
+        if service_tier != "fast" or credit_rates is None:
+            return standard_credits, False
+        if card is None:
+            return standard_credits, True
+        return standard_credits * decimal_value(card.fast_multiplier), False
 
     def cache_savings_for(self, usage: Usage, model: str, service_tier: str) -> CostTotals:
         if not usage.cached_input_tokens:
