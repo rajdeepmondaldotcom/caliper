@@ -2,7 +2,7 @@
 
 All notable changes to Caliper. Newest on top.
 
-## 0.0.1 — 2026-05-13
+## 0.0.1 - 2026-05-13
 
 Initial public release.
 
