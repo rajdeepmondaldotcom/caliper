@@ -180,12 +180,12 @@ caliper insights                     # cache and tier signals
 The first run parses everything and writes a sidecar cache. Later runs reuse
 it. Pass `--disable-parse-cache` when you want to bypass the cache.
 
-## Interactive workspace (opt-in)
+## Interactive workspace
 
-If you prefer to live inside the data:
+If you prefer to live inside the data, `caliper-ai` ships with an
+interactive Textual workspace built into the base install:
 
 ```bash
-pip install 'caliper-ai[tui]'
 caliper tui                              # against your real logs
 caliper tui --demo                       # synthetic fixture, zero disk reads
 ```
@@ -199,8 +199,9 @@ sessions. The remaining screens (Sessions, Projects, Models, Limits,
 Live, Forecast, What-If, Budgets, Doctor, Receipt) navigate via `1..9`
 and fill in over subsequent releases.
 
-Offline by default. No login. No telemetry. The classic CLI keeps
-working unchanged whether or not the `[tui]` extra is installed.
+Offline by default. No login. No telemetry. The classic CLI surface
+keeps working exactly the way it did before — the TUI is an
+*additional* entry point, never a redirection.
 
 ## Privacy is a constraint, not a feature
 

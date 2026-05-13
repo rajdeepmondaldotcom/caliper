@@ -2,13 +2,13 @@
 
 All notable changes to Caliper. Newest on top.
 
-## Unreleased
+## 0.0.3 - 2026-05-14
+
+First release with the interactive Textual workspace baked into the
+base install.
 
 ### Added
 
-- New optional `[tui]` extra. `pip install 'caliper-ai[tui]'` adds
-  `textual>=8.2,<9` and `watchdog>=4.0,<7`. Base install stays
-  zero-extra.
 - `caliper tui` command boots an interactive Textual workspace built
   on the existing pure modules (`parser.load_usage`,
   `aggregate_*`, `pricing.RateCard`, `windows.compute_window_state`,
@@ -17,6 +17,9 @@ All notable changes to Caliper. Newest on top.
   insights feed, and recent sessions. Twelve other screens are
   reachable via `1..9` but currently show placeholders; the workspace
   fills in over subsequent releases.
+- `textual>=8.2,<9` and `watchdog>=4.0,<7` are now required runtime
+  dependencies of `caliper-ai` itself so the TUI works out of the box
+  after `pip install caliper-ai`. No optional extra is needed.
 - `caliper tui --demo` boots against a deterministic synthetic
   fixture so the experience is reviewable without local logs.
 - New public helpers reused by both CLI and TUI:

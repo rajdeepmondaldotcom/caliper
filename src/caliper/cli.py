@@ -3516,16 +3516,11 @@ def tui(
         ),
     ] = False,
 ) -> None:
-    """Open the immersive Textual workspace (opt-in, needs the [tui] extra)."""
+    """Open the immersive Textual workspace."""
     if not sys.stdout.isatty() and not demo:
         raise _exit_error("caliper tui requires an interactive terminal.")
-    try:
-        from caliper import tui as caliper_tui
-    except ImportError as exc:  # textual / watchdog missing
-        raise _exit_error(
-            "caliper tui needs the optional 'tui' extra. "
-            "Install with: pip install 'caliper-ai[tui]'"
-        ) from exc
+    from caliper import tui as caliper_tui
+
     try:
         options = build_options(
             days=days if days is not None else (90.0 if since is None and until is None else None),
