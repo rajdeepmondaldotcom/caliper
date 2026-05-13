@@ -9,9 +9,55 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from caliper.models import Aggregate
+from caliper.aggregation import aggregate_total
+from caliper.models import Aggregate, LoadResult, RuntimeOptions
+from caliper.pricing import load_rate_card
+from caliper.timeutil import iso_z
 
 DEFAULT_DASHBOARD_TITLE = "Caliper"
+
+
+def session_compat_json(
+    session_id: str,
+    result: LoadResult,
+    options: RuntimeOptions,
+) -> str:
+    """Render a single-session receipt in the ccusage-compatible JSON shape.
+
+    Previously private to ``caliper.cli`` as ``_compat_session_id_json``;
+    promoted so the Textual TUI Receipt screen and any future exporter
+    can share the same wire shape that ``caliper session --format
+    compat-json`` already emits.
+    """
+    rate_card = load_rate_card(options)
+    total = aggregate_total(result, options, rate_card=rate_card)
+    entries = [
+        {
+            "timestamp": iso_z(event.timestamp),
+            "inputTokens": event.usage.uncached_input_tokens,
+            "outputTokens": event.usage.output_tokens,
+            "cacheCreationTokens": (
+                event.usage.cache_creation_input_tokens
+                + event.usage.cache_creation_input_1h_tokens
+            ),
+            "cacheReadTokens": event.usage.cache_read_input_tokens,
+            "model": event.raw_model or event.model or "unknown",
+            "costUSD": 0,
+        }
+        for event in sorted(result.events, key=lambda item: item.timestamp)
+    ]
+    return (
+        json.dumps(
+            {
+                "sessionId": session_id,
+                "totalCost": float(total.costs.api_dollars),
+                "totalTokens": total.totals.total_tokens,
+                "entries": entries,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 @dataclass(frozen=True)

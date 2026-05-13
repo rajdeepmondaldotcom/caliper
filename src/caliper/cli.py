@@ -562,36 +562,9 @@ def _compat_json(
 
 
 def _compat_session_id_json(session_id: str, result: LoadResult, options: RuntimeOptions) -> str:
-    rate_card = load_rate_card(options)
-    total = aggregate_total(result, options, rate_card=rate_card)
-    entries = []
-    for event in sorted(result.events, key=lambda item: item.timestamp):
-        entries.append(
-            {
-                "timestamp": iso_z(event.timestamp),
-                "inputTokens": event.usage.uncached_input_tokens,
-                "outputTokens": event.usage.output_tokens,
-                "cacheCreationTokens": (
-                    event.usage.cache_creation_input_tokens
-                    + event.usage.cache_creation_input_1h_tokens
-                ),
-                "cacheReadTokens": event.usage.cache_read_input_tokens,
-                "model": event.raw_model or event.model or "unknown",
-                "costUSD": 0,
-            }
-        )
-    return (
-        json.dumps(
-            {
-                "sessionId": session_id,
-                "totalCost": float(total.costs.api_dollars),
-                "totalTokens": total.totals.total_tokens,
-                "entries": entries,
-            },
-            indent=2,
-        )
-        + "\n"
-    )
+    from caliper.exporters import session_compat_json
+
+    return session_compat_json(session_id, result, options)
 
 
 def _split_instance_key(key: str) -> tuple[str, str]:
