@@ -89,6 +89,7 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/caliper"]
+artifacts = ["src/caliper/tui/tcss/*.tcss"]
 
 [tool.ruff]
 line-length = 100

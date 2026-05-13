@@ -52,6 +52,12 @@ jobs:
           wheel="$(ls dist/*.whl)"
           uvx --from "$wheel" caliper --version
           uvx --from "$wheel" caliper --help >/dev/null
+      - name: Verify wheel ships TUI TCSS
+        run: |
+          set -euo pipefail
+          wheel="$(ls dist/*.whl)"
+          unzip -l "$wheel" | grep -E '\.tcss$' \
+            || { echo "missing tcss in wheel"; exit 1; }
 
   lint-invariants:
     name: invariants
