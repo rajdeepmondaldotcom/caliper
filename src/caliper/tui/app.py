@@ -72,6 +72,8 @@ class CaliperApp(App):
         Binding("7", "go('live')", "Live"),
         Binding("8", "go('forecast')", "Forecast"),
         Binding("9", "go('doctor')", "Doctor"),
+        Binding("left_square_bracket", "step_back", "← interval", show=False),
+        Binding("right_square_bracket", "step_forward", "interval →", show=False),
     ]
 
     snapshot: reactive[AppSnapshot] = reactive(None, layout=True)  # type: ignore[assignment]
@@ -158,6 +160,12 @@ class CaliperApp(App):
             self.notify(f"Unknown screen: {name}")
             return
         self.push_screen(screen_cls())
+
+    def action_step_back(self) -> None:
+        self.notify("Time scrubber lands with T23 — coming soon.", timeout=3)
+
+    def action_step_forward(self) -> None:
+        self.notify("Time scrubber lands with T23 — coming soon.", timeout=3)
 
     def action_show_help(self) -> None:
         self.notify(

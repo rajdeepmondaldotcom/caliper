@@ -46,7 +46,14 @@ class HomeScreen(Screen):
         self.update_from_snapshot(self.app.snapshot)  # type: ignore[attr-defined]
 
     def update_from_snapshot(self, snapshot: AppSnapshot) -> None:
-        cards = self.query_one("#cards", Horizontal)
+        from textual.css.query import NoMatches
+
+        try:
+            cards = self.query_one("#cards", Horizontal)
+        except NoMatches:
+            # Compose has not yet completed; the next snapshot tick
+            # will redraw after the layout settles.
+            return
         cards.remove_children()
         if not snapshot.overview_windows:
             cards.mount(Static(self._empty_message(snapshot), classes="empty"))
