@@ -2,6 +2,15 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.2 - 2026-05-13
+
+Recreate the PyPI project after deleting the pre-rewrite package history.
+
+### Changed
+
+- Republished the initial Caliper release under a new PyPI version because
+  PyPI permanently reserves deleted distribution filenames.
+
 ## 0.0.1 - 2026-05-13
 
 Initial public release.

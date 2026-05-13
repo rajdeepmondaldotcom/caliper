@@ -2,7 +2,7 @@
   "name": "caliper-statusbar",
   "displayName": "Caliper Statusbar",
   "description": "Show local Caliper AI coding spend in the VS Code status bar.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "rajdeepmondaldotcom",
   "license": "MIT",
   "repository": {
