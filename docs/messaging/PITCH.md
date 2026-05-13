@@ -18,7 +18,7 @@ vendor logs), the output (per-PR cost), and the constraint (offline, no
 login).
 
 A YC partner who reads only the headline knows the category slot. An HN
-engineer who reads both lines knows the user, the wedge, and the moat in
+engineer who reads both lines knows the user, the wedge, and the product edge in
 one skim.
 
 If we ever have to drop one line, drop the subtitle and keep the headline.

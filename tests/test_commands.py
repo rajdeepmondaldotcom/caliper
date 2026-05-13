@@ -249,8 +249,9 @@ def test_help_surfaces_verbose_caliper_flags() -> None:
     result = runner.invoke(app, ["daily", "--help"], env={"COLUMNS": "160"})
 
     assert result.exit_code == 0, result.output
-    assert "--window-start" in result.output
-    assert "--lookback-days" in result.output
+    # Rich may abbreviate long option names differently across platforms.
+    assert "--window-st" in result.output
+    assert "--lookback-d" in result.output
     assert "--codex-session-ro" in result.output
     assert "--output-format" in result.output
     assert "--vendor-cost-mode" in result.output

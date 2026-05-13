@@ -19,7 +19,7 @@ walks. The hosted business is a different company. This one is not it.
 **"This will be table stakes when OpenAI ships per-PR billing."**
 Maybe. Two things stay true: the vendors do not control your git history,
 and they will never tell you what Cursor and Claude cost from inside
-one report. The cross-vendor join is the moat.
+one report. The cross-vendor join is the core product edge.
 
 ## On accuracy
 
@@ -58,7 +58,7 @@ real reason. Dependabot is on.
 
 ## On positioning
 
-**"This is just ccusage / per-vendor scripts."**
+**"This is just separate vendor scripts."**
 Per-vendor scripts answer per-vendor questions. Caliper answers
 cross-vendor questions. The unit of value is the PR, not the model.
 

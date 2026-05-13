@@ -87,7 +87,7 @@ caliper project --lookback-days 30
 ```text
 SlidesDockerTemp    4 models    18,746 credits    $3,009
 ace-ai              4 models    15,603 credits    $1,160
-codex-meter         3 models     9,219 credits      $443
+caliper             3 models     9,219 credits      $443
 ```
 
 Real numbers, one machine, one developer, ninety days. No account. No upload.
