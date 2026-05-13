@@ -55,6 +55,22 @@ def enabled_vendors(options: RuntimeOptions) -> list[VendorParser]:
     return [VENDORS[vendor_id] for vendor_id in ids]
 
 
+def vendor_file_count(options: RuntimeOptions) -> int:
+    """Return the total number of files the enabled vendors would parse.
+
+    Tolerates ``OSError`` from individual vendors so a single missing
+    home directory does not abort the count. Used by the doctor command
+    and by the Textual TUI loading overlay.
+    """
+    total = 0
+    for vendor in enabled_vendors(options):
+        try:
+            total += sum(1 for _ in vendor.discover(options))
+        except OSError:
+            continue
+    return total
+
+
 def vendor_summaries(options: RuntimeOptions) -> list[VendorSummary]:
     selected = _selected_vendor_ids(options.vendors)
     active = set(VENDORS) if "all" in selected else selected

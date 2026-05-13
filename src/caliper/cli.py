@@ -1542,15 +1542,9 @@ def doctor(
 
 
 def _discovered_vendor_file_count(options: RuntimeOptions) -> int:
-    from caliper.vendors import enabled_vendors
+    from caliper.vendors import vendor_file_count
 
-    total = 0
-    for vendor in enabled_vendors(options):
-        try:
-            total += len(list(vendor.discover(options)))
-        except OSError:
-            continue
-    return total
+    return vendor_file_count(options)
 
 
 @app.command()
