@@ -79,3 +79,28 @@ def test_empty_expression_rejected() -> None:
 def test_unknown_expression_rejected() -> None:
     with pytest.raises(ValueError):
         parse_interval("nonsense", NOW)
+
+
+def test_days_for_interval_rounds_to_at_least_one():
+    import datetime as dt
+
+    from caliper.intervals import Interval, parse_interval
+    from caliper.scenarios import days_for_interval
+
+    now = dt.datetime(2026, 5, 14, 12, 0, tzinfo=dt.UTC)
+    assert days_for_interval(parse_interval("last 7 days", now)) == 7
+    assert days_for_interval(parse_interval("last 30 days", now)) == 30
+
+    short = Interval(
+        start=now - dt.timedelta(minutes=30),
+        end=now,
+        label="last 30 minutes",
+    )
+    assert days_for_interval(short) == 1
+
+    twelve_hours = Interval(
+        start=now - dt.timedelta(hours=12),
+        end=now,
+        label="last 12 hours",
+    )
+    assert days_for_interval(twelve_hours) == 1

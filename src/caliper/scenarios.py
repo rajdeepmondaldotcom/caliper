@@ -13,6 +13,18 @@ from caliper.render import pricing_status, pricing_warnings
 from caliper.timeutil import iso_z
 
 
+def days_for_interval(interval: Interval) -> int:
+    """Round the span of an ``Interval`` to integer days.
+
+    ``build_whatif_report`` takes ``days: int``; the Textual TUI lets
+    the user pick an :class:`Interval`. This helper canonicalises one
+    into the other. Returns at least ``1`` even for sub-day intervals
+    so a what-if simulation always evaluates *some* window.
+    """
+    seconds = max((interval.end - interval.start).total_seconds(), 0.0)
+    return max(int(round(seconds / 86_400.0)), 1)
+
+
 @dataclass(frozen=True)
 class WhatIfTotals:
     actual_credits: Decimal
