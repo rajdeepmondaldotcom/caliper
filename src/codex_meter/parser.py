@@ -8,7 +8,7 @@ import sqlite3
 import tomllib
 from collections.abc import Iterable
 from contextlib import closing
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from codex_meter.models import (
@@ -26,6 +26,67 @@ from codex_meter.pricing import normalize_model, normalize_service_tier
 from codex_meter.timeutil import parse_datetime, parse_event_timestamp
 
 PARSER_CACHE_VERSION = 5
+
+
+@dataclass
+class UsageLoadAccumulator:
+    options: RuntimeOptions
+    start_utc: dt.datetime
+    end_utc: dt.datetime
+    events: list[UsageEvent] = field(default_factory=list)
+    duplicates: int = 0
+    seen: set[tuple] = field(default_factory=set)
+    tier_sources: dict[str, int] = field(default_factory=dict)
+    plan_types: set[str] = field(default_factory=set)
+    credit_samples: list[RateLimitSample] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    reset_warnings: set[Path] = field(default_factory=set)
+
+    def add_record(self, path: Path, record: ParsedSessionRecord) -> None:
+        self._add_sample(record.sample)
+        if record.event is None:
+            return
+        if not self._event_in_window(record.event):
+            return
+        self._warn_for_counter_reset(path, record.counter_reset)
+        self._add_usage_event(path, record.event)
+
+    def result(self) -> LoadResult:
+        self.credit_samples.sort(key=lambda sample: sample.timestamp)
+        self.events.sort(key=lambda event: event.timestamp)
+        return LoadResult(
+            events=self.events,
+            duplicates=self.duplicates,
+            tier_sources=self.tier_sources,
+            plan_types=self.plan_types,
+            credit_samples=self.credit_samples,
+            warnings=self.warnings,
+        )
+
+    def _add_sample(self, sample: RateLimitSample | None) -> None:
+        if sample is None or not (self.start_utc <= sample.timestamp < self.end_utc):
+            return
+        self.credit_samples.append(sample)
+        if sample.plan_type:
+            self.plan_types.add(sample.plan_type)
+
+    def _event_in_window(self, event: UsageEvent) -> bool:
+        return self.start_utc <= event.timestamp < self.end_utc
+
+    def _warn_for_counter_reset(self, path: Path, counter_reset: bool) -> None:
+        if not counter_reset or path in self.reset_warnings:
+            return
+        self.warnings.append(f"Token counter reset detected in {path}; used current totals")
+        self.reset_warnings.add(path)
+
+    def _add_usage_event(self, path: Path, event: UsageEvent) -> None:
+        key = usage_key(path, event.timestamp.isoformat(), event.usage)
+        if self.options.dedupe and key in self.seen:
+            self.duplicates += 1
+            return
+        self.seen.add(key)
+        self.tier_sources[event.tier_source] = self.tier_sources.get(event.tier_source, 0) + 1
+        self.events.append(event)
 
 
 def session_files(session_root: Path) -> Iterable[Path]:
@@ -218,27 +279,25 @@ def load_tier_overrides(path: Path | None) -> list[TierOverride]:
     items = raw.get("overrides", raw) if isinstance(raw, dict) else raw
     if not isinstance(items, list):
         raise ValueError("--tier-overrides must be a JSON list or an object with an overrides list")
-    overrides: list[TierOverride] = []
-    for item in items:
-        if not isinstance(item, dict):
-            raise ValueError("Each tier override must be an object")
-        tier = normalize_service_tier(str(item.get("service_tier") or item.get("tier") or ""))
-        if tier not in {"standard", "fast"}:
-            raise ValueError("Each tier override must set service_tier to standard or fast")
-        start = parse_datetime(str(item["start"])) if item.get("start") else None
-        end = parse_datetime(str(item["end"])) if item.get("end") else None
-        if start and end and start >= end:
-            raise ValueError("Tier override start must be before end")
-        overrides.append(
-            TierOverride(
-                service_tier=tier,
-                session=str(item["session"]) if item.get("session") else None,
-                start=start.astimezone(dt.UTC) if start else None,
-                end=end.astimezone(dt.UTC) if end else None,
-            )
-        )
-    return overrides
+    return [_tier_override_from_dict(item) for item in items]
 
+
+def _tier_override_from_dict(item: object) -> TierOverride:
+    if not isinstance(item, dict):
+        raise ValueError("Each tier override must be an object")
+    tier = normalize_service_tier(str(item.get("service_tier") or item.get("tier") or ""))
+    if tier not in {"standard", "fast"}:
+        raise ValueError("Each tier override must set service_tier to standard or fast")
+    start = parse_datetime(str(item["start"])) if item.get("start") else None
+    end = parse_datetime(str(item["end"])) if item.get("end") else None
+    if start and end and start >= end:
+        raise ValueError("Tier override start must be before end")
+    return TierOverride(
+        service_tier=tier,
+        session=str(item["session"]) if item.get("session") else None,
+        start=start.astimezone(dt.UTC) if start else None,
+        end=end.astimezone(dt.UTC) if end else None,
+    )
 
 def tier_override_for(path: Path, event_time: dt.datetime, overrides: list[TierOverride]) -> str:
     path_text = str(path)
@@ -282,45 +341,66 @@ def service_tier_for_event(
 def update_context_from_event(
     event: dict, current: ThreadMeta, current_tier: str
 ) -> tuple[ThreadMeta, str, bool]:
-    payload = event.get("payload") or {}
+    payload = _event_payload(event)
     event_type = event.get("type")
     payload_type = payload.get("type")
 
     if event_type == "turn_context":
-        model_seen = bool(str(payload.get("model") or "").strip())
-        model = payload.get("model") or current.model
-        effort = payload.get("effort") or current.reasoning_effort
-        cwd = payload.get("cwd") or current.cwd
-        collaboration = (payload.get("collaboration_mode") or {}).get("settings") or {}
-        effort = collaboration.get("reasoning_effort") or effort
-        tier = normalize_service_tier(payload.get("service_tier")) or current_tier
-        return (
-            replace(
-                current,
-                cwd=str(cwd or ""),
-                model=str(model or ""),
-                reasoning_effort=str(effort or ""),
-            ),
-            tier,
-            model_seen,
-        )
+        return _update_from_turn_context(payload, current, current_tier)
 
     if event_type == "session_meta":
-        tier = normalize_service_tier(payload.get("service_tier")) or current_tier
-        return current, tier, False
+        return current, _tier_from_payload(payload, current_tier), False
 
     if event_type == "event_msg" and payload_type == "session_configured":
-        tier = normalize_service_tier(payload.get("service_tier")) or current_tier
-        return current, tier, False
+        return current, _tier_from_payload(payload, current_tier), False
 
     if event_type == "event_msg" and payload_type == "user_message":
-        message = str(payload.get("message") or "").strip().lower()
-        if message.startswith("/fast on"):
-            return current, "fast", False
-        if message.startswith("/fast off"):
-            return current, "standard", False
+        tier = _tier_from_user_message(payload, current_tier)
+        return current, tier, False
 
     return current, current_tier, False
+
+
+def _event_payload(event: dict) -> dict:
+    payload = event.get("payload") or {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _update_from_turn_context(
+    payload: dict,
+    current: ThreadMeta,
+    current_tier: str,
+) -> tuple[ThreadMeta, str, bool]:
+    model_seen = bool(str(payload.get("model") or "").strip())
+    collaboration = payload.get("collaboration_mode") or {}
+    settings = collaboration.get("settings") if isinstance(collaboration, dict) else {}
+    if not isinstance(settings, dict):
+        settings = {}
+    updated = replace(
+        current,
+        cwd=str(payload.get("cwd") or current.cwd or ""),
+        model=str(payload.get("model") or current.model or ""),
+        reasoning_effort=str(
+            settings.get("reasoning_effort")
+            or payload.get("effort")
+            or current.reasoning_effort
+            or ""
+        ),
+    )
+    return updated, _tier_from_payload(payload, current_tier), model_seen
+
+
+def _tier_from_payload(payload: dict, fallback: str) -> str:
+    return normalize_service_tier(payload.get("service_tier")) or fallback
+
+
+def _tier_from_user_message(payload: dict, fallback: str) -> str:
+    message = str(payload.get("message") or "").strip().lower()
+    if message.startswith("/fast on"):
+        return "fast"
+    if message.startswith("/fast off"):
+        return "standard"
+    return fallback
 
 
 def model_for_event(
@@ -349,21 +429,30 @@ def rate_limit_sample(*, path: Path, event_time: dt.datetime, rate_limits: dict)
 
 
 def rate_limit_fields(rate_limits: dict) -> dict:
-    primary = rate_limits.get("primary") or {}
-    secondary = rate_limits.get("secondary") or {}
-    return dict(
-        plan_type=str(rate_limits.get("plan_type") or ""),
-        limit_id=str(rate_limits.get("limit_id") or ""),
-        limit_name=str(rate_limits.get("limit_name") or ""),
-        credits=rate_limits.get("credits"),
-        primary_used_percent=primary.get("used_percent"),
-        primary_window_minutes=primary.get("window_minutes"),
-        primary_resets_at=primary.get("resets_at"),
-        secondary_used_percent=secondary.get("used_percent"),
-        secondary_window_minutes=secondary.get("window_minutes"),
-        secondary_resets_at=secondary.get("resets_at"),
-        rate_limit_reached_type=str(rate_limits.get("rate_limit_reached_type") or ""),
-    )
+    return {
+        **_rate_limit_identity_fields(rate_limits),
+        **_rate_limit_window_fields("primary", rate_limits.get("primary")),
+        **_rate_limit_window_fields("secondary", rate_limits.get("secondary")),
+    }
+
+
+def _rate_limit_identity_fields(rate_limits: dict) -> dict:
+    return {
+        "plan_type": str(rate_limits.get("plan_type") or ""),
+        "limit_id": str(rate_limits.get("limit_id") or ""),
+        "limit_name": str(rate_limits.get("limit_name") or ""),
+        "credits": rate_limits.get("credits"),
+        "rate_limit_reached_type": str(rate_limits.get("rate_limit_reached_type") or ""),
+    }
+
+
+def _rate_limit_window_fields(prefix: str, raw_window: object) -> dict:
+    window = raw_window if isinstance(raw_window, dict) else {}
+    return {
+        f"{prefix}_used_percent": window.get("used_percent"),
+        f"{prefix}_window_minutes": window.get("window_minutes"),
+        f"{prefix}_resets_at": window.get("resets_at"),
+    }
 
 
 def load_usage(options: RuntimeOptions) -> LoadResult:
@@ -372,19 +461,11 @@ def load_usage(options: RuntimeOptions) -> LoadResult:
     config_tier = current_config_service_tier(options.config_path)
     overrides = load_tier_overrides(options.tier_overrides)
     metadata = load_thread_metadata(options.state_db)
-
-    events: list[UsageEvent] = []
-    duplicates = 0
-    seen: set[tuple] = set()
-    tier_sources: dict[str, int] = {}
-    plan_types: set[str] = set()
-    credit_samples: list[RateLimitSample] = []
-    warnings: list[str] = []
-    reset_warnings: set[Path] = set()
+    accumulator = UsageLoadAccumulator(options, start_utc, end_utc)
     cache = ParseCache.default() if options.parse_cache else None
 
     if not options.session_root.exists():
-        warnings.append(f"Session root does not exist: {options.session_root}")
+        accumulator.warnings.append(f"Session root does not exist: {options.session_root}")
 
     for path in session_files(options.session_root):
         thread_meta = metadata.get(
@@ -405,38 +486,9 @@ def load_usage(options: RuntimeOptions) -> LoadResult:
             if cache:
                 cache.put(path, signature, parsed)
         for record in parsed:
-            usage_event = record.event
-            sample = record.sample
-            sample_in_window = sample is not None and start_utc <= sample.timestamp < end_utc
-            if sample_in_window:
-                credit_samples.append(sample)
-                if sample.plan_type:
-                    plan_types.add(sample.plan_type)
-            if usage_event is None:
-                continue
-            if usage_event.timestamp < start_utc or usage_event.timestamp >= end_utc:
-                continue
-            if record.counter_reset and path not in reset_warnings:
-                warnings.append(f"Token counter reset detected in {path}; used current totals")
-                reset_warnings.add(path)
-            key = usage_key(path, usage_event.timestamp.isoformat(), usage_event.usage)
-            if options.dedupe and key in seen:
-                duplicates += 1
-                continue
-            seen.add(key)
-            tier_sources[usage_event.tier_source] = tier_sources.get(usage_event.tier_source, 0) + 1
-            events.append(usage_event)
+            accumulator.add_record(path, record)
 
-    credit_samples.sort(key=lambda sample: sample.timestamp)
-    events.sort(key=lambda event: event.timestamp)
-    return LoadResult(
-        events=events,
-        duplicates=duplicates,
-        tier_sources=tier_sources,
-        plan_types=plan_types,
-        credit_samples=credit_samples,
-        warnings=warnings,
-    )
+    return accumulator.result()
 
 
 def _parse_cache_signature(
