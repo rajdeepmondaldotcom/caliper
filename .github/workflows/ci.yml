@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install
+        run: uv sync --all-extras --dev --python ${{ matrix.python-version }}
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Tests
+        run: PYTHONWARNINGS=error::ResourceWarning uv run pytest
+      - name: Coverage gate
+        run: uv run pytest --cov=src/caliper --cov-report=term --cov-report=xml
+      - name: Build sdist + wheel
+        run: |
+          rm -rf dist
+          uv run python -m build
+      - name: Twine check
+        run: uvx twine check dist/*
+      - name: Smoke wheel
+        run: |
+          set -euo pipefail
+          wheel="$(ls dist/*.whl)"
+          uvx --from "$wheel" caliper --version
+          uvx --from "$wheel" caliper --help >/dev/null
+
+  lint-invariants:
+    name: invariants
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Single network chokepoint
+        run: |
+          set -euo pipefail
+          # Network-capable imports must only live in the explicit network chokepoint.
+          bad="$(grep -RIlE '^[[:space:]]*(import|from)[[:space:]]+(urllib|http\.client|socket|requests|httpx|aiohttp)\b' src/caliper \
+                 | grep -v 'src/caliper/network\.py' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Files outside network.py import network modules:"
+            echo "$bad"
+            exit 1
+          fi
+      - name: No services/* imports from local CLI
+        run: |
+          set -euo pipefail
+          bad="$(grep -RIlE '^[[:space:]]*(import|from)[[:space:]]+services(\b|\.)' src/caliper || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::src/caliper/ may not import from services.*:"
+            echo "$bad"
+            exit 1
+          fi
+      - name: No fat runtime dependencies
+        run: |
+          set -euo pipefail
+          # Permitted runtime deps: rich, typer, platformdirs (post-0.6). Block fat libs.
+          if grep -REn '^[[:space:]]*"(pandas|numpy|pydantic|attrs|requests|httpx|aiohttp|pint|scipy)([[:space:]<>=!~]|\")' pyproject.toml \
+              | grep -v '^[[:space:]]*#'; then
+            echo "::error::Disallowed runtime dependency detected in pyproject.toml"
+            exit 1
+          fi
+      - name: Deprecation messages use stable prefix
+        run: |
+          set -euo pipefail
+          bad="$(grep -RInE 'deprecat(ed|ion)' src/caliper \
+                 | grep -vi '\[deprecated\]' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Deprecation messages in src/caliper must include [deprecated]."
+            echo "$bad"
+            exit 1
+          fi
+      - name: No stale brand or comparison framing
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          terms = [
+              "cc" + "usage",
+              "codex" + "-meter",
+              "codex" + "_meter",
+              "Codex" + " Meter",
+              "CODEX_" + "METER",
+              "Data" + "dog",
+              "Y " + "Combinator",
+              "tok" + "scale",
+              "Claude-Code-" + "Usage-Monitor",
+              "Open" + "Cost",
+              "m" + "oat",
+              "compet" + "itor",
+              "start" + "up",
+              "adjacent " + "usage",
+              "per-vendor " + "usage",
+          ]
+          roots = [
+              ".github",
+              "CHANGELOG.md",
+              "README.md",
+              "docs",
+              "docs-site/src",
+              "pyproject.toml",
+              "schemas",
+              "scripts",
+              "src",
+              "tests",
+          ]
+          ignored_parts = {"__pycache__", ".git", "node_modules", "dist", ".astro", ".npm-cache"}
+          offenders = []
+          for root in roots:
+              path = Path(root)
+              candidates = [path] if path.is_file() else path.rglob("*")
+              for candidate in candidates:
+                  if not candidate.is_file():
+                      continue
+                  if any(part in ignored_parts for part in candidate.parts):
+                      continue
+                  try:
+                      text = candidate.read_text(encoding="utf-8")
+                  except UnicodeDecodeError:
+                      continue
+                  lowered = text.lower()
+                  for term in terms:
+                      if term.lower() in lowered:
+                          offenders.append(f"{candidate}: contains removed term")
+                          break
+          if offenders:
+              print("\n".join(offenders))
+              raise SystemExit(1)
+          PY

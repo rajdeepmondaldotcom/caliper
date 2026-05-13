@@ -1,0 +1,29 @@
+name: Docs
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "docs-site/**"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: docs-site/package-lock.json
+      - name: Install
+        working-directory: docs-site
+        run: npm ci
+      - name: Build
+        working-directory: docs-site
+        run: npm run build -- --silent
