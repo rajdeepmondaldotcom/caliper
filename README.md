@@ -2,9 +2,11 @@
 
 # Caliper
 
-**Measure every line of AI-written code.**
+### Datadog for AI coding spend.
 
-Offline-first usage, cost, and ROI intelligence for AI coding tools.
+The open-source, local-first instrument that turns the trail your AI coding
+tools leave on your laptop into per-PR, per-repo, per-model evidence of what
+you actually spent and what you actually shipped.
 
 [![CI](https://github.com/rajdeepmondaldotcom/caliper/actions/workflows/ci.yml/badge.svg)](https://github.com/rajdeepmondaldotcom/caliper/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/caliper-ai.svg)](https://pypi.org/project/caliper-ai/)
@@ -16,50 +18,103 @@ Offline-first usage, cost, and ROI intelligence for AI coding tools.
 uvx --from caliper-ai caliper
 ```
 
-That is the whole demo. Run it once. The next paragraph will make sense.
+That is the whole demo. Run it once against your own logs. The rest of this
+document will make sense after the first table prints.
 
 </div>
 
 ---
 
-## The 30-second pitch
+## The problem nobody is solving
 
-A typical engineer using AI coding tools today burns somewhere between **$20
-and $2,000 a month** across Codex, Claude Code, Cursor, Copilot, and Aider.
-Their employer often pays a multiple of that. Nobody — not the developer,
-not the eng lead, not finance — can answer two questions with evidence:
+In 2026, every paid software engineer ships code through some combination of
+**Codex, Claude Code, Cursor, Copilot, Aider, Continue, Windsurf, and Cline.**
+The bill that lands on the team's credit card has gone from a rounding error
+to a top-five line item in eighteen months — and it is volatile every quarter
+(Cursor repricing, Anthropic weekly limits, Codex rate-limit changes, vendor
+"fair use" carve-outs).
 
-1. **What did this PR actually cost?**
-2. **Did the spend ship code?**
+Three groups of people are now asking the same question and getting different
+non-answers:
 
-Vendor dashboards do not answer either. They show what *they* charged you,
-in *their* unit, for *their* tool, on *their* timeline. They are not built
-to be honest about waste, and they cannot see across vendors.
+- **The developer** opens five vendor dashboards, none of which reconcile to
+  the others, and gives up.
+- **The engineering manager** asks "what did this quarter cost us per engineer"
+  and gets a finance export with the wrong taxonomy.
+- **The CFO** asks "what is our AI-tools ROI" and gets a slack-thread story.
 
-Caliper does. It reads the trail your AI coding tools already leave on your
-laptop, joins it with local pricing, and turns it into the kind of evidence
-you can hand to finance, push to Prometheus, or commit alongside the PR.
+The data is already there. It is sitting in `~/.codex/sessions/`,
+`~/.claude/projects/`, `~/Library/Application Support/Cursor/`, and the other
+local trails every one of these tools leaves behind. It is just unjoined,
+unpriced, and unread.
 
-**No login. No upload. No telemetry. No vendor lock-in.** Your data never
-leaves the machine unless you explicitly export it.
+**Caliper is the instrument that reads all of them in one shape.**
 
 ---
 
-## What it looks like
+## What Caliper is
+
+A single command that:
+
+1. **Reads** local AI coding tool trails — Codex today; Claude Code, Cursor,
+   Aider, Copilot, Continue, Windsurf, Cline next.
+2. **Normalizes** them into one vendor-neutral usage record per event
+   (vendor, model, tier, session, project, tokens, cache, timestamp,
+   provenance).
+3. **Prices** them with an embedded, source-attributed rate card using
+   exact Decimal math (no float drift on money).
+4. **Joins** them against your local `git log` so every PR and every commit
+   carries its true AI cost.
+5. **Reports** them as tables, JSON, CSV, Markdown, HTML receipts, a Rich
+   live TUI, a one-line statusline, forecasts with ±1σ bands, what-if
+   re-pricing, budgets that exit `0/1/2` for CI, a Prometheus exporter,
+   and a Grafana dashboard.
+6. **Stays local.** No login. No upload. No telemetry. Anything that touches
+   the network is behind an explicit `--allow-network` flag and writes only
+   a local audit snapshot.
+
+Everything above ships under **MIT, free, forever**. The local CLI is the
+product. Team and enterprise tiers (post-1.0) are opt-in cloud layers that
+operate on data you explicitly export — never on data Caliper is silently
+collecting.
+
+---
+
+## Why "Datadog for AI coding spend"
+
+Datadog won because every server's process emits metrics and somebody had to
+unify them. The same shape is forming around AI coding tools today:
+
+| Datadog (then) | Caliper (now) |
+| --- | --- |
+| Every server emits CPU, RAM, disk metrics in its own format. | Every AI coding tool emits a session log in its own format. |
+| Ops teams can't reconcile them across cloud + on-prem + bare metal. | Dev teams can't reconcile them across Codex + Cursor + Claude Code + Copilot. |
+| Vendors' own dashboards show only their own slice. | Vendors' own dashboards show only their own slice. |
+| The unifying layer turned out to be observability. | The unifying layer is going to be local-first cost-and-ROI observability. |
+| Won by being agent-based, cross-cloud, and unopinionated. | Win by being local-first, vendor-neutral, and Decimal-correct. |
+
+The analogy is not "we want Datadog's margins." It is **"we are taking the
+same architectural bet at the same point in the cycle."** Caliper is to AI
+coding spend what early Datadog was to server metrics: the instrument
+everybody installs first, before they know what they are looking for.
+
+---
+
+## The 90-second tour
 
 ```text
 $ caliper
-Caliper • 7d / 30d / 90d • OpenAI Codex CLI
-─────────────────────────────────────────────────────────────────
-                         7 days      30 days     90 days
-─────────────────────────────────────────────────────────────────
- events                  1,284       4,901       14,302
- input tokens            12.4 M      48.7 M      141.2 M
-   cached                 8.9 M      35.1 M      102.7 M     (72%)
- output tokens            1.1 M       4.4 M        12.9 M
- reasoning tokens         0.3 M       1.3 M         3.7 M
- API-equiv $             $48.20     $192.30      $562.10
- credits used            81,420    312,810       907,440
+Caliper 0.4 • 7d / 30d / 90d • vendors: openai-codex
+──────────────────────────────────────────────────────────────────────
+                         7 days       30 days      90 days
+──────────────────────────────────────────────────────────────────────
+ events                   1,284        4,901       14,302
+ input tokens             12.4 M       48.7 M      141.2 M
+   cached                  8.9 M       35.1 M      102.7 M    (72%)
+ output tokens             1.1 M        4.4 M       12.9 M
+ reasoning tokens          0.3 M        1.3 M        3.7 M
+ API-equivalent $         $48.20      $192.30      $562.10
+ credits used            81,420      312,810      907,440
  top project              monorepo (61%)
  top model                gpt-5.4 standard (44%)
  pricing status           exact
@@ -68,24 +123,37 @@ Caliper • 7d / 30d / 90d • OpenAI Codex CLI
  burn (last 6h)           19,300 credits/hr
  5h window                42% used · resets in 2h 11m
  weekly window            61% used · resets in 3d 04h
+```
 
-Run  caliper insights   for cache-savings, tier-confidence, and concentration hints.
-Run  caliper forecast   for a 14-day projection with ±1σ band and ETA-to-cap.
-Run  caliper doctor     to validate your local data and assumptions.
+```text
+$ caliper pr 1428
+PR #1428  feat(billing): retry on idempotency conflict
+Branch  feature/billing-retry → main          15 commits · 4 days
+
+Vendor       Model            Events  Tokens (in/out)   Cached   Cost
+─────────────────────────────────────────────────────────────────────
+openai-codex gpt-5.4 standard    214   1.8 M / 0.21 M     74%   $8.10
+claude-code  sonnet-4.7           39   0.34 M/ 0.06 M     58%   $0.95
+cursor       composer (auto)     112   1.2 M / 0.18 M     33%   $1.40
+
+Total                                                            $10.45
+LOC shipped: +431 / -188            Cost per shipped line: $0.017
+Arbitrage:  3 Opus calls on <2k-token prompts could have run on Haiku.
+            Estimated waste this PR: $1.20
 ```
 
 ```text
 $ caliper budgets check
-[ok]    daily_credits   12,310 / 25,000   ( 49% )
-[warn]  weekly_credits  87,420 / 100,000  ( 87% )   → review burn at  caliper forecast
-[ok]    monthly_credits 312,810 / 400,000 ( 78% )
+[ok]    daily_credits      12,310 / 25,000   ( 49% )
+[warn]  weekly_credits     87,420 / 100,000  ( 87% )
+[ok]    monthly_credits   312,810 / 400,000  ( 78% )
 exit 1   # CI-friendly: 0 ok / 1 warn / 2 breach
 ```
 
 ```text
 $ caliper export receipt --month 2026-05 --format markdown | head
 # Caliper receipt — 2026-05
-Generated 2026-05-31 23:59 IST · pricing: exact · vendor: openai-codex
+Generated 2026-05-31 23:59 IST · pricing: exact
 
 | Total                  | Value       |
 | ---------------------- | ----------- |
@@ -96,32 +164,36 @@ Generated 2026-05-31 23:59 IST · pricing: exact · vendor: openai-codex
 | Cache savings $        | $98.40      |
 ```
 
-> Sample output — numbers above are illustrative.
-> Run `caliper` against your own `~/.codex/sessions/` to see real ones.
+> Sample output. Numbers above are illustrative.
+> Some commands (`caliper pr`, multi-vendor in one frame) ship on the
+> roadmap below — see [What's shipping today](#whats-shipping-today) for the
+> honest current state.
 
 ---
 
-## Why this is the right tool for the job
+## What's shipping today
 
-| | Vendor billing dashboard | `ccusage` / per-vendor scripts | **Caliper** |
-| --- | :---: | :---: | :---: |
-| Multi-vendor in one view | no | no | yes (roadmap) |
-| Per-PR / per-repo attribution | no | partial | yes (roadmap) |
-| Cache savings broken out | no | no | yes |
-| Service-tier provenance | no | no | yes |
-| Decimal-exact pricing math | no | no | yes |
-| Forecast + ±1σ band + ETA-to-cap | no | no | yes |
-| Budgets with CI-gradable exit codes | no | no | yes |
-| Prometheus + Grafana out of the box | no | no | yes |
-| Live TUI for a tmux pane | no | no | yes |
-| Works offline. Stays offline. | n/a | yes | yes |
-| Local privacy by default | no | yes | yes |
+Caliper at **0.4.0** (the current release) ships:
 
-Caliper is not trying to replace vendor billing. It is the local instrument
-that sits next to it — the kind of evidence you would want before you
-escalated a spend conversation, the kind of receipt you would want before
-you wrote off AI coding as an expense, the kind of dashboard you would want
-before you greenlit Opus in CI.
+- **OpenAI Codex CLI** — full coverage. Sessions, projects, models, tiers,
+  cache reuse, rate-limit windows, burn rate, ETA-to-cap, plan metadata.
+- **Vendor-neutral record format.** Every parsed event already carries a
+  `vendor` field; the second parser (Claude Code) is the only thing
+  required to light up cross-vendor reports.
+- **All reports above** (overview, daily/weekly/monthly, session, project,
+  models, tail, limits, statusline, insights, forecast, compare, whatif).
+- **Receipts** (HTML, Markdown), **Prometheus exporter**, **Grafana
+  dashboard**, **budgets** with CI exit codes, **doctor** / **init**.
+- **Privacy by default** — local-only reads, redaction on by default.
+- **Decimal math** — money never leaves Decimal until output.
+- **190+ tests, 88% coverage**, Python 3.11/3.12/3.13.
+
+Caliper at **1.0** (the milestone we are building toward) ships everything
+in the [Roadmap](#roadmap) below — multi-vendor parser parity, per-PR
+attribution, the editor extension, and the arbitrage advisor. Versioning is
+deliberately conservative: `1.0` is reserved for the release where the CLI
+surface, the vendor-neutral record, and the multi-vendor parser set are
+all considered frozen.
 
 ---
 
@@ -135,11 +207,9 @@ uvx --from caliper-ai caliper
 
 # Persistent install
 uv tool install caliper-ai
-caliper
 
 # pipx
 pipx install caliper-ai
-caliper
 
 # pip
 python -m pip install caliper-ai
@@ -151,10 +221,10 @@ uv tool install 'caliper-ai[prom]'
 brew install rajdeepmondaldotcom/tap/caliper
 ```
 
-The PyPI distribution name is `caliper-ai`. The canonical Python import path
-and CLI binary are both `caliper`. The `codex-meter` command and
-`codex_meter.*` Python imports are preserved as compatibility aliases for
-users upgrading from the original release.
+The PyPI distribution name is **`caliper-ai`**. The Python import path and
+the CLI binary are both **`caliper`**. The `codex-meter` command is
+preserved as a permanent alias for users upgrading from the original
+release.
 
 ---
 
@@ -182,112 +252,26 @@ Use `--no-parse-cache` while debugging parser behavior.
 
 ---
 
-## What you get, in full
+## How Caliper differs from everything adjacent
 
-### Reports
+| | Vendor billing dashboards | `ccusage`, per-vendor scripts | OpenCost / FinOps for infra | **Caliper** |
+| --- | :---: | :---: | :---: | :---: |
+| Multi-vendor in one view | no | no | no | **yes** (roadmap) |
+| Per-PR / per-commit attribution | no | partial | no | **yes** (roadmap) |
+| Cache savings broken out | no | no | no | **yes** |
+| Service-tier provenance | no | no | no | **yes** |
+| Decimal-exact pricing math | no | no | varies | **yes** |
+| Forecast + ±1σ band + ETA-to-cap | no | no | varies | **yes** |
+| Budgets with CI exit codes | no | no | no | **yes** |
+| Prometheus + Grafana out of the box | no | no | yes | **yes** |
+| Live TUI for a tmux pane | no | no | no | **yes** |
+| Works offline. Stays offline. | n/a | yes | no | **yes** |
+| Local privacy by default | no | yes | n/a | **yes** |
 
-| Report | Command |
-| --- | --- |
-| Rolling 7 / 30 / 90 day overview | `caliper` |
-| Daily / weekly / monthly | `caliper daily`, `weekly`, `monthly` |
-| Per session | `caliper session --top 20` |
-| Per project / repo | `caliper project --days 30` |
-| Per model and tier | `caliper models --days 30` |
-| Recent events | `caliper tail --n 20` |
-| Rate-limit windows | `caliper limits` |
-| Statusline snapshot | `caliper statusline` |
-| Insights (cache, concentration, tier confidence, trend) | `caliper insights` |
-| Forecast with ±1σ band and ETA-to-cap | `caliper forecast --days 14` |
-| Window comparison | `caliper compare --a "last 7 days" --b "previous 7 days"` |
-| What-if pricing | `caliper whatif --tier standard` |
-| Budgets (warn/breach) | `caliper budgets check` |
-| Receipt (HTML / Markdown) | `caliper export receipt --month 2026-05 --format html` |
-| Prometheus exporter | `caliper export prometheus --port 9090` |
-| Grafana dashboard JSON | `caliper export grafana > dashboard.json` |
-
-Every grouped report supports `--format table|json|csv|markdown`,
-`--output FILE`, `--since YYYY-MM-DD`, `--days N`, and `--top N`.
-
-JSON exports include a `projects` inventory for the window and row-level
-`model_breakdowns` — paths, session counts, first/last seen, models, tiers,
-model source/fallback flags, git branches/remotes when Codex recorded them,
-plus the same token and cost fields as the primary breakdown.
-
-### Live view
-
-```bash
-caliper live
-```
-
-A three-panel Rich TUI: today's usage, trailing 7-day usage, 5-hour and
-weekly rate-limit windows, burn rate, and ETA-to-100% when enough samples
-exist.
-
-| Key | Action |
-| --- | --- |
-| `q` | Quit |
-| `?` | Help |
-| `r` | Refresh |
-| `p` | Pause |
-
-### Statusline
-
-```bash
-caliper statusline
-caliper statusline --format json
-```
-
-One compact line for shell prompts, editor hooks, and scripts: latest
-model/tier, top project, today's credits and API-equivalent dollars,
-trailing 7-day credits, 5-hour and weekly reset windows, cache ratio, and
-pricing status.
-
-### Budgets that gate CI
-
-```bash
-caliper init
-```
-
-```toml
-[budgets]
-daily_credits = 25000
-weekly_credits = 100000
-monthly_credits = 400000
-weekly_api_dollars = 50.0
-```
-
-```bash
-caliper budgets check
-```
-
-Exit codes are designed for CI:
-
-| Exit | Meaning |
-| ---: | --- |
-| `0` | ok |
-| `1` | warning |
-| `2` | breached or failed |
-
-### Receipts you can hand to finance
-
-```bash
-caliper export receipt --month 2026-05 --format markdown
-caliper export receipt --month 2026-05 --format html > receipt.html
-```
-
-Receipts redact local session and project labels by default. Use
-`--show-sensitive` only for private artifacts.
-
-### Prometheus and Grafana
-
-```bash
-caliper export prometheus --host 127.0.0.1 --port 9090
-caliper export grafana > dashboard.json
-```
-
-Exposes credits, burn rate, rate-limit window percent, event count,
-long-context event count, and tokens by model/tier/kind. Drop the dashboard
-JSON into Grafana and you have a real-time view in under a minute.
+Caliper is not trying to replace vendor billing. It is the local instrument
+that sits next to it — the evidence you reach for before you escalate a
+spend conversation, the receipt you reach for before you write AI off as
+an expense, the dashboard you reach for before you greenlight Opus in CI.
 
 ---
 
@@ -306,23 +290,18 @@ Caliper:
   override file, or an assumption — with per-source counts in JSON output.
 - Surfaces pricing as **exact**, **estimated**, or **unpriced** so a
   fallback never silently masquerades as a billing receipt.
-
-### Model identity provenance
-
-JSON exports record whether each event's model came from JSONL
-`turn_context`, SQLite thread metadata, or the configured default model.
-When the default model is used because a legacy session recorded tokens
-without model metadata, those events are marked as fallback model events
-and pricing is treated as estimated.
+- Records whether each event's model came from a JSONL `turn_context`,
+  SQLite thread metadata, or a configured default. Fallback events are
+  marked and priced as estimated.
 
 ### Subscription plans are metadata, not pricing magic
 
 Caliper preserves the raw `plan_type`, adds normalized subscription plan
 details for Free, Go, Plus, Pro, Business, Enterprise, Edu, Health, Gov,
-and ChatGPT for Teachers, and uses the logged `codex` rate-limit bucket for
-remaining-window math when multiple buckets are present. Free/Go
-promotional access and Enterprise-family legacy-rate-card ambiguity surface
-as warnings instead of being guessed.
+and ChatGPT for Teachers, and uses the logged `codex` rate-limit bucket
+for remaining-window math when multiple buckets are present. Free/Go
+promotional access and Enterprise-family legacy-rate-card ambiguity
+surface as warnings instead of being guessed.
 
 Reasoning tokens are billed separately only when the token log shows they
 are not already included in output tokens. No double counting.
@@ -350,66 +329,46 @@ Schemas:
 
 ---
 
-## Data sources
-
-Today, Caliper reads:
-
-- `~/.codex/sessions/**/*.jsonl`
-- `~/.codex/state_5.sqlite`
-- `~/.codex/config.toml`
-
-If `CODEX_HOME` is set, those defaults move under that directory, matching
-Codex itself. Explicit `--session-root`, `--state-db`, `--codex-config`,
-and config file paths still take precedence.
-
-Workspace attribution is local and evidence-based. For each usage event,
-Caliper uses:
-
-1. JSONL `turn_context.cwd`
-2. SQLite `threads.cwd`
-3. `Unknown Project`
-
-Normal reports never touch the network. The only networked command is
-explicit:
-
-```bash
-caliper rates refresh --allow-network
-```
-
-This writes a local pricing-source audit snapshot (observed token rates,
-fast multipliers, long-context rules, discrepancies). It does not rewrite
-the embedded rate card.
-
----
-
 ## Privacy
 
-Default posture is local and conservative.
+Local-first is not a tagline. It is an enforced architectural posture.
 
-- Reports read local files only.
-- Prompt and session labels are redacted unless explicitly requested.
-- Receipts hide full session IDs and project paths by default.
-- JSON, CSV, Markdown, and HTML exports may still contain local metadata
-  (paths, git remotes) when those fields are present in the source data.
+- **Reports read local files only.**
+- **Prompt and session labels are redacted** unless explicitly requested
+  with `--show-prompts`.
+- **Receipts hide full session IDs and project paths** by default. Use
+  `--show-sensitive` only for private artifacts.
+- **No telemetry, no analytics beacons, no auto-update phone-home.** A
+  network-aware command exists, but it is named `caliper rates refresh
+  --allow-network` and it only writes a local audit snapshot.
+- **Exports may contain local metadata** (paths, git remotes) when those
+  fields are present in source data. Treat exports as sensitive unless
+  you made them to share.
 
-Treat exports as sensitive unless you made them to be shared.
+Caliper aligns with the
+[local-first software](https://www.inkandswitch.com/local-first/)
+principles: you own your data, ownership of data lives in your hands, the
+network is enhancement, not infrastructure.
 
 ---
 
 ## Roadmap
 
-Caliper 0.4 ships with full OpenAI Codex CLI coverage and the vendor-neutral
-record format that the next milestones build on.
+Caliper 0.4 ships full OpenAI Codex CLI coverage and the vendor-neutral
+record the next milestones build on.
 
 | Milestone | What lands |
 | --- | --- |
-| **0.5** | Claude Code parser (`~/.claude/projects/**/*.jsonl`) — same record shape, same reports, same pricing engine |
-| **0.6** | Cursor + Aider parsers; cross-vendor model and tier normalization |
-| **0.7** | Per-PR / per-commit attribution via local `git log` join — every PR carries its real AI cost |
-| **0.8** | Model-arbitrage advisor — flags spend where a smaller model would have shipped the same work |
-| **0.9** | VS Code / Cursor / Zed extension surfacing live cost in the editor |
-| **1.0** | Public API freeze; cross-vendor surface considered stable. Multi-vendor parser set ships together. |
-| **post-1.0** | Opt-in team aggregator — workspace rollups, Slack/Linear digests, finance export. Local CLI stays free, MIT, and offline-first. |
+| **0.5** | **Claude Code parser** (`~/.claude/projects/**/*.jsonl`) — same record shape, same reports, same pricing engine. First proof of vendor-neutrality. |
+| **0.6** | **Cursor + Aider parsers**, cross-vendor model and tier normalization, plus a `--vendor` filter on every report. |
+| **0.7** | **`caliper pr <N>`** — per-PR / per-commit attribution via local `git log` join. Every PR carries its real AI cost. The viral demo. |
+| **0.8** | **Model-arbitrage advisor** — heuristic that flags spend where a cheaper model would have shipped the same work. "$X of your last week was overkill" report. |
+| **0.9** | **VS Code / Cursor / Zed extension** surfacing live cost in the editor. Ambient awareness, daily active. |
+| **1.0** | **Public API freeze.** Cross-vendor surface considered stable. Multi-vendor parser set (Codex + Claude Code + Cursor + Aider) ships together. |
+| **1.x** | **GitHub Copilot + Continue + Windsurf + Cline parsers.** Coverage parity with the rest of the market. |
+| **2.0** | **Opt-in team aggregator (paid).** Workspace rollups, Slack/Linear digests, finance export (CSV, QuickBooks, NetSuite). Local CLI stays free, MIT, offline-first. |
+| **2.x** | **Enterprise tier (paid).** SSO/SAML, SOC2, on-prem aggregator, policy enforcement (model bans, daily caps), audit log. |
+| **ongoing** | **AI Dev Spend Index** — opt-in anonymized cohort benchmark. "Your spend vs. P50 of $X-engineer teams." Press hook. |
 
 Caliper will not reach `1.0` until at least three vendor parsers (Codex,
 Claude Code, Cursor) ship together. That is the bar for calling the public
