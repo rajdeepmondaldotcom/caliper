@@ -158,57 +158,80 @@ def rate_discrepancies(observed_models: list[dict]) -> list[dict]:
     discrepancies: list[dict] = []
     for observed in observed_models:
         card = MODELS_BY_NAME.get(normalize_model(str(observed.get("name") or "")))
-        if card is None:
-            continue
-        for section, rates in (("api", card.api_rates), ("credits", card.credit_rates)):
-            if not rates or not isinstance(observed.get(section), dict):
-                continue
-            expected = rates_payload(rates) or {}
-            for field in ("input", "cached_input", "output"):
-                actual = observed[section].get(field)
-                if actual is None:
-                    continue
-                if abs(float(actual) - float(expected[field])) > 1e-9:
-                    discrepancies.append(
-                        {
-                            "model": card.name,
-                            "section": section,
-                            "field": field,
-                            "embedded": expected[field],
-                            "observed": actual,
-                        }
-                    )
-        if observed.get("fast_multiplier") is not None:
-            actual_fast = float(observed["fast_multiplier"])
-            if abs(actual_fast - float(card.fast_multiplier)) > 1e-9:
-                discrepancies.append(
-                    {
-                        "model": card.name,
-                        "section": "fast_multiplier",
-                        "field": "multiplier",
-                        "embedded": card.fast_multiplier,
-                        "observed": actual_fast,
-                    }
-                )
-        if isinstance(observed.get("long_context"), dict) and card.long_context is not None:
-            expected_long = {
-                "threshold": card.long_context.threshold,
-                "input_mult": card.long_context.input_mult,
-                "output_mult": card.long_context.output_mult,
-            }
-            for field, expected in expected_long.items():
-                actual = observed["long_context"].get(field)
-                if actual is not None and abs(float(actual) - float(expected)) > 1e-9:
-                    discrepancies.append(
-                        {
-                            "model": card.name,
-                            "section": "long_context",
-                            "field": field,
-                            "embedded": expected,
-                            "observed": actual,
-                        }
-                    )
+        if card is not None:
+            discrepancies.extend(_model_rate_discrepancies(card, observed))
     return discrepancies
+
+
+def _model_rate_discrepancies(card, observed: dict) -> list[dict]:
+    return [
+        *_section_rate_discrepancies(card, observed, "api", card.api_rates),
+        *_section_rate_discrepancies(card, observed, "credits", card.credit_rates),
+        *_fast_multiplier_discrepancy(card, observed),
+        *_long_context_discrepancies(card, observed),
+    ]
+
+
+def _section_rate_discrepancies(card, observed: dict, section: str, rates) -> list[dict]:
+    observed_rates = observed.get(section)
+    if not rates or not isinstance(observed_rates, dict):
+        return []
+    expected = rates_payload(rates) or {}
+    discrepancies: list[dict] = []
+    for field in ("input", "cached_input", "output"):
+        actual = observed_rates.get(field)
+        if actual is not None and _different_number(actual, expected[field]):
+            discrepancies.append(
+                {
+                    "model": card.name,
+                    "section": section,
+                    "field": field,
+                    "embedded": expected[field],
+                    "observed": actual,
+                }
+            )
+    return discrepancies
+
+
+def _fast_multiplier_discrepancy(card, observed: dict) -> list[dict]:
+    actual = observed.get("fast_multiplier")
+    if actual is None or not _different_number(actual, card.fast_multiplier):
+        return []
+    return [
+        {
+            "model": card.name,
+            "section": "fast_multiplier",
+            "field": "multiplier",
+            "embedded": card.fast_multiplier,
+            "observed": float(actual),
+        }
+    ]
+
+
+def _long_context_discrepancies(card, observed: dict) -> list[dict]:
+    observed_long = observed.get("long_context")
+    if not isinstance(observed_long, dict) or card.long_context is None:
+        return []
+    expected_long = {
+        "threshold": card.long_context.threshold,
+        "input_mult": card.long_context.input_mult,
+        "output_mult": card.long_context.output_mult,
+    }
+    return [
+        {
+            "model": card.name,
+            "section": "long_context",
+            "field": field,
+            "embedded": expected,
+            "observed": actual,
+        }
+        for field, expected in expected_long.items()
+        if (actual := observed_long.get(field)) is not None and _different_number(actual, expected)
+    ]
+
+
+def _different_number(left, right) -> bool:
+    return abs(float(left) - float(right)) > 1e-9
 
 
 def _validated_source_url(url: str) -> str:
