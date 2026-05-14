@@ -393,6 +393,8 @@ def write_output(text: str, output: Path | None) -> None:
     if output:
         output.expanduser().write_text(text)
         return
+    import contextlib
+
     try:
         sys.stdout.write(text)
         sys.stdout.flush()
@@ -400,10 +402,8 @@ def write_output(text: str, output: Path | None) -> None:
         # `caliper daily --format json | head` is a real usage pattern.
         # Swallow the broken pipe and exit clean. Mirrors the pattern in
         # most POSIX line-oriented tools.
-        try:
+        with contextlib.suppress(BrokenPipeError):
             sys.stdout.close()
-        except BrokenPipeError:
-            pass
 
 
 def render_table(

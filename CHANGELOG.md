@@ -2,9 +2,51 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.5 - 2026-05-14
+
+Persona overhaul, round one. Caliper's terminal output starts speaking
+in its own voice: short sentences, named constraints, decisions over
+decoration. The work follows
+`docs/persona-overhaul/01-plan.md`.
+
+### Added
+
+- `caliper.persona` module with `voice_lint(text)` and
+  `voice_lint_strict(text)`. CI runs a dedicated voice-lint step on
+  the persona tests so banned hype / fog / em-dashes never sneak into
+  shipped copy. Importable from the top-level package.
+- `caliper.pricing.model_vendor(model)` returns the canonical vendor
+  label (`anthropic`, `openai`, `anysphere`, `google`, `mistral`,
+  `meta`, `unknown`) for any model id. Every model in `MODEL_CARDS`
+  resolves to a non-unknown vendor. Glyph helper
+  `model_vendor_glyph(vendor)` returns a single character for dense
+  screens.
+- `Aggregate.model_vendors: set[str]` and
+  `ModelBreakdown.model_vendor: str` populated everywhere aggregation
+  runs.
+- Classic table rendering shows a dim `Anthropic . OpenAI` chip under
+  the model list. JSON gains `"model_vendor"` on every breakdown and
+  `"model_vendors"` on every aggregate. Additive only.
+- `Insight` carries `scope`, `evidence`, and `next_command` fields.
+  Existing builders pin their scope and rewrite in voice. Two new
+  templates: model-concentration and vendor-mix.
+- Short primary flag names alongside every existing alias on shared
+  `Annotated[...]` options. New flags reserved: `--only-vendor`,
+  `--classic` / `--no-tui`. Every old flag survives as an alias
+  forever.
+- Textual-by-default branching for the `overview` (default) command:
+  bare `caliper` on a TTY opens the workspace; `--format`, `--out`,
+  `--classic`, or `CALIPER_NO_TUI=1` keep the classic Rich path
+  byte-identical.
+
+### Changed
+
+- `caliper.render.write_output` swallows `BrokenPipeError` cleanly so
+  `caliper daily --format json | head` no longer prints a traceback.
+
 ## 0.0.4 - 2026-05-14
 
-Polish pass on the table output so reports scan cleanly in a 100–140
+Polish pass on the table output so reports scan cleanly in a 100-140
 column terminal.
 
 ### Changed
