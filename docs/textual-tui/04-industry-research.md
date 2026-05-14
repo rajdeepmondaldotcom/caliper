@@ -163,7 +163,7 @@ theme registration? Does it honour `NO_COLOR`?
 - `slate` — warm dark gray, indigo accent.
 - `parchment` — off-white, sienna accent.
 - `colorblind` — blue / orange severity instead of red / green.
-- *On startup*, if `NO_COLOR` env var is set, force a fourth registered
+- *On launch*, if `NO_COLOR` env var is set, force a fourth registered
   theme `monochrome` (no hue, weight + italic only for hierarchy) and
   ignore the saved `[tui] theme = ...` setting for the session. The
   saved value is kept, not overwritten.

@@ -393,7 +393,7 @@ tree and asserts the three-band invariant.
 - [ ] `0.0.8` ships from CI with the verify step green.
 - [ ] `src/caliper/tui/screens/` contains one real screen per stub.
       `stub.py` only holds compatibility shims if needed.
-- [ ] Four themes register at startup. `t` cycles. `NO_COLOR` pins
+- [ ] Four themes register at launch. `t` cycles. `NO_COLOR` pins
       monochrome.
 - [ ] Command palette opens on `ctrl+p` and lists every action in the
       table above.

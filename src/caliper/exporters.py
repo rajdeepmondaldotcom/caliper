@@ -22,7 +22,7 @@ def session_compat_json(
     result: LoadResult,
     options: RuntimeOptions,
 ) -> str:
-    """Render a single-session receipt in the ccusage-compatible JSON shape.
+    """Render a single-session receipt in the legacy-compatible JSON shape.
 
     Previously private to ``caliper.cli`` as ``_compat_session_id_json``;
     promoted so the Textual TUI Receipt screen and any future exporter

@@ -190,7 +190,7 @@ Key properties:
   recent `LoadResult`, `RateCard`, derived aggregates, computed at well-
   defined refresh points. Screens read from it; they never call
   `load_usage` themselves.
-- **One shared `RuntimeOptions`.** Built once at startup the same way
+- **One shared `RuntimeOptions`.** Built once at launch the same way
   `cli.py` builds it (`_options(values)` → `RuntimeOptions`). User
   filters (interval, model, project, tier, redact, etc.) mutate a *copy*
   using `dataclasses.replace`.
@@ -280,8 +280,8 @@ spinner and "last refreshed Xs ago" indicator honest.
 
 | Worker | Trigger | Output | Notes |
 | --- | --- | --- | --- |
-| `load_usage_worker` | startup, `r`, scope change | `LoadResult` | Long. Shows centered "Reading sessions…" overlay with file count progress. |
-| `rate_card_worker` | startup, `rates refresh` | `RateCard` | Fast. Pure. |
+| `load_usage_worker` | launch, `r`, scope change | `LoadResult` | Long. Shows centered "Reading sessions…" overlay with file count progress. |
+| `rate_card_worker` | launch, `rates refresh` | `RateCard` | Fast. Pure. |
 | `aggregate_worker` | after `load_usage` resolves | `dict[str, Aggregate]` | CPU-bound but quick; we still run in a thread to keep the UI smooth on huge logs. |
 | `whatif_worker` | modal apply | `WhatIfReport` | Pure math, sub-50ms typical. |
 | `health_worker` | open Doctor | `list[HealthCheck]` | Includes IO. |
@@ -691,7 +691,7 @@ Coverage floor stays at 90%. The TUI must pull its weight, not lower it.
    `await pilot.press("d")` → assert active screen is `IntervalsScreen`.
 5. **Demo data** — `tui/fixtures/demo_data.py` builds a deterministic
    `LoadResult` so screenshots are stable.
-6. **Performance budget** — pilot test asserting startup → first paint
+6. **Performance budget** — pilot test asserting launch → first paint
    under 200 ms on the demo dataset (skip on Windows CI if flaky).
 7. **Privacy invariant test** — assert that with `redact=True`, no
    session label, project path, or first message appears anywhere in
@@ -782,7 +782,7 @@ The TUI is **not**:
 - A new pricing source. `pricing.py` + `pricing_catalog.py` continue
   to be the canonical rates.
 - A long-running daemon. Quitting the TUI ends the process. No daemons,
-  no startup hooks.
+  no launch hooks.
 
 ## 15. Definition of done
 

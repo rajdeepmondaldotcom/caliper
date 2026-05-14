@@ -2,6 +2,15 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.18 - 2026-05-14
+
+CI invariant cleanup on top of 0.0.17.
+
+### Fixed
+
+- Removed remaining legacy comparison wording from old planning docs
+  and exporter docstrings so the main-branch invariant gate is clean.
+
 ## 0.0.17 - 2026-05-14
 
 Actionable accuracy and insight release.
