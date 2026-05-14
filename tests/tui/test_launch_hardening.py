@@ -342,22 +342,28 @@ def test_tui_screenshot_regression_matrix_80x24(tmp_path, monkeypatch):
 def test_tui_screenshot_regression_matrix_120x40(tmp_path, monkeypatch):
     app = _demo_app(tmp_path, monkeypatch)
 
-    async def _drive() -> dict[str, str]:
+    async def _drive() -> tuple[dict[str, str], dict[str, str]]:
+        screen_names: dict[str, str] = {}
         async with app.run_test(size=(120, 40)) as pilot:
             await _wait_for_first_load(app, pilot)
             shots = {"home": app.export_screenshot()}
             for name, key in (("sessions", "3"), ("projects", "4"), ("forecast", "8")):
                 await pilot.press(key)
                 await pilot.pause(0.2)
+                screen_names[name] = type(app.screen).__name__
                 shots[name] = app.export_screenshot()
                 await pilot.press("escape")
                 await pilot.pause(0.1)
-            return shots
+            return shots, screen_names
 
-    shots = asyncio.run(_drive())
+    shots, screen_names = asyncio.run(_drive())
 
     assert "Recent&#160;sessions" in shots["home"]
-    assert "sessions" in shots["sessions"]
+    assert screen_names == {
+        "sessions": "SessionsScreen",
+        "projects": "ProjectsScreen",
+        "forecast": "ForecastScreen",
+    }
     assert "Projects" in shots["projects"]
     assert "Forecast" in shots["forecast"]
     for svg in shots.values():
