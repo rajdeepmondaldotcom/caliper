@@ -68,7 +68,11 @@ def test_json_redacts_absolute_paths_by_default(tmp_path: Path) -> None:
     assert payload["metadata"]["path_redaction"] == "redacted"
     assert str(tmp_path) not in result.output
     assert "/tmp/project-alpha" not in result.output
+    assert "https://github.com/example/project-alpha" not in result.output
+    assert "2026-05-12T00-00-00-launch" not in result.output
     assert "<redacted-path>" in result.output
+    assert "<redacted-repo>" in result.output
+    assert "<redacted-session>" in result.output
 
 
 def test_json_show_paths_restores_absolute_paths(tmp_path: Path) -> None:
@@ -79,6 +83,8 @@ def test_json_show_paths_restores_absolute_paths(tmp_path: Path) -> None:
     assert payload["metadata"]["path_redaction"] == "visible"
     assert str(tmp_path) in result.output
     assert "/tmp/project-alpha" in result.output
+    assert "https://github.com/example/project-alpha" in result.output
+    assert "2026-05-12T00-00-00-launch" in result.output
 
 
 def test_human_overview_redacts_session_root_by_default(tmp_path: Path) -> None:

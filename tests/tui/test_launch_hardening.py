@@ -17,6 +17,8 @@ def _demo_app(tmp_path, monkeypatch, *, demo=True, first_run=False, no_color=Fal
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     if no_color:
         monkeypatch.setenv("NO_COLOR", "1")
+    else:
+        monkeypatch.delenv("NO_COLOR", raising=False)
 
     options = build_options(
         days=size_days,
@@ -95,6 +97,7 @@ def test_demo_home_renders_body_and_no_wrapped_default_footer(tmp_path, monkeypa
 
     assert "7d" in svg
     assert "OpenAI" in svg
+    assert "usage&#160;12%" in svg
     assert "pa\nlette" not in svg
     assert "pa lette" not in svg
 
@@ -207,12 +210,15 @@ def test_no_color_selects_monochrome_theme(tmp_path, monkeypatch):
         tui_config=TuiConfig(show_demo_on_first_run=False, no_watchdog=True, theme="slate"),
     )
 
-    async def _drive() -> str:
+    async def _drive() -> tuple[str, str]:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause(0.2)
-            return app.theme
+            before = app.theme
+            await pilot.press("t")
+            await pilot.pause(0.1)
+            return before, app.theme
 
-    assert asyncio.run(_drive()) == "monochrome"
+    assert asyncio.run(_drive()) == ("monochrome", "monochrome")
 
 
 def test_shortcut_navigation_reaches_secondary_screens(tmp_path, monkeypatch):
@@ -256,6 +262,27 @@ def test_shortcut_navigation_reaches_secondary_screens(tmp_path, monkeypatch):
         "BudgetsScreen",
         "InsightsScreen",
         "HelpScreen",
+    ]
+
+
+def test_secondary_shortcuts_are_global_without_escape(tmp_path, monkeypatch):
+    app = _demo_app(tmp_path, monkeypatch)
+
+    async def _drive() -> list[str]:
+        titles: list[str] = []
+        async with app.run_test(size=(80, 24)) as pilot:
+            await _wait_for_first_load(app, pilot)
+            for key in ("w", "b", "i", "0"):
+                await pilot.press(key)
+                await pilot.pause(0.1)
+                titles.append(type(app.screen).__name__)
+            return titles
+
+    assert asyncio.run(_drive()) == [
+        "WhatIfScreen",
+        "BudgetsScreen",
+        "InsightsScreen",
+        "ReceiptScreen",
     ]
 
 
@@ -373,14 +400,18 @@ def test_tui_screenshot_regression_matrix_120x40(tmp_path, monkeypatch):
 def test_no_color_screenshot_regression(tmp_path, monkeypatch):
     app = _demo_app(tmp_path, monkeypatch, no_color=True)
 
-    async def _drive() -> tuple[str, str]:
+    async def _drive() -> tuple[str, str, str]:
         async with app.run_test(size=(80, 24)) as pilot:
             await _wait_for_first_load(app, pilot)
-            return app.theme, app.export_screenshot()
+            before = app.theme
+            await pilot.press("t")
+            await pilot.pause(0.1)
+            return before, app.theme, app.export_screenshot()
 
-    theme, svg = asyncio.run(_drive())
+    theme, theme_after_cycle, svg = asyncio.run(_drive())
 
     assert theme == "monochrome"
+    assert theme_after_cycle == "monochrome"
     assert "Caliper" in svg
     _assert_no_obvious_midword_splits(svg)
 

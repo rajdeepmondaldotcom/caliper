@@ -22,6 +22,7 @@ def test_tui_navigation_keymap(tmp_path, monkeypatch):
     monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
     monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    monkeypatch.delenv("NO_COLOR", raising=False)
 
     options = build_options(
         days=90,

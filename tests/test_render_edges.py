@@ -195,6 +195,8 @@ def test_narrow_table_uses_scan_friendly_columns(tmp_path: Path) -> None:
     assert "Pricing" in text
     assert "Reported $" not in text
     assert "supercalifragilisticexpialidocious\n" not in text
+    assert "$0..." not in text
+    assert "$0…" not in text
 
 
 def test_pricing_status_and_warning_branches() -> None:
@@ -226,11 +228,17 @@ def test_pricing_status_and_warning_branches() -> None:
     vendor.costs = CostTotals(vendor_reported_events=1)
     assert render_module.pricing_status(vendor) == "vendor-reported"
 
+    mixed_vendor = Aggregate(key="mixed-vendor", label="mixed vendor")
+    mixed_vendor.costs = CostTotals(vendor_reported_events=1, unpriced_events=2)
+    assert render_module.pricing_status(mixed_vendor) == "partial"
+
     breakdown = ModelBreakdown(key="m", model="m", service_tier="standard")
     breakdown.costs = CostTotals(unpriced_events=1)
     assert render_module.model_breakdown_pricing_status(breakdown) == "partial"
     breakdown.costs = CostTotals(vendor_reported_events=1)
     assert render_module.model_breakdown_pricing_status(breakdown) == "vendor-reported"
+    breakdown.costs = CostTotals(vendor_reported_events=1, unpriced_events=2)
+    assert render_module.model_breakdown_pricing_status(breakdown) == "partial"
 
 
 def test_render_dispatch_and_markdown_totals(tmp_path: Path, capsys) -> None:

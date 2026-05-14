@@ -11,6 +11,33 @@ from caliper.scenarios import build_whatif_report, events_in_interval
 from caliper.tui.formatting import format_cost_usd
 from caliper.tui.screens._base import CaliperScreen
 
+_EMPTY_INPUT_NAV_KEYS = {
+    "1": "home",
+    "2": "intervals",
+    "3": "sessions",
+    "4": "projects",
+    "5": "models",
+    "6": "limits",
+    "7": "live",
+    "8": "forecast",
+    "9": "doctor",
+    "0": "receipt",
+    "w": "whatif",
+    "b": "budgets",
+    "i": "insights",
+}
+
+
+class WhatIfInput(Input):
+    """Let global single-key navigation win when an empty field has focus."""
+
+    def on_key(self, event) -> None:
+        if self.value or event.key not in _EMPTY_INPUT_NAV_KEYS:
+            return
+        event.prevent_default()
+        event.stop()
+        self.app.action_go(_EMPTY_INPUT_NAV_KEYS[event.key])
+
 
 class WhatIfScreen(CaliperScreen):
     SCREEN_TITLE = "Caliper - What if"
@@ -26,9 +53,9 @@ class WhatIfScreen(CaliperScreen):
 
     def middle(self):
         yield Static("[dim]Hypothetical tier (standard or fast):[/dim]")
-        yield Input(placeholder="standard", id="tier-input")
+        yield WhatIfInput(placeholder="standard", id="tier-input")
         yield Static("[dim]Hypothetical model (must be in rate card):[/dim]")
-        yield Input(placeholder="claude-sonnet-4.6", id="model-input")
+        yield WhatIfInput(placeholder="claude-sonnet-4.6", id="model-input")
         yield Static("", id="whatif-result")
 
     def footer_pills(self) -> str:

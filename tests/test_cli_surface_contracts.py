@@ -146,6 +146,36 @@ def test_budgets_json_output_carries_caliper_envelope(tmp_path: Path) -> None:
     assert payload["caliper"] == {"version": __version__, "schema_version": SCHEMA_VERSION}
 
 
+def test_specialized_commands_accept_shared_release_flags(tmp_path: Path) -> None:
+    session_root, state_db, until, missing_cfg, config = _fixture(tmp_path)
+    shared = [
+        "--session-root",
+        str(session_root),
+        "--state-db",
+        str(state_db),
+        "--codex-config",
+        str(missing_cfg),
+    ]
+
+    cases = [
+        ["whatif", "--days", "1", "--tier", "standard", *shared, "--no-cache"],
+        ["advise", "--days", "7", "--until", until, *shared, "--width", "100", "--no-cache"],
+        [
+            "budgets",
+            "check",
+            "--config",
+            str(config),
+            *shared,
+            "--no-cache",
+            "--format",
+            "json",
+        ],
+    ]
+    for args in cases:
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0, result.output
+
+
 @pytest.mark.parametrize(
     ("command", "fmt", "needle"),
     [

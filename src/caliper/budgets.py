@@ -119,7 +119,8 @@ def alert_records(
             "warn_at": alert.budget.warn_at,
             "used": alert.used,
             "used_exact": decimal_string(usage.get(alert.budget.key(), alert.used)),
-            "used_percent": alert.used_percent,
+            "used_percent": round(alert.used_percent, 2),
+            "used_percent_exact": decimal_string(alert.used_percent),
             "severity": alert.severity,
             "pricing_status": pricing_status,
         }

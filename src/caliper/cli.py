@@ -2334,10 +2334,10 @@ def rates_catalog(
         table.add_row(
             str(row["provider"]),
             str(row["model"]),
-            str(row["api_input"]),
-            str(row["api_cached_input"]),
-            str(row["api_output"]),
-            str(row["context_window"]),
+            _format_catalog_rate(row["api_input"]),
+            _format_catalog_rate(row["api_cached_input"]),
+            _format_catalog_rate(row["api_output"]),
+            _format_catalog_count(row["context_window"]),
         )
     console.print(table)
     if len(display_rows) < len(rows):
@@ -2347,6 +2347,22 @@ def rates_catalog(
             "--provider, --limit, or --all."
             "[/dim]"
         )
+
+
+def _format_catalog_rate(value: object) -> str:
+    if value in (None, ""):
+        return "-"
+    amount = Decimal(str(value))
+    if amount == amount.to_integral_value():
+        return f"{amount:,.0f}"
+    text = format(amount.normalize(), "f")
+    return text.rstrip("0").rstrip(".") or "0"
+
+
+def _format_catalog_count(value: object) -> str:
+    if value in (None, ""):
+        return "-"
+    return format_int(int(Decimal(str(value))))
 
 
 def _rates_catalog_limit(output_format: str, limit: int | None, show_all: bool) -> int | None:
@@ -2703,14 +2719,14 @@ def compare(
         f"${agg_a.costs.cost_usd:,.2f}",
         f"${agg_b.costs.cost_usd:,.2f}",
         f"{cost_delta:+,.2f}",
-        f"{cost_pct:+.1f}%",
+        _format_percent(cost_pct, signed=True),
     )
     table.add_row(
         "Tokens",
         format_int(agg_a.totals.total_tokens),
         format_int(agg_b.totals.total_tokens),
         f"{tokens_delta:+,.0f}",
-        f"{tokens_pct:+.1f}%",
+        _format_percent(tokens_pct, signed=True),
     )
     table.add_row(
         "Events",
@@ -3166,6 +3182,8 @@ def _format_count(value: object, *, signed: bool = False) -> str:
 
 
 def _format_percent(value: object, *, signed: bool = False) -> str:
+    if value in (None, ""):
+        return "n/a"
     amount = float(value)
     sign = "+" if signed and amount > 0 else ""
     return f"{sign}{amount:,.2f}%"
@@ -3190,7 +3208,7 @@ def _render_whatif_table(report) -> None:
         f"${totals.actual_cost_usd:,.2f}",
         f"${totals.hypothetical_cost_usd:,.2f}",
         f"{totals.cost_usd_delta:+,.2f}",
-        f"{totals.cost_usd_pct:+.1f}%",
+        _format_percent(totals.cost_usd_pct, signed=True),
     )
     console.print(table)
 
@@ -3232,6 +3250,7 @@ def whatif(
     tier_overrides: TierOverridesOpt = None,
     service_tier: ServiceTierOpt = "auto",
     pricing_mode: PricingModeOpt = "model",
+    no_parse_cache: NoParseCacheOpt = False,
     vendors: VendorOpt = None,
 ) -> None:
     """Re-price the window as if you had used a different tier or model."""
@@ -3248,6 +3267,7 @@ def whatif(
             tier_overrides=tier_overrides,
             service_tier=service_tier,
             pricing_mode=pricing_mode,
+            no_parse_cache=no_parse_cache,
             vendors=vendors,
         )
     except ValueError as exc:
@@ -3297,6 +3317,7 @@ def advise(
     no_dedupe: NoDedupeOpt = False,
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
+    width: WidthOpt = None,
     vendors: VendorOpt = None,
 ) -> None:
     """Suggest model or tier swaps that would have cut cost on past usage."""
@@ -3326,6 +3347,7 @@ def advise(
             no_dedupe=no_dedupe,
             no_parse_cache=no_parse_cache,
             default_model=default_model,
+            width=width,
             vendors=vendors,
         )
     except ValueError as exc:
@@ -3337,7 +3359,9 @@ def advise(
     recommendations = [
         item.to_record() for item in recommend_arbitrage(result.events, rate_card, threshold)
     ]
-    _emit_advisor(rows, recommendations, output_format, threshold, len(result.events))
+    _emit_advisor(
+        rows, recommendations, output_format, threshold, len(result.events), options.width
+    )
 
 
 def _emit_advisor(
@@ -3346,7 +3370,9 @@ def _emit_advisor(
     output_format: str,
     threshold: float,
     event_count: int,
+    width: int | None = None,
 ) -> None:
+    local_console = Console(width=width or 140, _environ={})
     display_rows = recommendations or records
     empty_message = _advisor_empty_message(threshold, event_count)
     if output_format == "json":
@@ -3373,9 +3399,9 @@ def _emit_advisor(
             return
         typer.echo(records_to_markdown(display_rows), nl=False)
         return
-    console.print("[bold]Caliper - Advisor[/bold]")
+    local_console.print("[bold]Caliper - Advisor[/bold]")
     if not display_rows:
-        console.print(empty_message)
+        local_console.print(empty_message)
         return
     table = Table(show_lines=False, expand=True)
     table.add_column("Rule", overflow="fold", max_width=28)
@@ -3393,7 +3419,7 @@ def _emit_advisor(
             _advisor_savings(record),
             str(record.get("action") or record.get("next_command") or ""),
         )
-    console.print(table)
+    local_console.print(table)
 
 
 def _advisor_empty_message(threshold: float, event_count: int) -> str:
@@ -3754,6 +3780,7 @@ def budgets_check(
     service_tier: ServiceTierOpt = "auto",
     pricing_mode: PricingModeOpt = "model",
     vendors: VendorOpt = None,
+    no_parse_cache: NoParseCacheOpt = False,
     output_format: FormatOpt = "table",
 ) -> None:
     """Check the \\[budgets] table in .caliper.toml. Exits 0 ok, 1 warn, 2 breach.
@@ -3791,6 +3818,7 @@ def budgets_check(
             service_tier=service_tier,
             pricing_mode=pricing_mode,
             vendors=vendors,
+            no_parse_cache=no_parse_cache,
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc

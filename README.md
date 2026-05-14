@@ -238,11 +238,10 @@ quickly; it is an *additional* entry point, never a redirection.
 - No upload, ever.
 - No telemetry, ever.
 - Prompts and titles are redacted in default output. Pass `--show-prompts`
-  if you want them. JSON output never leaks session titles when redaction
-  is on. It falls back to session IDs.
-- Absolute local paths are redacted in machine-readable output by default.
-  Pass `--show-paths` only when you explicitly want filesystem paths in
-  JSON.
+  if you want them.
+- Absolute local paths, repo origins, git identifiers, and session identifiers
+  are redacted in machine-readable output by default. Pass `--show-paths` only
+  when you explicitly want those identifiers in JSON.
 - The only network call in the codebase is the opt-in pricing refresh,
   gated by `--allow-network`. The privacy invariant is tested.
 

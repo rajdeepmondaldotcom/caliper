@@ -57,8 +57,11 @@ are running on assumed tiers.
 ## Redaction is on by default
 
 Prompts and titles are redacted in default output. Pass `--show-prompts`
-when you want them. JSON output never leaks session titles when redaction
-is on. It falls back to session IDs.
+when you want them.
+
+Machine-readable output also redacts absolute local paths, repo origins, git
+identifiers, and session identifiers by default. Pass `--show-paths` only when
+you intentionally want those fields in JSON.
 
 The privacy invariant is tested. If a future change accidentally leaks
 prompt content into the event representation, the test fails.

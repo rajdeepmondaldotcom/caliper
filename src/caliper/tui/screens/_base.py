@@ -21,6 +21,7 @@ Subclasses override :meth:`top`, :meth:`middle`, and optionally
 from __future__ import annotations
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Container
 from textual.screen import Screen
 from textual.widgets import Header, Static
@@ -55,6 +56,33 @@ class CaliperScreen(Screen):
 
     SCREEN_TITLE: str = "Caliper"
     SCREEN_QUESTION: str = ""
+    GLOBAL_BINDINGS = [
+        Binding("question_mark", "app.show_help", "help", priority=True),
+        Binding("t", "app.cycle_theme", "theme", priority=True),
+        Binding("p", "app.toggle_redact", "redact", show=False, priority=True),
+        Binding("1", "app.go('home')", "Home", priority=True),
+        Binding("2", "app.go('intervals')", "Daily/Weekly", priority=True),
+        Binding("3", "app.go('sessions')", "Sessions", priority=True),
+        Binding("4", "app.go('projects')", "Projects", priority=True),
+        Binding("5", "app.go('models')", "Models", priority=True),
+        Binding("6", "app.go('limits')", "Limits", priority=True),
+        Binding("7", "app.go('live')", "Live", priority=True),
+        Binding("8", "app.go('forecast')", "Forecast", priority=True),
+        Binding("9", "app.go('doctor')", "Doctor", priority=True),
+        Binding("0", "app.go('receipt')", "Receipt", priority=True),
+        Binding("w", "app.go('whatif')", "What-If", priority=True),
+        Binding("b", "app.go('budgets')", "Budgets", priority=True),
+        Binding("i", "app.go('insights')", "Insights", priority=True),
+        Binding("left_square_bracket", "app.step_back", "< interval", show=False, priority=True),
+        Binding(
+            "right_square_bracket", "app.step_forward", "interval >", show=False, priority=True
+        ),
+    ]
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        local_bindings = list(getattr(cls, "BINDINGS", []))
+        cls.BINDINGS = [*CaliperScreen.GLOBAL_BINDINGS, *local_bindings]
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)

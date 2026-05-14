@@ -30,7 +30,7 @@ class WhatIfTotals:
     actual_cost_usd: Decimal
     hypothetical_cost_usd: Decimal
     cost_usd_delta: Decimal
-    cost_usd_pct: float
+    cost_usd_pct: float | None
 
 
 @dataclass(frozen=True)
@@ -176,9 +176,15 @@ def aggregate_interval_by_vendor(
     return out
 
 
-def amount_delta(left, right) -> tuple[Any, float]:
+def amount_delta(left, right) -> tuple[Any, float | None]:
     diff = left - right
-    pct = float(decimal_value(diff) / decimal_value(right) * Decimal("100")) if right else 0.0
+    baseline = decimal_value(right)
+    if baseline:
+        pct = float(decimal_value(diff) / baseline * Decimal("100"))
+    elif decimal_value(diff):
+        pct = None
+    else:
+        pct = 0.0
     return diff, pct
 
 
@@ -238,13 +244,17 @@ def calculate_whatif_totals(
         hypothetical_cost_usd += hypothetical.cost_usd
 
     cost_usd_delta = hypothetical_cost_usd - actual_cost_usd
+    if actual_cost_usd:
+        cost_usd_pct = float(cost_usd_delta / actual_cost_usd * Decimal("100"))
+    elif cost_usd_delta:
+        cost_usd_pct = None
+    else:
+        cost_usd_pct = 0.0
     return WhatIfTotals(
         actual_cost_usd=actual_cost_usd,
         hypothetical_cost_usd=hypothetical_cost_usd,
         cost_usd_delta=cost_usd_delta,
-        cost_usd_pct=(
-            float(cost_usd_delta / actual_cost_usd * Decimal("100")) if actual_cost_usd else 0.0
-        ),
+        cost_usd_pct=cost_usd_pct,
     )
 
 

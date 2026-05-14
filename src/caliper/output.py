@@ -75,7 +75,11 @@ def _stringify_record_value(field: str, value: object) -> str:
     JSON keeps numeric precision. CSV/Markdown should not expose accidental
     Python float repr for percentage columns.
     """
+    if value is None:
+        return ""
     lowered = field.lower()
-    if isinstance(value, float) and (lowered == "pct" or lowered.endswith("_pct")):
+    if isinstance(value, float) and (
+        lowered in {"pct", "percent", "used_percent"} or lowered.endswith(("_pct", "_percent"))
+    ):
         return f"{value:.2f}"
     return str(value)

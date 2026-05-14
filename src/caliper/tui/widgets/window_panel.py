@@ -19,6 +19,7 @@ class WindowPanel(Vertical):
     DEFAULT_CSS = """
     WindowPanel { padding: 1 2; height: 8; border: round $primary 40%; margin: 0 1 1 0; }
     WindowPanel .label { color: $foreground 70%; }
+    WindowPanel .percent { text-style: bold; }
     WindowPanel .reset { color: $foreground 60%; }
     WindowPanel.alarm { border: round $error; }
     """
@@ -39,6 +40,7 @@ class WindowPanel(Vertical):
         title = self._label + (f"  ({state.window_minutes}m)" if state.window_minutes else "")
         yield Static(title, classes="label")
         pct = state.used_percent or 0
+        yield Static(_usage_percent_text(state.used_percent), classes="percent")
         bar = ProgressBar(total=100, show_eta=False, show_percentage=True)
         bar.advance(pct)
         yield bar
@@ -47,3 +49,7 @@ class WindowPanel(Vertical):
             f"burn {format_burn_rate(state.burn_rate_per_hour)}",
             classes="reset",
         )
+
+
+def _usage_percent_text(value: float | None) -> str:
+    return "usage -" if value is None else f"usage {value:.0f}%"

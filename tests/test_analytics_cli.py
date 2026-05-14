@@ -228,9 +228,11 @@ def test_compare_returns_balanced_delta(tmp_path) -> None:
     assert "cost_usd_exact" in payload["a"]
     assert payload["b"]["cost_usd"] >= 0
     assert "cost_usd_exact" in payload["delta"]
+    assert payload["delta"]["cost_usd_pct"] is None
+    assert payload["delta"]["tokens_pct"] is None
 
 
-def test_compare_markdown_uses_human_money_and_percent_format(tmp_path) -> None:
+def test_compare_markdown_uses_human_money_and_zero_baseline_na(tmp_path) -> None:
     session_root, state_db, missing_cfg = _build_fixture(tmp_path, tier="standard")
     result = runner.invoke(
         app,
@@ -253,7 +255,7 @@ def test_compare_markdown_uses_human_money_and_percent_format(tmp_path) -> None:
 
     assert result.exit_code == 0, result.output
     assert "| cost_usd | $" in result.output
-    assert "%" in result.output
+    assert "n/a" in result.output
     assert "1,100" in result.output
     assert "Decimal(" not in result.output
 
@@ -430,3 +432,4 @@ def test_compare_warns_when_window_is_sparse(tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "not representative" in result.output
+    assert "n/a" in result.output

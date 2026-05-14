@@ -66,25 +66,25 @@ class CaliperApp(App):
 
     BINDINGS = [
         Binding("q", "quit", "quit", priority=True),
-        Binding("question_mark", "show_help", "help"),
-        Binding("r", "refresh", "refresh"),
-        Binding("t", "cycle_theme", "theme"),
-        Binding("p", "toggle_redact", "redact", show=False),
-        Binding("1", "go('home')", "Home"),
-        Binding("2", "go('intervals')", "Daily/Weekly"),
-        Binding("3", "go('sessions')", "Sessions"),
-        Binding("4", "go('projects')", "Projects"),
-        Binding("5", "go('models')", "Models"),
-        Binding("6", "go('limits')", "Limits"),
-        Binding("7", "go('live')", "Live"),
-        Binding("8", "go('forecast')", "Forecast"),
-        Binding("9", "go('doctor')", "Doctor"),
-        Binding("0", "go('receipt')", "Receipt"),
-        Binding("w", "go('whatif')", "What-If"),
-        Binding("b", "go('budgets')", "Budgets"),
-        Binding("i", "go('insights')", "Insights"),
-        Binding("left_square_bracket", "step_back", "< interval", show=False),
-        Binding("right_square_bracket", "step_forward", "interval >", show=False),
+        Binding("question_mark", "show_help", "help", priority=True),
+        Binding("r", "refresh", "refresh", priority=True),
+        Binding("t", "cycle_theme", "theme", priority=True),
+        Binding("p", "toggle_redact", "redact", show=False, priority=True),
+        Binding("1", "go('home')", "Home", priority=True),
+        Binding("2", "go('intervals')", "Daily/Weekly", priority=True),
+        Binding("3", "go('sessions')", "Sessions", priority=True),
+        Binding("4", "go('projects')", "Projects", priority=True),
+        Binding("5", "go('models')", "Models", priority=True),
+        Binding("6", "go('limits')", "Limits", priority=True),
+        Binding("7", "go('live')", "Live", priority=True),
+        Binding("8", "go('forecast')", "Forecast", priority=True),
+        Binding("9", "go('doctor')", "Doctor", priority=True),
+        Binding("0", "go('receipt')", "Receipt", priority=True),
+        Binding("w", "go('whatif')", "What-If", priority=True),
+        Binding("b", "go('budgets')", "Budgets", priority=True),
+        Binding("i", "go('insights')", "Insights", priority=True),
+        Binding("left_square_bracket", "step_back", "< interval", show=False, priority=True),
+        Binding("right_square_bracket", "step_forward", "interval >", show=False, priority=True),
     ]
 
     snapshot: reactive[AppSnapshot] = reactive(None, layout=True)  # type: ignore[assignment]
@@ -103,6 +103,22 @@ class CaliperApp(App):
         "doctor": DoctorScreen,
         "receipt": ReceiptScreen,
         "help": HelpScreen,
+    }
+
+    _GLOBAL_NAV_KEYS = {
+        "1": "home",
+        "2": "intervals",
+        "3": "sessions",
+        "4": "projects",
+        "5": "models",
+        "6": "limits",
+        "7": "live",
+        "8": "forecast",
+        "9": "doctor",
+        "0": "receipt",
+        "w": "whatif",
+        "b": "budgets",
+        "i": "insights",
     }
 
     _THEME_ORDER = ("slate", "parchment", "colorblind", "monochrome")
@@ -154,6 +170,43 @@ class CaliperApp(App):
 
     def on_unmount(self) -> None:
         self._stop_refresh_monitoring()
+
+    def on_key(self, event) -> None:
+        key = event.key
+        if key in self._GLOBAL_NAV_KEYS:
+            event.prevent_default()
+            event.stop()
+            self.action_go(self._GLOBAL_NAV_KEYS[key])
+            return
+        if key == "question_mark":
+            event.prevent_default()
+            event.stop()
+            self.action_show_help()
+            return
+        if key == "r":
+            event.prevent_default()
+            event.stop()
+            self.action_refresh()
+            return
+        if key == "t":
+            event.prevent_default()
+            event.stop()
+            self.action_cycle_theme()
+            return
+        if key == "p":
+            event.prevent_default()
+            event.stop()
+            self.action_toggle_redact()
+            return
+        if key in {"left_square_bracket", "["}:
+            event.prevent_default()
+            event.stop()
+            self.action_step_back()
+            return
+        if key in {"right_square_bracket", "]"}:
+            event.prevent_default()
+            event.stop()
+            self.action_step_forward()
 
     # ------------------------------------------------------------------ themes
     def _register_caliper_themes(self) -> None:
@@ -252,6 +305,10 @@ class CaliperApp(App):
             self.theme = target
 
     def action_cycle_theme(self) -> None:
+        if os.environ.get("NO_COLOR"):
+            self._set_theme("monochrome")
+            self.notify("Theme: monochrome (NO_COLOR)")
+            return
         try:
             current_index = self._THEME_ORDER.index(self._tui_config.theme)
         except ValueError:
@@ -264,14 +321,20 @@ class CaliperApp(App):
     # ------------------------------------------------------------------ navigation
     def action_go(self, name: str) -> None:
         if name == "home":
-            while len(self.screen_stack) > 1:
-                self.pop_screen()
+            self._show_home()
             return
         screen_cls = self._SCREENS.get(name)
         if screen_cls is None:
             self.notify(f"Unknown screen: {name}")
             return
+        self._show_home()
         self.push_screen(screen_cls())
+
+    def _show_home(self) -> None:
+        while self.screen_stack and not isinstance(self.screen_stack[-1], HomeScreen):
+            self.pop_screen()
+        if not self.screen_stack or not isinstance(self.screen_stack[-1], HomeScreen):
+            self.push_screen(HomeScreen())
 
     def action_step_back(self) -> None:
         self._step_interval(-1)

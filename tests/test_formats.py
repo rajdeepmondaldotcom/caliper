@@ -183,8 +183,8 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["projects"][0]["session_count"] == 1
     assert payload["projects"][0]["project_paths"] == ["<redacted-path>"]
     assert payload["projects"][0]["project_names"] == ["project-alpha"]
-    assert payload["projects"][0]["git_origins"] == ["https://github.com/example/project-alpha"]
-    assert payload["projects"][0]["git_branches"] == ["main"]
+    assert payload["projects"][0]["git_origins"] == ["<redacted-repo>"]
+    assert payload["projects"][0]["git_branches"] == ["<redacted-git-branch>"]
     assert payload["projects"][0]["model_breakdowns"][0]["model"] == "gpt-5.5"
     assert payload["projects"][0]["first_seen"]
     assert payload["projects"][0]["last_seen"]

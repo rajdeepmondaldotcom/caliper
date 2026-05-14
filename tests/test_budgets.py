@@ -134,3 +134,12 @@ def test_alert_records_include_current_period_windows() -> None:
     assert records[0]["window_start"] == "2026-05-15T00:00:00Z"
     assert records[0]["window_end"] == "2026-05-15T10:30:00Z"
     assert records[0]["window_label"] == "daily to date"
+
+
+def test_alert_records_quantize_percent_but_keep_exact() -> None:
+    budgets = [Budget(period="daily", metric="cost_usd", limit=3.0)]
+    usage = {"daily.cost_usd": 1.0}
+    records = alert_records(evaluate(budgets, usage), usage, "exact")
+
+    assert records[0]["used_percent"] == 33.33
+    assert records[0]["used_percent_exact"].startswith("33.333333")

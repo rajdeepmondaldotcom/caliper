@@ -2,6 +2,31 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.24 - 2026-05-15
+
+Final trust-polish pass after the 0.0.23 live release QA review.
+
+### Fixed
+
+- Default machine-readable reports now redact repo/session identity fields
+  such as git origins, git SHAs, git branches, session IDs, and session
+  filenames. `--show-paths` restores the explicit reveal behavior.
+- Narrow and compact cost tables reserve the dollar column and drop lower
+  priority columns before money can collapse into `$0...`.
+- Mixed aggregate pricing now reports `partial` whenever any included event is
+  unsupported, even if other events are vendor-reported.
+- `caliper compare` renders zero-baseline percentage deltas as `null` in JSON
+  and `n/a` in human formats instead of implying `0.00%`.
+- Budget JSON records now include stable `used_percent` values plus
+  `used_percent_exact` for machines that need the full representation.
+- `rates catalog` table output formats rates and context windows for humans
+  while leaving JSON payloads unchanged.
+- `advise --width`, `whatif --no-cache`, and `budgets check --no-cache` now
+  work when users place the flags after the subcommand.
+- TUI global shortcuts work from secondary screens, `NO_COLOR=1` keeps theme
+  cycling pinned to monochrome, and rate-limit panels show explicit usage
+  percentages outside the progress bar.
+
 ## 0.0.23 - 2026-05-15
 
 Release-readiness cleanup after the 0.0.22 live QA pass.

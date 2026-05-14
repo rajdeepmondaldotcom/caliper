@@ -600,7 +600,8 @@ def test_rates_catalog_defaults_to_scan_friendly_table_limit(monkeypatch) -> Non
             f"gpt-unit-{index}": CatalogModel(
                 name=f"gpt-unit-{index}",
                 provider="openai",
-                api_rates=Rates("1", "0.1", "2"),
+                api_rates=Rates("1.000000", "0.100000", "2.000000"),
+                context_window=400000,
                 source="unit",
             )
             for index in range(30)
@@ -612,6 +613,9 @@ def test_rates_catalog_defaults_to_scan_friendly_table_limit(monkeypatch) -> Non
     assert table.exit_code == 0, table.output
     assert "Matches: 30" in table.output
     assert "Showing 25 of 30 models" in table.output
+    assert "1.000000" not in table.output
+    assert "0.100000" not in table.output
+    assert "400,000" in table.output
 
     limited_json = runner.invoke(
         app,

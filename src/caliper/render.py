@@ -180,9 +180,9 @@ def model_breakdown_estimated_events(item: ModelBreakdown) -> int:
 
 
 def model_breakdown_pricing_status(item: ModelBreakdown) -> str:
-    if item.costs.unpriced_events and not item.costs.vendor_reported_events:
+    if item.costs.unpriced_events > item.costs.vendor_reported_events:
         return "partial"
-    if item.unknown_model_events and not item.costs.vendor_reported_events:
+    if item.unknown_model_events > item.costs.vendor_reported_events:
         return "partial"
     if model_breakdown_estimated_events(item):
         return "estimated"
@@ -201,9 +201,9 @@ def pricing_estimated_events(item: Aggregate) -> int:
 
 
 def pricing_status(item: Aggregate) -> str:
-    if item.costs.unpriced_events and not item.costs.vendor_reported_events:
+    if item.costs.unpriced_events > item.costs.vendor_reported_events:
         return "partial"
-    if item.unknown_model_events and not item.costs.vendor_reported_events:
+    if item.unknown_model_events > item.costs.vendor_reported_events:
         return "partial"
     if pricing_estimated_events(item):
         return "estimated"
@@ -251,19 +251,61 @@ def rate_limit_sample_to_dict(sample) -> dict:
     return item
 
 
-def _redact_paths(payload: Any, options: RuntimeOptions) -> Any:
-    """Remove absolute local paths from default machine-readable output."""
+_IDENTITY_REDACTION_MARKERS = {
+    "session_id": "<redacted-session>",
+    "sessions": "<redacted-session>",
+    "git_origin": "<redacted-repo>",
+    "git_origins": "<redacted-repo>",
+    "git_origin_url": "<redacted-repo>",
+    "git_sha": "<redacted-git-sha>",
+    "git_shas": "<redacted-git-sha>",
+    "git_branch": "<redacted-git-branch>",
+    "git_branches": "<redacted-git-branch>",
+}
+
+
+def _redact_paths(payload: Any, options: RuntimeOptions, key: str | None = None) -> Any:
+    """Remove local paths and repo/session identity from default machine-readable output."""
     if options.show_paths:
         return payload
+    marker = _IDENTITY_REDACTION_MARKERS.get(key or "")
+    if marker:
+        return _redact_identity(payload, marker)
+    if key == "path":
+        return _redact_path_identity(payload, options)
     if isinstance(payload, dict):
-        return {key: _redact_paths(value, options) for key, value in payload.items()}
+        return {
+            item_key: _redact_paths(value, options, str(item_key))
+            for item_key, value in payload.items()
+        }
     if isinstance(payload, list):
-        return [_redact_paths(value, options) for value in payload]
+        return [_redact_paths(value, options, key) for value in payload]
     if isinstance(payload, tuple):
-        return tuple(_redact_paths(value, options) for value in payload)
+        return tuple(_redact_paths(value, options, key) for value in payload)
     if isinstance(payload, str):
         return _redact_path_string(payload, options)
     return payload
+
+
+def _redact_identity(value: Any, marker: str) -> Any:
+    if isinstance(value, list):
+        return [_redact_identity(item, marker) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_identity(item, marker) for item in value)
+    if isinstance(value, str):
+        return marker if value else value
+    return value
+
+
+def _redact_path_identity(value: Any, options: RuntimeOptions) -> Any:
+    if isinstance(value, list):
+        return [_redact_path_identity(item, options) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_path_identity(item, options) for item in value)
+    if isinstance(value, str):
+        redacted = _redact_path_string(value, options)
+        return "<redacted-path>" if redacted != value else redacted
+    return value
 
 
 def _redact_path_string(value: str, options: RuntimeOptions) -> str:
@@ -605,15 +647,13 @@ def _uses_narrow_table(options: RuntimeOptions) -> bool:
 
 def _narrow_usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOptions) -> Table:
     table = Table(show_lines=False, expand=False)
-    table.add_column("Group", overflow="ellipsis", no_wrap=True, max_width=24)
-    table.add_column("Models", overflow="ellipsis", no_wrap=True, max_width=26)
-    table.add_column("Tokens", justify="right", no_wrap=True)
-    table.add_column("Cost", justify="right", no_wrap=True)
-    table.add_column("Pricing", no_wrap=True)
+    table.add_column("Group", overflow="ellipsis", no_wrap=True, max_width=28)
+    table.add_column("Tokens", justify="right", no_wrap=True, width=10)
+    table.add_column("Cost", justify="right", no_wrap=True, width=10)
+    table.add_column("Pricing", overflow="ellipsis", no_wrap=True, max_width=16)
     for row in rows:
         table.add_row(
             short_table_label(redact(row.label, options.show_prompts)),
-            compact_models_oneline(row, limit=2),
             _table_int(row.totals.total_tokens, options),
             _cost_cell(row.costs, options),
             pricing_status(row),
@@ -621,7 +661,6 @@ def _narrow_usage_table(rows: list[Aggregate], total: Aggregate, options: Runtim
     table.add_section()
     table.add_row(
         "Total",
-        compact_models_oneline(total, limit=2),
         _table_int(total.totals.total_tokens, options),
         _cost_cell(total.costs, options),
         pricing_status(total),
