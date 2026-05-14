@@ -82,9 +82,8 @@ def test_no_claude_attribution_in_tracked_files():
         for marker in _BANNED:
             if marker.lower() in lowered:
                 offenders.append((str(path.relative_to(ROOT)), marker))
-    assert not offenders, (
-        "Banned attribution markers found in tracked files:\n  "
-        + "\n  ".join(f"{path} contains {marker!r}" for path, marker in offenders)
+    assert not offenders, "Banned attribution markers found in tracked files:\n  " + "\n  ".join(
+        f"{path} contains {marker!r}" for path, marker in offenders
     )
 
 

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
-from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Static, Tabs, Tab
+from textual.widgets import DataTable, Static, Tab, Tabs
 
 from caliper.tui.screens._base import CaliperScreen
 from caliper.tui.state import AppSnapshot
@@ -67,7 +66,9 @@ class SessionsScreen(CaliperScreen):
     def middle(self):
         snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
         vendors = self._vendors_with_data(snap)
-        tabs = Tabs(*(Tab(_VENDOR_LABELS.get(v, v.title()), id=f"v-{v}") for v in vendors), id="vendor-tabs")
+        tabs = Tabs(
+            *(Tab(_VENDOR_LABELS.get(v, v.title()), id=f"v-{v}") for v in vendors), id="vendor-tabs"
+        )
         yield tabs
         table = DataTable(id="sessions-table", cursor_type="row", zebra_stripes=True)
         table.add_columns("When", "Vendor", "Model", "Tier", "Tokens", "API $")

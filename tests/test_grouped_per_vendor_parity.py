@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import datetime as dt
 import io
-import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -38,7 +37,9 @@ def _event(*, vendor: str, when: dt.datetime, tokens: int = 1000) -> UsageEvent:
         timestamp=when,
         path=Path(f"/tmp/{vendor}.jsonl"),
         session_id=f"{vendor}-session",
-        usage=Usage(input_tokens=tokens, output_tokens=tokens // 10, total_tokens=tokens + tokens // 10),
+        usage=Usage(
+            input_tokens=tokens, output_tokens=tokens // 10, total_tokens=tokens + tokens // 10
+        ),
         model="claude-opus-4.7" if vendor == VENDOR_CLAUDE_CODE else "gpt-5.5",
         service_tier="standard",
         tier_source="logged",
@@ -81,9 +82,7 @@ def test_grouped_per_vendor_split_daily_emits_one_table_per_vendor(tmp_path):
         days=7,
     )
     result = _two_vendor_result()
-    text = _capture(
-        lambda: _render_grouped_per_vendor("daily", aggregate_daily, result, options)
-    )
+    text = _capture(lambda: _render_grouped_per_vendor("daily", aggregate_daily, result, options))
 
     # Header line names tool vendors and event count.
     assert "by tool vendor" in text
@@ -102,9 +101,7 @@ def test_grouped_per_vendor_split_weekly_emits_one_table_per_vendor(tmp_path):
         days=30,
     )
     result = _two_vendor_result()
-    text = _capture(
-        lambda: _render_grouped_per_vendor("weekly", aggregate_weekly, result, options)
-    )
+    text = _capture(lambda: _render_grouped_per_vendor("weekly", aggregate_weekly, result, options))
 
     assert "Caliper - Weekly  (Claude Code," in text
     assert "Caliper - Weekly  (OpenAI Codex," in text
@@ -128,9 +125,7 @@ def test_overview_per_vendor_split_emits_one_table_per_vendor(tmp_path):
     )
 
     text = _capture(
-        lambda: _render_overview_per_vendor(
-            result, options, windows, rate_card, total, rows
-        )
+        lambda: _render_overview_per_vendor(result, options, windows, rate_card, total, rows)
     )
 
     assert "Caliper - Overview, by tool vendor" in text

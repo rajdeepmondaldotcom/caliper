@@ -2,6 +2,44 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.8 - 2026-05-14
+
+Unblock the release workflow. Land the foundation for the Textual
+workspace overhaul. Establish the attribution policy.
+
+### Fixed
+
+- Release workflow's "Verify the published release installs" step now
+  passes `--from` to `uvx`. The bug failed every release since 0.0.3:
+  `uvx --refresh "caliper-ai==X" caliper --version` resolves the
+  version spec as the executable name. One flag closes it. Regression
+  test in `tests/test_release_workflow.py`.
+
+### Added
+
+- `caliper.tui.screens._base.CaliperScreen`. A three-band layout base
+  (top, middle, footer) every real Textual screen subclasses. Source-
+  level invariant test pins the contract.
+- Real `SessionsScreen` replaces the stub. Vendor `Tabs` row (All,
+  Codex, Claude, Cursor, Aider), sortable `DataTable`, top-50 cap
+  per the UX standard, decision-pill footer.
+- `tests/test_grouped_per_vendor_parity.py` pins the v0.0.7
+  per-vendor split across daily, weekly, monthly, project, session,
+  models, blocks. Regression-blocked.
+- `tests/test_attribution_policy.py` blocks the Claude attribution
+  trailer from re-entering tracked source. Vendor product names and
+  model ids stay whitelisted.
+- `CONTRIBUTING.md` carries the matching policy block.
+- `docs/release-and-ux-overhaul/RUNBOOK-publish.md` documents the
+  `.env`-driven manual publish path for when CI is unavailable.
+
+### Skipped
+
+- Tag `v0.0.7`. The pre-release tag was pushed against the wrong
+  commit (pyproject still at 0.0.6 at that revision). Branch
+  protection blocks force-push. PyPI never received `0.0.7`. The
+  artefact lives on the remote as historical noise. Use `0.0.8`.
+
 ## 0.0.7 - 2026-05-14
 
 Per-vendor tables on every grouped report. No combined table.
