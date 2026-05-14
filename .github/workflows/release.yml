@@ -4,9 +4,18 @@ on:
   push:
     tags:
       - "v*"
+  # Manual fallback. Pick the tag from the Actions UI when an automatic
+  # run gets stuck (transient HTTP 403, PyPI propagation delay, etc.)
+  # and rerun the full workflow without retagging.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to re-run (e.g. v0.0.15). Defaults to the branch ref."
+        required: false
+        type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -114,13 +123,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" dist/* --clobber
-            gh release edit "$tag" --draft --title "$tag" --notes-file RELEASE_NOTES.md --latest=false
-          else
-            gh release create "$tag" dist/* --draft --verify-tag --title "$tag" --notes-file RELEASE_NOTES.md --latest=false
-          fi
+          tag="${{ inputs.tag || github.ref_name }}"
+          # Transient HTTP 403 has hit this step under high API load.
+          # Retry three times with a short backoff before giving up.
+          for attempt in 1 2 3; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              if gh release upload "$tag" dist/* --clobber \
+                 && gh release edit "$tag" --draft --title "$tag" \
+                      --notes-file RELEASE_NOTES.md --latest=false; then
+                exit 0
+              fi
+            else
+              if gh release create "$tag" dist/* --draft --verify-tag \
+                   --title "$tag" --notes-file RELEASE_NOTES.md --latest=false; then
+                exit 0
+              fi
+            fi
+            echo "stage attempt $attempt failed; sleeping 10s..."
+            sleep 10
+          done
+          echo "Stage GitHub release failed after 3 attempts."
+          exit 1
 
   pypi:
     name: Publish to PyPI
@@ -160,7 +183,19 @@ jobs:
       - name: Publish staged release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          # Same transient HTTP 403 mitigation as the staging step.
+          for attempt in 1 2 3; do
+            if gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest; then
+              exit 0
+            fi
+            echo "publish attempt $attempt failed; sleeping 10s..."
+            sleep 10
+          done
+          echo "Publish GitHub release failed after 3 attempts."
+          exit 1
 
   post-release-smoke:
     name: Verify the published release installs
@@ -172,16 +207,19 @@ jobs:
       - uses: astral-sh/setup-uv@v8.1.0
       - name: Resolve published version
         id: ver
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
       - name: Install from PyPI and smoke-test
         run: |
           set -euo pipefail
           # Allow the PyPI index a moment to propagate the new release.
-          for i in 1 2 3 4 5; do
+          # 8 x 15s = 2 minutes is enough on a typical day.
+          for i in 1 2 3 4 5 6 7 8; do
             if uvx --refresh --from "caliper-ai==${{ steps.ver.outputs.version }}" caliper --version; then
               exit 0
             fi
-            echo "Attempt $i failed; sleeping…"
+            echo "Attempt $i: PyPI index lag, sleeping 15s..."
             sleep 15
           done
           echo "Published release did not install cleanly within retry budget."
