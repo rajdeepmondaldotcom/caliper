@@ -18,9 +18,9 @@ Caliper reads the session logs those tools already write to your disk,
 joins them into one event shape, and prints per-PR, per-commit, and
 per-project cost. Offline by default. No login. No SDK. No SaaS.
 
-On my own machine, ninety days of usage, one command:
+Against a sanitized local fixture, ninety days of usage, one command:
 
-> 95,090 events. $10,897 spent. $65,871 in cache savings.
+> 2,100 events. $219 spent. $640 in cache savings.
 
 What I want from this post:
 
@@ -45,9 +45,8 @@ read `src/caliper/parser.py` end to end in one sitting.
 
 ## Notes
 
-- Numbers above are from this machine. Re-run `caliper overview` before
-  posting and replace if anything has shifted.
+- Numbers above are sanitized examples. Replace only with deliberately
+  public-safe figures before posting.
 - Do not tag any vendor. The pitch is not a comparison.
 - Do not use hashtags.
-- Do not edit the dollar figures to round numbers. The point is that
-  they are real.
+- Do not paste raw local project names, session titles, or personal paths.

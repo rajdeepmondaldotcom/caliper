@@ -44,15 +44,16 @@ If it is not, it is decoration.
 The 30-second proof block in the README and docs landing is one rendered
 PR receipt. Not a feature list. The receipt is the argument.
 
-Use real numbers from `caliper overview` and `caliper pr` runs on this
-machine, redacted where they reference private repos or session titles.
+Use sanitized numbers from `caliper overview` and `caliper pr` examples.
+Do not paste raw project names, session titles, personal paths, or private
+repo identifiers into public copy.
 
-Reference figures captured 2026-05-13 from this machine:
+Reference demo figures:
 
-- 95,090 events parsed across 90 days.
+- 2,100 events parsed across 90 days.
 - 4 vendors detected: Claude Code, OpenAI Codex, Cursor, Aider.
-- $10,897.56 estimated API spend.
-- $65,871.47 cache savings detected at 99.3% cache hit.
+- $219.40 estimated API spend.
+- $640.25 cache savings detected at 72.4% cache hit.
 - 1,968 models in the pricing catalog.
 - 1 command to produce the above: `caliper overview`.
 

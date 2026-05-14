@@ -53,8 +53,8 @@ places where a cost/privacy tool must feel boringly precise.
     path, prompt, title, repo slug, unknown model pricing, transcript-only Cursor
     file, rate-limit samples, bad TOML, bad JSON rates, bad tier map, and budget
     breach data.
-  - Verified default JSON did not leak `SECRET_PROMPT`, `Project Nightfall`, or
-    `/Users/alice`.
+  - Verified default JSON did not leak `DEMO_PROMPT_MARKER`,
+    `Example Planning Title`, or `/workspace/example-root`.
   - Verified default human output redacts the session root as `<redacted-path>`.
   - Verified `--show-paths` restores absolute paths intentionally.
   - Verified empty first-run overview now gives useful next steps.
@@ -84,8 +84,8 @@ Default JSON redacts absolute paths and prompt/title content. Good.
 But the hostile fixture still exposed:
 
 ```text
-2026-05-15T04-00-00-private-acquisition
-git@github.com:stealth/private-acquisition.git
+2026-05-15T04-00-00-sample-workspace
+git@github.com:example-org/sample-workspace.git
 ```
 
 Those are not absolute local paths, but they are still private identifiers. If
@@ -109,8 +109,8 @@ names in half. That is a real improvement.
 But `caliper project --width 80` still truncates the most important cell:
 
 ```text
-│ secret-acquisition-di… │ gpt-5.5 · sonnet-4.6… │ 206,… │ $0… │ partial       │
-│ private-repo           │ aider-reported        │ 3,250 │ $0… │ vendor-repor… │
+│ sample-workspace-d… │ gpt-5.5 · sonnet-4.6… │ 206,… │ $0… │ partial       │
+│ sample-repo         │ aider-reported        │ 3,250 │ $0… │ vendor-repor… │
 ```
 
 Brutal feedback: this is a cost tool. The dollar cell must never become `$0...`.
@@ -323,7 +323,7 @@ into a budget thread without explaining the tool."
 ### Privacy/Security Reviewer
 
 "No upload and prompt/path redaction are good. Default JSON still carrying
-`git@github.com:stealth/private-acquisition.git` is the gap. Either redact repo
+`git@github.com:example-org/sample-workspace.git` is the gap. Either redact repo
 identity by default or document it as intentionally in scope."
 
 ### Finance Operator

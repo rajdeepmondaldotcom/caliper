@@ -24,8 +24,8 @@ Problem: default JSON redacts prompts, titles, and absolute paths, but still
 exposes repo/session identifiers such as:
 
 ```text
-2026-05-15T04-00-00-private-acquisition
-git@github.com:stealth/private-acquisition.git
+2026-05-15T04-00-00-sample-workspace
+git@github.com:example-org/sample-workspace.git
 ```
 
 Fix:

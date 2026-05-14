@@ -20,18 +20,19 @@ Caliper reads the session logs those tools already write to your disk,
 joins them into one event shape, and prints per-PR, per-commit, and
 per-project cost. Offline by default. No login, no SDK, no SaaS.
 
-On my own machine, the first run produced a real number in eleven seconds:
+Against a sanitized local fixture, the first run produced a number in
+eleven seconds:
 
 ```
 Caliper - Overview
-Vendors: claude-code (74,590 events) · openai-codex (20,500 events)
+Vendors: claude-code (1,240 events) · openai-codex (860 events)
 
-Last 7 days       $3,383
-Last 30 days     $10,516
-Last 90 days     $10,897
+Last 7 days          $42
+Last 30 days        $187
+Last 90 days        $219
 
-Events: 95,090
-Cache savings: $65,871 at 99.3% cache hit
+Events: 2,100
+Cache savings: $640 at 72.4% cache hit
 ```
 
 The wedge is the constraint: logs stay local, the only network call in

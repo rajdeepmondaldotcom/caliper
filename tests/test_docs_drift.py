@@ -19,8 +19,7 @@ def test_docs_site_install_and_budget_examples_match_live_cli() -> None:
         "daily_credits",
         "weekly_credits",
         "monthly_api_dollars",
-        "48,727 credits",
-        "52,691 credits",
+        " credits",
     ]
     for needle in stale_needles:
         assert needle not in docs
@@ -31,5 +30,4 @@ def test_launch_drafts_match_current_install_and_output_language() -> None:
 
     assert "uvx --isolated --from caliper-ai caliper" in docs
     assert "uvx --from caliper-ai caliper" not in docs
-    assert "48,727 credits" not in docs
-    assert "52,691 credits" not in docs
+    assert " credits" not in docs

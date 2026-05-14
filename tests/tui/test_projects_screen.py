@@ -6,11 +6,11 @@ from caliper.tui.screens.projects import _project_table_label
 
 def test_project_table_label_shows_folder_name_for_full_path() -> None:
     project = Aggregate(
-        key="/Users/rajdeepmondal/Documents/GitHub/SlidesDock",
-        label="/Users/rajdeepmondal/Documents/GitHub/SlidesDock",
+        key="/workspace/example-product",
+        label="/workspace/example-product",
     )
 
-    assert _project_table_label(project) == "SlidesDock"
+    assert _project_table_label(project) == "example-product"
 
 
 def test_project_table_label_keeps_non_path_label() -> None:

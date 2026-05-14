@@ -25,7 +25,7 @@ the answer forward.
 
 | Voice rule (source) | UI pattern |
 | --- | --- |
-| Name the constraint (Q33, "Always #1") | Every header line names a window. "Last 7 days. 48,727 credits. $3,383." No "Welcome to Caliper". |
+| Name the constraint (Q33, "Always #1") | Every header line names a window. "Last 7 days. 1,234 credits. $42." No "Welcome to Caliper". |
 | Make the claim testable (Q33, "Always #2") | Every insight ends with a measurable next step. "Pin tier with `--tier anthropic-priority` and re-run to compare." |
 | End with a decision and owner (Q33, "Always #3") | Every screen footer carries one action affordance. `[ d doctor · e export · r refresh ]`. Errors end with a hot key. |
 | No hype, no big nouns (Q25) | Banned in copy: leverage, optimize, drive, enable, insights (the word — keep `Insight` only as the dataclass), powerful, seamless, robust, modern, premium (irony noted). |
@@ -156,7 +156,7 @@ with copy in voice.
 
 ```
 Caliper · Last 7 days · 2026-05-07 to 2026-05-14
-48,727 credits   $3,383   95,090 events
+1,234 credits   $42   2,100 events
 ```
 
 ### 6.2 Footer (every screen)

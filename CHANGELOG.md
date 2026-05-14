@@ -2,6 +2,18 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.25 - 2026-05-15
+
+Security and final release hygiene pass after 0.0.24.
+
+### Fixed
+
+- Updated the docs-site lockfile so the transitive `devalue` package resolves
+  to `5.8.1`, closing the high-severity Dependabot alert for sparse-array
+  deserialization DoS in the npm docs build graph.
+- Re-ran the final release gate, docs build, npm audit, packaging checks, and
+  published-install smoke before cutting the release.
+
 ## 0.0.24 - 2026-05-15
 
 Final trust-polish pass after the 0.0.23 live release QA review.

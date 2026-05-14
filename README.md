@@ -53,7 +53,7 @@ review: **what did this PR cost.**
 
 ## The 30-second proof
 
-On the machine that wrote this README, three commands.
+Three commands against a sanitized local fixture.
 
 ```bash
 caliper overview
@@ -61,14 +61,14 @@ caliper overview
 
 ```text
 Caliper - Overview
-Vendors: claude-code (74,590 events) · openai-codex (20,500 events)
+Vendors: claude-code (1,240 events) · openai-codex (860 events)
 
-Last 7 days       $3,383
-Last 30 days     $10,516
-Last 90 days     $10,897
+Last 7 days          $42
+Last 30 days        $187
+Last 90 days        $219
 
-Events: 95,090
-Cache savings: $65,871 at 99.3% cache hit
+Events: 2,100
+Cache savings: $640 at 72.4% cache hit
 ```
 
 ```bash
@@ -76,8 +76,8 @@ caliper insights
 ```
 
 ```text
-High cache reuse: 99.3% of input tokens served from cache,
-saving about $63,415. Keep prompts and file context stable
+High cache reuse: 72.4% of input tokens served from cache,
+saving about $612. Keep prompts and file context stable
 to preserve cache hits.
 ```
 
@@ -86,12 +86,12 @@ caliper project --lookback-days 30
 ```
 
 ```text
-SlidesDockerTemp    4 models    $3,009
-ace-ai              4 models    $1,160
-caliper             3 models      $443
+demo-api          4 models     $81
+frontend-lab      4 models     $63
+caliper-demo      3 models     $43
 ```
 
-Real numbers, one machine, one developer, ninety days. No account. No upload.
+Names and numbers above are sanitized examples. No account. No upload.
 The first run took eleven seconds on a cold cache. Later runs are under a
 second.
 

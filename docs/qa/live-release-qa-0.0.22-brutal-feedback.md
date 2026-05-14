@@ -50,7 +50,7 @@ without edits.
   - Built a clean temp venv with `caliper-ai[prom]==0.0.22`.
   - Created Codex, Claude Code, Cursor, and Aider-shaped local data.
   - Verified `vendors list --format json` detected all four vendors.
-  - Verified `overview --format json` did not contain `/tmp/secret-project`,
+  - Verified `overview --format json` did not contain `/tmp/sample-workspace`,
     the QA temp root, private prompt text, or private session title.
   - Verified `--show-paths` restored the expected absolute paths.
   - Verified malformed TOML exits 2 with a one-line `error:` message and no
@@ -89,9 +89,9 @@ Found in:
 The Show HN draft also still shows:
 
 ```text
-Last 7 days     48,727 credits     $3,383
-Last 30 days    52,691 credits    $10,516
-Last 90 days    52,691 credits    $10,897
+Last 7 days      1,234 credits        $42
+Last 30 days     1,980 credits       $187
+Last 90 days     2,100 credits       $219
 ```
 
 The live product and README have moved to token/cost/evidence language. If
@@ -147,7 +147,7 @@ the local username and directory structure.
 
 This is not a data exfiltration bug. It is a privacy perception bug. The
 product's pitch is "offline, no upload, redacted by default." A screenshot with
-`/Users/<name>/...` weakens that story even if the implementation is otherwise
+`<home-dir>/...` weakens that story even if the implementation is otherwise
 safe.
 
 Brutal feedback: if privacy is the wedge, every default screenshot must look
