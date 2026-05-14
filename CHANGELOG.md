@@ -2,6 +2,26 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.6 - 2026-05-14
+
+Honest loading + per-vendor tables on the overview command.
+
+### Added
+
+- Rich live progress bar replaces the silent multi-second wait while
+  `caliper` parses sessions. The user now sees:
+  `Reading 1,283 / 4,210  cached 902  last: rollout-...jsonl`
+  Activates only on TTY stderr with no `--format` / `--out`. Pipes
+  and scripted invocations stay silent.
+- `caliper.cli_progress.cli_parse_progress` context manager. Wraps
+  any `load_usage` call. Used by the overview command and every
+  grouped report command.
+- `caliper` (overview) now prints one Rich table per tool vendor
+  when multiple vendors are present, followed by a unified totals
+  table: Claude Code separate, OpenAI Codex separate, Cursor
+  separate, Aider separate, then All vendors. Triggers only on the
+  classic table path. JSON / CSV / markdown wire shapes unchanged.
+
 ## 0.0.5 - 2026-05-14
 
 Persona overhaul, round one. Caliper's terminal output starts speaking
