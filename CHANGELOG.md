@@ -2,6 +2,37 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.22 - 2026-05-15
+
+Live-release QA remediation after the brutal 0.0.21 pass.
+
+### Fixed
+
+- Docs-site install, budget, and sample-output examples now match the live
+  CLI. A docs drift test rejects stale budget keys, stale `uvx` install
+  commands, and old credits-based samples.
+- Empty first-run overview output names every enabled vendor source
+  instead of implying Caliper only checks Codex logs.
+- Human CSV/Markdown percentage fields no longer expose accidental Python
+  float precision.
+- Evidence and insights now report proportional priced/unsupported counts.
+  Missing git attribution remains visible but no longer poisons overall cost
+  confidence.
+- `caliper advise` explains confidence thresholds when no recommendation
+  matches.
+- Default multi-vendor reports stay unified; `--by-vendor` opts into expanded
+  one-table-per-tool output.
+- `caliper rates catalog` now explains fresh-install live-cache state and
+  includes explicit `catalog_source` and `embedded_available` JSON fields.
+- `caliper statusline --compact` prints a prompt-sized line.
+- The Prometheus exporter suppresses client-disconnect tracebacks.
+- The TUI now has visible navigation/help for every shipped screen, a working
+  monochrome `NO_COLOR` theme, demo mode skips first-run onboarding, Doctor
+  redacts local diagnostic paths by default with explicit reveal, and
+  screenshot regression tests cover narrow and wide terminal layouts.
+- Release QA artifacts and a fresh-install smoke script now live under
+  `docs/qa/` and `scripts/live-release-smoke.sh`.
+
 ## 0.0.21 - 2026-05-15
 
 Launch-hardening pass after live first-run, empty-state, privacy, and TUI

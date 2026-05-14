@@ -80,7 +80,7 @@ class CaliperScreen(Screen):
 
     def footer_pills(self) -> str:
         """Return the decision-pill line for the footer band."""
-        return "[ r refresh ]  [ ? help ]  [ q quit ]"
+        return "[ 0 receipt ] [ i insights ] [ ? help ] [ r refresh ] [ q quit ]"
 
     def action_refresh(self) -> None:
         """Delegate screen-level refresh bindings to the app shell."""

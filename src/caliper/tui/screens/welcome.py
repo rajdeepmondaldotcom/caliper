@@ -36,7 +36,7 @@ def mark_welcome_seen() -> None:
 
 class WelcomeScreen(CaliperScreen):
     SCREEN_TITLE = "Caliper"
-    SCREEN_QUESTION = "Local cost ledger for AI-assisted coding."
+    SCREEN_QUESTION = "Local AI cost ledger."
 
     BINDINGS = [
         ("space", "dismiss", "continue"),
@@ -48,8 +48,8 @@ class WelcomeScreen(CaliperScreen):
 
     def middle(self):
         yield Static(
-            "We read the logs already on this machine.\n"
-            "Nothing leaves the device. No login. No upload.\n\n"
+            "Reads local coding logs already on this machine.\n"
+            "No login. No upload.\n\n"
             "Press space to enter."
         )
 

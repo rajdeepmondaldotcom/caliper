@@ -16,6 +16,7 @@ GRADE_ORDER = {
     GRADE_PARTIAL: 2,
     GRADE_UNSUPPORTED: 3,
 }
+OVERALL_EVIDENCE_DIMENSION_NAMES = frozenset({"usage", "model", "tier", "pricing", "project"})
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ def warnings_from_parser_issues(issues: list[ParserIssue]) -> list[str]:
 def evidence_metadata(result: LoadResult, total: Aggregate) -> dict[str, object]:
     dimensions = evidence_dimensions(result, total)
     return {
-        "overall": worst_grade([dimension.grade for dimension in dimensions]),
+        "overall": overall_evidence_grade(dimensions),
         "dimensions": [dimension.to_record() for dimension in dimensions],
         "vendor_coverage": vendor_coverage_records(result),
         "parser_issues": [issue.to_record() for issue in result.parser_issues],
@@ -118,8 +119,11 @@ def tier_evidence(total: Aggregate) -> EvidenceDimension:
 
 def pricing_evidence(total: Aggregate) -> EvidenceDimension:
     reasons: list[str] = []
-    if total.costs.unpriced_events:
-        reasons.append(f"{total.costs.unpriced_events:,} events have no local USD rate")
+    events = total.totals.events
+    priced_events = _priced_cost_events(total)
+    unsupported_events = max(events - priced_events, 0)
+    if unsupported_events:
+        reasons.append(f"{priced_events:,} priced, {unsupported_events:,} unsupported")
     if total.costs.vendor_reported_events:
         reasons.append(f"{total.costs.vendor_reported_events:,} events used vendor-reported USD")
     if total.costs.reported_calculated_delta_usd:
@@ -133,7 +137,9 @@ def pricing_evidence(total: Aggregate) -> EvidenceDimension:
         reasons.append(
             f"{total.costs.ambiguous_reasoning_events:,} events had ambiguous reasoning tokens"
         )
-    if total.costs.unpriced_events and not total.costs.vendor_reported_events:
+    if events and priced_events == 0:
+        grade = GRADE_UNSUPPORTED
+    elif unsupported_events:
         grade = GRADE_PARTIAL
     elif (
         total.costs.estimated_events
@@ -143,7 +149,13 @@ def pricing_evidence(total: Aggregate) -> EvidenceDimension:
         grade = GRADE_ESTIMATED
     else:
         grade = GRADE_EXACT
-    return EvidenceDimension("pricing", grade, total.totals.events, tuple(reasons))
+    return EvidenceDimension("pricing", grade, events, tuple(reasons))
+
+
+def _priced_cost_events(total: Aggregate) -> int:
+    events = total.totals.events
+    locally_priced = max(events - total.costs.unpriced_events, 0)
+    return min(events, locally_priced + total.costs.vendor_reported_events)
 
 
 def project_evidence(result: LoadResult) -> EvidenceDimension:
@@ -232,6 +244,15 @@ def worst_grade(grades: list[str]) -> str:
     if not grades:
         return GRADE_EXACT
     return max(grades, key=lambda grade: GRADE_ORDER.get(grade, 0))
+
+
+def overall_evidence_grade(dimensions: list[EvidenceDimension]) -> str:
+    grades = [
+        dimension.grade
+        for dimension in dimensions
+        if dimension.name in OVERALL_EVIDENCE_DIMENSION_NAMES
+    ]
+    return worst_grade(grades)
 
 
 def _coverage(discovered: int, with_events: int) -> float:

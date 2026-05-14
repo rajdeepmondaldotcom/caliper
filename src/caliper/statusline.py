@@ -170,6 +170,19 @@ def render_statusline_text(snapshot: StatuslineSnapshot) -> str:
     return " | ".join(parts)
 
 
+def render_statusline_compact(snapshot: StatuslineSnapshot) -> str:
+    parts = [
+        f"T ${snapshot.today.cost_usd:,.2f}",
+        f"7d ${snapshot.trailing_7d.cost_usd:,.2f}",
+        f"5h {_window_compact_text(snapshot.primary)}",
+        f"W {_window_compact_text(snapshot.secondary)}",
+        f"C {snapshot.today.cache_ratio:.0%}",
+    ]
+    if snapshot.warnings:
+        parts.append(f"!{len(snapshot.warnings)}")
+    return " | ".join(parts)
+
+
 def _events_in_window(
     events: list[UsageEvent], start: dt.datetime, end: dt.datetime
 ) -> list[UsageEvent]:
@@ -240,6 +253,12 @@ def _window_text(state: WindowState) -> str:
         else format_seconds_remaining(state.seconds_remaining)
     )
     return f"{percent} reset {reset}"
+
+
+def _window_compact_text(state: WindowState) -> str:
+    percent = "-" if state.used_percent is None else f"{state.used_percent:.0f}%"
+    reset = format_seconds_remaining(state.seconds_remaining)
+    return f"{percent}/{reset}"
 
 
 def _amount(value: Decimal) -> str:

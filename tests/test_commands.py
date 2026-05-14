@@ -585,7 +585,35 @@ def test_rates_catalog_empty_cache_surfaces_warning(monkeypatch, tmp_path) -> No
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["catalog"] == []
+    assert payload["catalog_source"] == "cache"
+    assert payload["embedded_available"] is True
     assert any("rates refresh --allow-network" in warning for warning in payload["warnings"])
+    assert payload["using_embedded_rate_card"] is True
+    assert payload["next_commands"] == ["caliper rates refresh --allow-network"]
+
+
+def test_empty_overview_names_all_enabled_vendor_sources(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
+    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+
+    result = runner.invoke(
+        app,
+        [
+            "overview",
+            "--session-root",
+            str(tmp_path / "codex-empty"),
+            "--state-db",
+            str(tmp_path / "state.sqlite"),
+            "--codex-config",
+            str(tmp_path / "codex.toml"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    for label in ("OpenAI Codex", "Claude Code", "Cursor", "Aider"):
+        assert label in result.output
+    assert "no files found" in result.output
 
 
 def test_pr_command_requires_pr_or_range(tmp_path) -> None:

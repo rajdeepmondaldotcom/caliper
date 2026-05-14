@@ -3,7 +3,13 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-from caliper.evidence import evidence_dimensions, evidence_metadata, evidence_rows, worst_grade
+from caliper.evidence import (
+    evidence_dimensions,
+    evidence_metadata,
+    evidence_rows,
+    overall_evidence_grade,
+    worst_grade,
+)
 from caliper.models import (
     Aggregate,
     CostTotals,
@@ -104,11 +110,37 @@ def test_evidence_dimensions_surface_partial_and_unsupported_reasons() -> None:
     assert dimensions["usage"].grade == "partial"
     assert dimensions["model"].grade == "partial"
     assert dimensions["tier"].grade == "estimated"
-    assert dimensions["pricing"].grade == "partial"
+    assert dimensions["pricing"].grade == "unsupported"
     assert dimensions["project"].grade == "partial"
     assert dimensions["git_attribution"].grade == "unsupported"
     assert any(row["section"] == "vendor" and row["grade"] == "unsupported" for row in rows)
     assert worst_grade(["exact", "estimated", "partial"]) == "partial"
+
+
+def test_pricing_evidence_reports_mixed_priced_and_unsupported_counts() -> None:
+    result = _result(*[_event() for _ in range(6)])
+    total = Aggregate(key="total", label="Total")
+    total.totals.events = 6
+    total.costs = CostTotals(cost_usd="1.23", unpriced_events=1)
+
+    dimensions = {row.name: row for row in evidence_dimensions(result, total)}
+
+    assert dimensions["pricing"].grade == "partial"
+    assert "5 priced, 1 unsupported" in dimensions["pricing"].reasons
+
+
+def test_overall_evidence_ignores_git_attribution_for_cost_confidence() -> None:
+    result = _result(_event(git_sha=""))
+    total = Aggregate(key="total", label="Total")
+    total.totals.events = 1
+
+    dimensions = evidence_dimensions(result, total)
+    payload = evidence_metadata(result, total)
+
+    grades = {dimension.name: dimension.grade for dimension in dimensions}
+    assert grades["git_attribution"] == "unsupported"
+    assert overall_evidence_grade(dimensions) == "exact"
+    assert payload["overall"] == "exact"
 
 
 def test_tracking_dataclass_defaults_are_stable(tmp_path) -> None:

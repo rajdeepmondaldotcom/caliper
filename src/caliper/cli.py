@@ -123,6 +123,7 @@ from caliper.scenarios import (
 from caliper.schemas import export_schema, validate_json
 from caliper.statusline import (
     build_statusline_snapshot,
+    render_statusline_compact,
     render_statusline_text,
     statusline_payload,
 )
@@ -426,6 +427,13 @@ VendorOpt = Annotated[
         help="Filter by tool vendor (codex, claude-code, cursor, aider). Repeatable.",
     ),
 ]
+ByVendorOpt = Annotated[
+    bool,
+    typer.Option(
+        "--by-vendor",
+        help="Expand human table output into one table per tool vendor.",
+    ),
+]
 OnlyVendorOpt = Annotated[
     list[str] | None,
     typer.Option(
@@ -502,6 +510,7 @@ ROOT_OPTION_DEFAULTS: dict[str, Any] = {
     "rate_limit_sample_limit": 100,
     "include_all_rate_limit_samples": False,
     "vendors": None,
+    "by_vendor": False,
 }
 
 
@@ -601,6 +610,7 @@ def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
     if (
         values["output_format"] == "table"
         and values["output"] is None
+        and values.get("by_vendor")
         and _has_multiple_tool_vendors(result)
     ):
         _render_grouped_per_vendor(name, rows_fn, result, options)
@@ -859,6 +869,7 @@ def main(
     rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
     include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
     vendors: VendorOpt = None,
+    by_vendor: ByVendorOpt = False,
     classic: ClassicOpt = False,
 ) -> None:
     if ctx.invoked_subcommand is None:
@@ -903,6 +914,7 @@ def _run_overview(values: dict) -> None:
     if (
         output_format == "table"
         and values["output"] is None
+        and values.get("by_vendor")
         and _has_multiple_tool_vendors(longest_result)
     ):
         _render_overview_per_vendor(
@@ -1049,6 +1061,7 @@ def overview(
     rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
     include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
     vendors: VendorOpt = None,
+    by_vendor: ByVendorOpt = False,
     classic: ClassicOpt = False,
 ) -> None:
     """Print the rolling 7, 30, and 90 day cost summary. Start here."""
@@ -1089,6 +1102,7 @@ def daily(
     breakdown: BreakdownOpt = False,
     cost_mode: CostModeOpt = "auto",
     vendors: VendorOpt = None,
+    by_vendor: ByVendorOpt = False,
 ) -> None:
     """Print token and cost rollups grouped by day."""
     _run_grouped("daily", aggregate_daily, locals())
@@ -1128,6 +1142,7 @@ def weekly(
     breakdown: BreakdownOpt = False,
     cost_mode: CostModeOpt = "auto",
     vendors: VendorOpt = None,
+    by_vendor: ByVendorOpt = False,
 ) -> None:
     """Print token and cost rollups grouped by week."""
     _run_grouped("weekly", aggregate_weekly, locals())
@@ -1166,6 +1181,7 @@ def monthly(
     breakdown: BreakdownOpt = False,
     cost_mode: CostModeOpt = "auto",
     vendors: VendorOpt = None,
+    by_vendor: ByVendorOpt = False,
 ) -> None:
     """Print token and cost rollups grouped by month."""
     _run_grouped("monthly", aggregate_monthly, locals())
@@ -1207,6 +1223,7 @@ def session_command(
         typer.Option("--session-id", "--id", "-i", help="Load one session id."),
     ] = None,
     vendors: VendorOpt = None,
+    by_vendor: ByVendorOpt = False,
 ) -> None:
     """Print one row per session with tokens, cost, and model breakdown."""
     if id:
@@ -1369,6 +1386,7 @@ def project(
     breakdown: BreakdownOpt = False,
     cost_mode: CostModeOpt = "auto",
     vendors: VendorOpt = None,
+    by_vendor: ByVendorOpt = False,
 ) -> None:
     """Print cost per project (working directory). Answers: which repo cost what."""
     _run_grouped("project", aggregate_projects, locals())
@@ -1407,6 +1425,7 @@ def models(
     breakdown: BreakdownOpt = False,
     cost_mode: CostModeOpt = "auto",
     vendors: VendorOpt = None,
+    by_vendor: ByVendorOpt = False,
     by: Annotated[str, typer.Option("--group-by", "--by", help="model or vendor.")] = "model",
 ) -> None:
     """Print cost per model and service tier. Answers: which model cost what."""
@@ -2223,20 +2242,32 @@ def rates_catalog(
         lowered_provider = provider.lower()
         rows = [row for row in rows if lowered_provider in str(row["provider"]).lower()]
     warnings = list(catalog.warnings)
+    cache_path = pricing_catalog_path()
     if not catalog.models:
         warnings.append(
-            "no cached live pricing catalog; run `caliper rates refresh --allow-network` "
-            "to populate it"
+            "no cached live pricing catalog yet; embedded rates are active. Run "
+            "`caliper rates refresh --allow-network` to populate live provider pricing."
         )
+    payload = {
+        "catalog": rows,
+        "model_count": len(rows),
+        "catalog_source": catalog.source if catalog.models else "cache",
+        "embedded_available": True,
+        "warnings": warnings,
+        "cache_path": str(cache_path),
+        "using_embedded_rate_card": not catalog.models,
+        "next_commands": ["caliper rates refresh --allow-network"] if not catalog.models else [],
+    }
     if output_format == "json":
-        typer.echo(
-            json_dumps_enveloped({"catalog": rows, "model_count": len(rows), "warnings": warnings})
-        )
+        typer.echo(json_dumps_enveloped(payload))
         return
     if output_format == "csv":
         typer.echo(records_to_csv(rows), nl=False)
         return
     if output_format == "markdown":
+        if not rows and warnings:
+            typer.echo(f"_{warnings[-1]}_\n", nl=False)
+            return
         typer.echo(records_to_markdown(rows), nl=False)
         return
     console.print("[bold]Caliper - Pricing Catalog[/bold]")
@@ -3182,14 +3213,18 @@ def advise(
     recommendations = [
         item.to_record() for item in recommend_arbitrage(result.events, rate_card, threshold)
     ]
-    _emit_advisor(rows, recommendations, output_format)
+    _emit_advisor(rows, recommendations, output_format, threshold, len(result.events))
 
 
 def _emit_advisor(
     records: list[dict],
     recommendations: list[dict],
     output_format: str,
+    threshold: float,
+    event_count: int,
 ) -> None:
+    display_rows = recommendations or records
+    empty_message = _advisor_empty_message(threshold, event_count)
     if output_format == "json":
         typer.echo(
             json_dumps_enveloped(
@@ -3197,20 +3232,26 @@ def _emit_advisor(
                     "recommendations": recommendations,
                     "records": records,
                     "record_count": len(records),
+                    "event_count": event_count,
+                    "confidence_threshold": threshold,
+                    "status": "ok" if display_rows else "no_recommendations",
+                    "message": "" if display_rows else empty_message,
                 }
             )
         )
         return
-    display_rows = recommendations or records
     if output_format == "csv":
         typer.echo(records_to_csv(display_rows), nl=False)
         return
     if output_format == "markdown":
+        if not display_rows:
+            typer.echo(f"_{empty_message}_\n", nl=False)
+            return
         typer.echo(records_to_markdown(display_rows), nl=False)
         return
     console.print("[bold]Caliper - Advisor[/bold]")
     if not display_rows:
-        console.print("No suggestions for this window.")
+        console.print(empty_message)
         return
     table = Table(show_lines=False, expand=True)
     table.add_column("Rule", overflow="fold", max_width=28)
@@ -3229,6 +3270,20 @@ def _emit_advisor(
             str(record.get("action") or record.get("next_command") or ""),
         )
     console.print(table)
+
+
+def _advisor_empty_message(threshold: float, event_count: int) -> str:
+    confidence = f"{threshold:.0%}"
+    if event_count:
+        return (
+            f"No advisor suggestions matched {event_count:,} events at confidence >= {confidence}. "
+            "Try `caliper whatif` for a manual scenario or `caliper advise --explain-rule <rule>` "
+            "to inspect the heuristics."
+        )
+    return (
+        f"No advisor suggestions matched because this window has no loaded events. "
+        f"The active confidence threshold is {confidence}."
+    )
 
 
 def _advisor_int(value: object) -> str:
@@ -3656,6 +3711,7 @@ def statusline(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     offline: OfflineOpt = True,
+    compact: CompactOpt = False,
     vendors: VendorOpt = None,
     watch: Annotated[
         float | None,
@@ -3695,6 +3751,7 @@ def statusline(
             no_parse_cache=no_parse_cache,
             default_model=default_model,
             offline=offline,
+            compact=compact,
             vendors=vendors,
         )
         if output:
@@ -3727,6 +3784,7 @@ def _statusline_text(
     no_parse_cache: bool,
     default_model: str,
     offline: bool,
+    compact: bool,
     vendors: list[str] | None,
 ) -> str:
     try:
@@ -3763,6 +3821,8 @@ def _statusline_text(
             )
             + "\n"
         )
+    if compact:
+        return render_statusline_compact(snapshot) + "\n"
     return render_statusline_text(snapshot) + "\n"
 
 

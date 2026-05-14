@@ -130,6 +130,43 @@ def test_metrics_handler_serves_metrics_and_404s() -> None:
     assert missing.status == 404
 
 
+def test_metrics_handler_ignores_client_disconnect() -> None:
+    snapshot = MetricsSnapshot(
+        cost_usd=1.0,
+        burn_per_hour=2.0,
+        primary_window_percent=3.0,
+        secondary_window_percent=4.0,
+        events_total=5,
+        long_context_events_total=6,
+    )
+    handler_cls = make_handler(lambda: snapshot)
+
+    class BrokenWriter:
+        def write(self, _body: bytes) -> None:
+            raise BrokenPipeError
+
+    class TestHandler(handler_cls):
+        def __init__(self) -> None:
+            self.path = "/metrics"
+            self.wfile = BrokenWriter()
+            self.status: int | None = None
+
+        def send_response(self, code: int, message: str | None = None) -> None:
+            del message
+            self.status = code
+
+        def send_header(self, keyword: str, value: str) -> None:
+            del keyword, value
+
+        def end_headers(self) -> None:
+            return
+
+    handler = TestHandler()
+    handler.do_GET()
+
+    assert handler.status == 200
+
+
 def test_serve_forever_closes_server(monkeypatch) -> None:
     calls: list[str] = []
 

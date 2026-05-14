@@ -45,7 +45,10 @@ def records_to_csv(records: list[dict]) -> str:
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=fields)
     writer.writeheader()
-    writer.writerows(records)
+    writer.writerows(
+        {field: _stringify_record_value(field, record.get(field, "")) for field in fields}
+        for record in records
+    )
     return out.getvalue()
 
 
@@ -58,6 +61,21 @@ def records_to_markdown(records: list[dict]) -> str:
         "| " + " | ".join("---" for _ in fields) + " |",
     ]
     for record in records:
-        values = [str(record.get(field, "")).replace("|", "\\|") for field in fields]
+        values = [
+            _stringify_record_value(field, record.get(field, "")).replace("|", "\\|")
+            for field in fields
+        ]
         lines.append("| " + " | ".join(values) + " |")
     return "\n".join(lines) + "\n"
+
+
+def _stringify_record_value(field: str, value: object) -> str:
+    """Stringify record values for human-facing tabular formats.
+
+    JSON keeps numeric precision. CSV/Markdown should not expose accidental
+    Python float repr for percentage columns.
+    """
+    lowered = field.lower()
+    if isinstance(value, float) and (lowered == "pct" or lowered.endswith("_pct")):
+        return f"{value:.2f}"
+    return str(value)

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual.widgets import DataTable, Static
 
 from caliper.tui.screens._base import CaliperScreen
+
+_PATH_CHECK_LABELS = {"Session root", "State DB", "Codex config", "Rates file", "Parse cache"}
 
 
 class DoctorScreen(CaliperScreen):
@@ -21,7 +25,14 @@ class DoctorScreen(CaliperScreen):
     ]
 
     def top(self):
-        yield Static(f"[bold]{self.SCREEN_TITLE}[/bold]   {self.SCREEN_QUESTION}")
+        snap = getattr(self.app, "snapshot", None)
+        if snap is not None and snap.options.show_paths:
+            mode = "Local paths visible. Press p to redact."
+        else:
+            mode = "Local paths redacted. Press p to reveal."
+        yield Static(
+            f"[bold]{self.SCREEN_TITLE}[/bold]   {self.SCREEN_QUESTION}\n[dim]{mode}[/dim]"
+        )
 
     def middle(self):
         table = DataTable(id="doctor-table", cursor_type="row", zebra_stripes=True)
@@ -44,8 +55,43 @@ class DoctorScreen(CaliperScreen):
             else:
                 for check in checks:
                     glyph = {"ok": ".", "warn": "!", "fail": "x"}.get(check.status, "?")
-                    table.add_row(glyph, check.label, check.detail[:80])
+                    table.add_row(
+                        glyph,
+                        check.label,
+                        _doctor_detail(check.label, check.detail, snap.options.show_paths),
+                    )
         yield table
 
     def footer_pills(self) -> str:
-        return "[ r refresh ]  [ esc back ]"
+        return "[ p redact ]  [ r refresh ]  [ esc back ]"
+
+    def update_from_snapshot(self, _snapshot) -> None:
+        self.refresh(recompose=True)
+
+
+def _doctor_detail(label: str, detail: str, show_paths: bool) -> str:
+    if show_paths or label not in _PATH_CHECK_LABELS:
+        return detail[:80]
+    if label == "Rates file" and detail == "using embedded rate card":
+        return detail
+    if label == "State DB readable":
+        return detail
+    return _redact_path_detail(detail)[:80]
+
+
+def _redact_path_detail(detail: str) -> str:
+    if not detail:
+        return ""
+    if " (" in detail:
+        path, suffix = detail.split(" (", 1)
+        return f"{_path_basename(path)} ({suffix}"
+    if " unreadable:" in detail:
+        path, suffix = detail.split(" unreadable:", 1)
+        return f"{_path_basename(path)} unreadable:{suffix}"
+    if detail.endswith(" (not created yet)"):
+        return f"{_path_basename(detail.removesuffix(' (not created yet)'))} (not created yet)"
+    return _path_basename(detail)
+
+
+def _path_basename(value: str) -> str:
+    return Path(value).name or "<redacted-path>"

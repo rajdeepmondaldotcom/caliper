@@ -223,13 +223,14 @@ insights) and adds only presentation: a Home overview with cost cards,
 primary/secondary limit panels, the insights feed, and recent sessions.
 The workspace includes real screens for Sessions, Intervals, Projects,
 Models, Limits, Live, Forecast, What-If, Budgets, Insights, Doctor, and
-Receipt. Number keys jump across the core screens, `r` refreshes, `t`
-cycles themes, `p` toggles prompt-derived labels, and `[` / `]` step
+Receipt. Number keys jump across the core screens, `0` opens Receipt,
+`w` opens What-If, `b` opens Budgets, `i` opens Insights, `r` refreshes,
+`t` cycles themes, `p` toggles prompt/path redaction, and `[` / `]` step
 the active time window.
 
-Offline by default. No login. No telemetry. The classic CLI surface
-keeps working exactly the way it did before — the TUI is an
-*additional* entry point, never a redirection.
+Offline by default. No login. No telemetry. The classic CLI is the stable
+surface. The Textual workspace is included for exploration and improving
+quickly; it is an *additional* entry point, never a redirection.
 
 ## Privacy is a constraint, not a feature
 
@@ -308,8 +309,16 @@ caliper export grafana
 ```
 
 Receipts render as Markdown or HTML and are suitable for finance handoff.
-The Prometheus exporter is a local process. The Grafana exporter prints a
-dashboard JSON. The optional `[prom]` extra brings `prometheus-client` in.
+The Prometheus exporter is a local `/metrics` process for live scraping.
+The Grafana exporter prints a static dashboard JSON you can import or keep
+under source control. The optional `[prom]` extra brings
+`prometheus-client` in.
+
+| Exporter | Usage data? | Output | Source flags |
+|---|---:|---|---|
+| `export receipt` | yes | Markdown or HTML receipt for one month | accepts session/config/rate flags |
+| `export prometheus` | yes | local `/metrics` server | accepts session/config/rate flags |
+| `export grafana` | no | static dashboard JSON template | does not read usage logs |
 
 ## Python library
 

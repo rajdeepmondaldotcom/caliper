@@ -484,16 +484,20 @@ def render_table(
 
 
 def _print_no_data_overview(console: Console, options: RuntimeOptions) -> None:
+    from caliper.vendors import vendor_summaries
+
     console.print("[bold]Caliper - Overview[/bold]")
     console.print("No AI coding usage logs found in the active window.")
     console.print()
     console.print("Checked:")
+    for summary in vendor_summaries(options):
+        if not summary.enabled:
+            continue
+        count = f"{summary.files:,} files" if summary.files else "no files found"
+        console.print(f"- {summary.label}: {count}")
     if options.show_paths:
-        console.print(f"- Codex sessions: {options.session_root}")
-        console.print(f"- Codex state DB: {options.state_db}")
-    else:
-        console.print("- Codex sessions directory")
-        console.print("- Codex state DB")
+        console.print(f"- OpenAI Codex sessions path: {options.session_root}")
+        console.print(f"- OpenAI Codex state DB path: {options.state_db}")
     console.print()
     console.print("Next:")
     console.print("- Run `caliper doctor` to inspect local setup.")

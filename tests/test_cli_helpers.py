@@ -80,6 +80,8 @@ def test_records_helpers_handle_empty_and_escaping() -> None:
     assert records_to_markdown([]) == "_No data._\n"
     text = records_to_markdown([{"name": "a|b", "count": 2}])
     assert "a\\|b" in text
+    assert "12.35" in records_to_csv([{"cache_pct": 12.34567}])
+    assert "12.35" in records_to_markdown([{"cache_pct": 12.34567}])
 
 
 def test_version_label_survives_missing_git(monkeypatch) -> None:

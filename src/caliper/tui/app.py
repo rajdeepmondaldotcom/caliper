@@ -13,6 +13,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.css.query import NoMatches
 from textual.reactive import reactive
+from textual.theme import Theme
 from textual.worker import Worker, get_current_worker
 
 from caliper.config import TuiConfig, load_config, load_tui_config
@@ -34,6 +35,7 @@ from caliper.tui.progress import TextualParseProgress
 from caliper.tui.screens.budgets import BudgetsScreen
 from caliper.tui.screens.doctor import DoctorScreen
 from caliper.tui.screens.forecast import ForecastScreen
+from caliper.tui.screens.help import HelpScreen
 from caliper.tui.screens.home import HomeScreen
 from caliper.tui.screens.insights import InsightsScreen
 from caliper.tui.screens.intervals import IntervalsScreen
@@ -59,7 +61,6 @@ class CaliperApp(App):
 
     CSS_PATH = [
         Path(__file__).parent / "tcss" / "base.tcss",
-        Path(__file__).parent / "tcss" / "themes" / "slate.tcss",
     ]
     TITLE = "Caliper"
 
@@ -78,8 +79,12 @@ class CaliperApp(App):
         Binding("7", "go('live')", "Live"),
         Binding("8", "go('forecast')", "Forecast"),
         Binding("9", "go('doctor')", "Doctor"),
-        Binding("left_square_bracket", "step_back", "← interval", show=False),
-        Binding("right_square_bracket", "step_forward", "interval →", show=False),
+        Binding("0", "go('receipt')", "Receipt"),
+        Binding("w", "go('whatif')", "What-If"),
+        Binding("b", "go('budgets')", "Budgets"),
+        Binding("i", "go('insights')", "Insights"),
+        Binding("left_square_bracket", "step_back", "< interval", show=False),
+        Binding("right_square_bracket", "step_forward", "interval >", show=False),
     ]
 
     snapshot: reactive[AppSnapshot] = reactive(None, layout=True)  # type: ignore[assignment]
@@ -97,6 +102,7 @@ class CaliperApp(App):
         "insights": InsightsScreen,
         "doctor": DoctorScreen,
         "receipt": ReceiptScreen,
+        "help": HelpScreen,
     }
 
     _THEME_ORDER = ("slate", "parchment", "colorblind", "monochrome")
@@ -134,9 +140,14 @@ class CaliperApp(App):
         yield from ()
 
     def on_mount(self) -> None:
+        self._register_caliper_themes()
         self._apply_theme()
         self.push_screen(HomeScreen())
-        if self._tui_config.show_demo_on_first_run and not welcome_already_seen():
+        if (
+            not self._demo
+            and self._tui_config.show_demo_on_first_run
+            and not welcome_already_seen()
+        ):
             self.push_screen(WelcomeScreen())
         self.action_refresh()
         self._start_refresh_monitoring()
@@ -145,6 +156,84 @@ class CaliperApp(App):
         self._stop_refresh_monitoring()
 
     # ------------------------------------------------------------------ themes
+    def _register_caliper_themes(self) -> None:
+        themes = (
+            Theme(
+                name="slate",
+                primary="#7f8dbd",
+                secondary="#8fb3a8",
+                warning="#d0a85c",
+                error="#d56a6a",
+                success="#7fbf8f",
+                accent="#c7a86a",
+                foreground="#d6dae3",
+                background="#11151b",
+                surface="#151a22",
+                panel="#1c2230",
+                dark=True,
+            ),
+            Theme(
+                name="parchment",
+                primary="#4d6f85",
+                secondary="#7a6f46",
+                warning="#a66824",
+                error="#a74845",
+                success="#497a57",
+                accent="#8f5f3b",
+                foreground="#1f2933",
+                background="#f7f2e8",
+                surface="#fbf7ef",
+                panel="#ece3d4",
+                dark=False,
+            ),
+            Theme(
+                name="colorblind",
+                primary="#0072b2",
+                secondary="#009e73",
+                warning="#e69f00",
+                error="#d55e00",
+                success="#009e73",
+                accent="#56b4e9",
+                foreground="#f2f2f2",
+                background="#101418",
+                surface="#151b20",
+                panel="#202830",
+                dark=True,
+            ),
+            Theme(
+                name="monochrome",
+                primary="#d0d0d0",
+                secondary="#a8a8a8",
+                warning="#e0e0e0",
+                error="#ffffff",
+                success="#d0d0d0",
+                accent="#ffffff",
+                foreground="#d0d0d0",
+                background="#000000",
+                surface="#000000",
+                panel="#101010",
+                dark=True,
+                ansi=True,
+                variables={
+                    "ansi-background": "ansi_black",
+                    "ansi-foreground": "ansi_white",
+                    "border-blurred": "ansi_black",
+                    "block-cursor-foreground": "ansi_black",
+                    "block-cursor-background": "ansi_white",
+                    "input-cursor-background": "ansi_black",
+                    "input-cursor-foreground": "ansi_bright_white",
+                    "input-cursor-text-style": "none",
+                    "input-selection-background": "ansi_bright_blue",
+                    "input-selection-foreground": "ansi_black",
+                    "screen-selection-background": "ansi_bright_blue",
+                    "screen-selection-foreground": "ansi_black",
+                },
+            ),
+        )
+        for theme in themes:
+            with contextlib.suppress(Exception):
+                self.register_theme(theme)
+
     def _apply_theme(self) -> None:
         saved = self._tui_config.theme
         active = "monochrome" if os.environ.get("NO_COLOR") else saved
@@ -156,7 +245,7 @@ class CaliperApp(App):
             "slate": "textual-dark",
             "parchment": "textual-light",
             "colorblind": "nord" if "nord" in available else "textual-dark",
-            "monochrome": "textual-ansi",
+            "monochrome": "ansi-dark" if "ansi-dark" in available else "textual-dark",
         }.get(name, "textual-dark")
         target = name if name in available else fallback
         with contextlib.suppress(Exception):
@@ -210,15 +299,20 @@ class CaliperApp(App):
         if snapshot is None:
             return
         show_prompts = not snapshot.options.show_prompts
-        self.snapshot = apply_scope(snapshot, show_prompts=show_prompts)
-        self.notify("Prompt labels shown" if show_prompts else "Prompt labels redacted")
+        self.snapshot = apply_scope(
+            snapshot,
+            show_prompts=show_prompts,
+            show_paths=show_prompts,
+        )
+        self.notify(
+            "Sensitive labels and paths shown"
+            if show_prompts
+            else "Sensitive labels and paths redacted"
+        )
         self.action_refresh()
 
     def action_show_help(self) -> None:
-        self.notify(
-            "Keys: q quit · r refresh · t theme · 1–9 jump · ? help",
-            timeout=4,
-        )
+        self.push_screen(HelpScreen())
 
     # ------------------------------------------------------------------ refresh
     def action_refresh(self) -> None:

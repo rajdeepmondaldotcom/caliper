@@ -8,7 +8,11 @@ from caliper.aggregation import (
     aggregate_total,
     event_cache_savings,
 )
-from caliper.evidence import evidence_dimensions, worst_grade
+from caliper.evidence import (
+    OVERALL_EVIDENCE_DIMENSION_NAMES,
+    evidence_dimensions,
+    overall_evidence_grade,
+)
 from caliper.models import CostTotals, LoadResult, RuntimeOptions, decimal_string
 from caliper.pricing import RateCard, load_rate_card
 
@@ -108,19 +112,21 @@ def build_insights_from(
 def _accuracy_insight(result: LoadResult, total) -> Insight | None:
     """Surface when the numbers should not be treated as invoice-grade."""
     dimensions = evidence_dimensions(result, total)
-    grade = worst_grade([dimension.grade for dimension in dimensions])
+    grade = overall_evidence_grade(dimensions)
     if grade == "exact":
         return None
     ordered = sorted(
-        [dimension for dimension in dimensions if dimension.grade != "exact"],
+        [
+            dimension
+            for dimension in dimensions
+            if dimension.name in OVERALL_EVIDENCE_DIMENSION_NAMES and dimension.grade != "exact"
+        ],
         key=lambda dimension: (dimension.grade, dimension.name),
     )
     reasons = [reason for dimension in ordered for reason in dimension.reasons]
     first = ordered[0] if ordered else None
     scope = SCOPE_DOCTOR if first and first.name in {"usage", "pricing"} else SCOPE_HOME
-    detail = f"Overall evidence is {grade}. " + (
-        reasons[0] if reasons else "Run doctor to see which input is incomplete."
-    )
+    detail = _accuracy_detail(grade, total, reasons)
     return Insight(
         severity="warn" if grade in {"estimated", "partial"} else "fail",
         title=f"Accuracy is {grade}",
@@ -137,6 +143,23 @@ def _accuracy_insight(result: LoadResult, total) -> Insight | None:
             "dimensions": {dimension.name: dimension.grade for dimension in dimensions},
         },
         commands=("caliper evidence", "caliper doctor"),
+    )
+
+
+def _accuracy_detail(grade: str, total, reasons: list[str]) -> str:
+    events = total.totals.events
+    priced = min(
+        events,
+        max(events - total.costs.unpriced_events, 0) + total.costs.vendor_reported_events,
+    )
+    unsupported = max(events - priced, 0)
+    if events and unsupported:
+        return (
+            f"Cost evidence is {grade}: {priced:,}/{events:,} events priced; "
+            f"{unsupported:,} unsupported."
+        )
+    return f"Cost evidence is {grade}. " + (
+        reasons[0] if reasons else "Run doctor to see which input is incomplete."
     )
 
 

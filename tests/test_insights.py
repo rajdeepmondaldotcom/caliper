@@ -14,10 +14,10 @@ from caliper.insights import (
     build_insights_from,
     render_insights_markdown,
 )
-from caliper.models import LoadResult
+from caliper.models import Aggregate, CostTotals, LoadResult
 from caliper.pricing import load_rate_card
 
-from .conftest import make_state_db, token_event, write_session
+from .conftest import make_state_db, token_event, turn_context, write_session
 
 runner = CliRunner()
 
@@ -82,6 +82,78 @@ def test_insights_json_reports_cache_tier_and_project_concentration(tmp_path) ->
     assert cache["impact_usd_exact"]
     assert cache["evidence_metrics"]["cache_hit_ratio"] > 0
     assert isinstance(cache["commands"], list)
+
+
+def test_accuracy_insight_ignores_missing_git_sha_when_cost_evidence_exact(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-gitless.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(
+                now,
+                {
+                    "input_tokens": 1000,
+                    "cached_input_tokens": 500,
+                    "output_tokens": 100,
+                    "total_tokens": 1100,
+                },
+            ),
+        ],
+    )
+    state_db = tmp_path / "state.sqlite"
+    make_state_db(state_db, session_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "insights",
+            "--days",
+            "1",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    titles = {item["title"] for item in payload["insights"]}
+    assert not any(title.startswith("Accuracy is") for title in titles)
+
+
+def test_accuracy_insight_reports_mixed_priced_and_unsupported_counts(tmp_path) -> None:
+    session_root, state_db, missing_cfg = _fixture(tmp_path)
+    options = build_options(
+        session_root=session_root,
+        state_db=state_db,
+        codex_config=missing_cfg,
+        days=1,
+    )
+    from caliper.parser import load_usage
+
+    result = load_usage(options)
+    total = Aggregate(key="total", label="Total")
+    total.totals.events = 6
+    total.costs = CostTotals(cost_usd="1.23", unpriced_events=1)
+    insights = build_insights_from(
+        result=result,
+        rate_card=load_rate_card(options),
+        total=total,
+        projects=[],
+        daily=[],
+    )
+
+    accuracy = next(item for item in insights if item.title == "Accuracy is partial")
+    assert "5/6 events priced" in accuracy.detail
+    assert "1 unsupported" in accuracy.detail
 
 
 def test_insights_markdown_renders_actions(tmp_path) -> None:

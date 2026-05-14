@@ -84,6 +84,17 @@ def test_statusline_json_exposes_latest_usage_and_limit_windows(tmp_path) -> Non
     assert payload["subscription"]["plans"][0]["slug"] == "pro"
 
 
+def test_statusline_compact_stays_prompt_sized(tmp_path) -> None:
+    result = runner.invoke(app, ["statusline", *_fixture(tmp_path), "--compact"])
+
+    assert result.exit_code == 0, result.output
+    line = result.output.strip()
+    assert len(line) <= 80
+    assert "T $" in line
+    assert "7d $" in line
+    assert "project" not in line
+
+
 def test_statusline_watch_max_ticks(tmp_path) -> None:
     result = runner.invoke(
         app,

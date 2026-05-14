@@ -9,7 +9,7 @@ looks wrong, run `caliper doctor` and the table will tell you what to fix.
 ## 1. Install
 
 ```bash
-uvx --from caliper-ai caliper           # zero-install, recommended
+uvx --isolated --from caliper-ai caliper # zero-install, recommended
 uv tool install caliper-ai              # persistent install
 pipx install caliper-ai
 python -m pip install caliper-ai
@@ -62,9 +62,9 @@ Add a `[budgets]` table to `.caliper.toml`:
 
 ```toml
 [budgets]
-daily_credits = 25000
-weekly_credits = 100000
-monthly_api_dollars = 500
+daily_cost_usd = 25
+weekly_cost_usd = 100
+monthly_cost_usd = 500
 ```
 
 Then in your CI step:
@@ -84,6 +84,18 @@ caliper doctor
 `doctor` prints a table of every check Caliper runs against your local
 environment: data paths, rate-card age, clock skew, parser warnings. The
 overall row at the bottom is the verdict.
+
+## 7. Export or scrape it
+
+```bash
+caliper export receipt --receipt-month 2026-05 --receipt-format html
+caliper export prometheus --metrics-port 9090
+caliper export grafana
+```
+
+Receipts and Prometheus read your local usage window and accept the normal
+session/config/rate flags. Grafana emits a static dashboard JSON template. The
+Prometheus server requires the optional extra: `pip install 'caliper-ai[prom]'`.
 
 ## What to read next
 

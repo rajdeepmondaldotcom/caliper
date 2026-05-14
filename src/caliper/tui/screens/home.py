@@ -46,7 +46,10 @@ class HomeScreen(Screen):
             Horizontal(id="windows"),
             Static("", id="insights"),
             Static("", id="recent"),
-            Static("[ r refresh ]  [ ? help ]  [ q quit ]", id="home-footer"),
+            Static(
+                "[ 0 receipt ] [ i insights ] [ ? help ] [ r refresh ] [ q quit ]",
+                id="home-footer",
+            ),
             id="home-body",
         )
 
@@ -74,7 +77,7 @@ class HomeScreen(Screen):
                 series = self._series_for(snapshot, window.label)
                 cards.mount(
                     CostCard(
-                        label=window.label,
+                        label=self._card_label(window.label),
                         cost_usd=float(window.costs.cost_usd),
                         series=series,
                         vendors=vendor_chip(window),
@@ -118,6 +121,16 @@ class HomeScreen(Screen):
         else:
             window = snapshot.daily[-90:]
         return [float(item.costs.cost_usd) for item in window]
+
+    @staticmethod
+    def _card_label(label: str) -> str:
+        if "7" in label:
+            return "7d"
+        if "30" in label:
+            return "30d"
+        if "90" in label:
+            return "90d"
+        return label
 
     @staticmethod
     def _render_insights(snapshot: AppSnapshot) -> str:

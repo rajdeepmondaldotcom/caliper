@@ -97,7 +97,10 @@ def make_handler(snapshot_fn: Callable[[], MetricsSnapshot]):
             self.send_header("Content-Type", PROM_CONTENT_TYPE)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                return
 
         def log_message(self, fmt: str, *args: object) -> None:  # silence default logging
             return
