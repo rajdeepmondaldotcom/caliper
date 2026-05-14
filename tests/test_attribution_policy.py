@@ -52,6 +52,8 @@ def _tracked_files() -> list[Path]:
         # Skip the policy file and its own test (would self-trip).
         if line == "CLAUDE.md":
             continue
+        if line == "CONTRIBUTING.md":
+            continue
         if line.startswith("tests/test_attribution_policy"):
             continue
         # Skip planning artefacts that quote the banned strings as

@@ -30,6 +30,7 @@ from caliper.tui.messages import (
 )
 from caliper.tui.progress import TextualParseProgress
 from caliper.tui.screens.home import HomeScreen
+from caliper.tui.screens.sessions import SessionsScreen
 from caliper.tui.screens.stub import (
     BudgetsScreen,
     DoctorScreen,
@@ -41,7 +42,6 @@ from caliper.tui.screens.stub import (
     ModelsScreen,
     ProjectsScreen,
     ReceiptScreen,
-    SessionsScreen,
     WhatIfScreen,
 )
 from caliper.tui.state import AppSnapshot, default_scope
