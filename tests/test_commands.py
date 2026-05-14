@@ -252,11 +252,16 @@ def test_help_surfaces_verbose_caliper_flags() -> None:
     assert result.exit_code == 0, result.output
     # Rich may abbreviate or omit option text differently across platforms.
     # The OptionInfo objects are the stable source for the public flag surface.
-    assert _option_decls(cli.SinceOpt) == {"--window-start", "--since", "-s"}
-    assert _option_decls(cli.DaysOpt) == {"--lookback-days", "--days"}
-    assert _option_decls(cli.SessionRootOpt) == {"--codex-session-root", "--session-root"}
-    assert _option_decls(cli.FormatOpt) == {"--output-format", "--format", "-f"}
-    assert _option_decls(cli.CostModeOpt) == {"--vendor-cost-mode", "--cost-mode", "-m"}
+    # Primary names listed first; legacy aliases survive forever.
+    assert {"--window-start", "--since", "-s"} <= _option_decls(cli.SinceOpt)
+    assert {"--lookback-days", "--days"} <= _option_decls(cli.DaysOpt)
+    assert {"--codex-session-root", "--session-root", "--from-codex"} <= _option_decls(
+        cli.SessionRootOpt
+    )
+    assert {"--output-format", "--format", "-f"} <= _option_decls(cli.FormatOpt)
+    assert {"--vendor-cost-mode", "--cost-mode", "-m", "--cost-from"} <= _option_decls(
+        cli.CostModeOpt
+    )
 
 
 def _option_decls(annotation) -> set[str]:

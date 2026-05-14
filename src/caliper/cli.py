@@ -140,41 +140,52 @@ OUTPUT_FORMATS = ("table", "json", "csv", "markdown", "compat-json")
 SinceOpt = Annotated[
     str | None,
     typer.Option(
-        "--window-start",
         "--since",
+        "--window-start",
         "-s",
-        help="Inclusive report window start. Supports YYYY-MM-DD, YYYYMMDD, or ISO.",
+        help="Inclusive start. Date or ISO. Pins the window.",
     ),
 ]
 UntilOpt = Annotated[
     str | None,
     typer.Option(
-        "--window-end",
         "--until",
+        "--window-end",
         "-u",
-        help="Exclusive report window end. Defaults to now.",
+        help="Exclusive end. Defaults to now.",
     ),
 ]
 DaysOpt = Annotated[
     float | None,
-    typer.Option("--lookback-days", "--days", help="Rolling day window before --window-end."),
+    typer.Option("--days", "--lookback-days", help="Rolling day window. Anchored on --until."),
 ]
 TimezoneOpt = Annotated[
     str,
     typer.Option(
-        "--grouping-timezone",
+        "--tz",
         "--timezone",
+        "--grouping-timezone",
         "-z",
-        help="Timezone used for report grouping. Use local or an IANA name.",
+        help="Grouping timezone. IANA or local.",
     ),
 ]
 SessionRootOpt = Annotated[
     Path | None,
-    typer.Option("--codex-session-root", "--session-root", help="Codex session JSONL root."),
+    typer.Option(
+        "--from-codex",
+        "--codex-session-root",
+        "--session-root",
+        help="Codex JSONL root. Read-only.",
+    ),
 ]
 StateDbOpt = Annotated[
     Path | None,
-    typer.Option("--codex-state-db", "--state-db", help="Codex state_5.sqlite path."),
+    typer.Option(
+        "--codex-db",
+        "--codex-state-db",
+        "--state-db",
+        help="Codex state DB. Read-only.",
+    ),
 ]
 CodexConfigOpt = Annotated[
     Path | None,
@@ -187,113 +198,153 @@ ConfigOpt = Annotated[
 PricingModeOpt = Annotated[
     str,
     typer.Option(
+        "--pricing",
         "--pricing-estimation-mode",
         "--pricing-mode",
-        help="Pricing mode: model or flat.",
+        help="model or flat. model is the truthful default.",
     ),
 ]
 PricingSourceOpt = Annotated[
     str,
     typer.Option(
+        "--rates-from",
         "--pricing-catalog-source",
         "--pricing-source",
-        help="Pricing catalog source: auto, embedded, litellm, openrouter, portkey, or codex.",
+        help="Pricing source. auto, embedded, litellm, openrouter, portkey, codex.",
     ),
 ]
 PricingCacheTtlOpt = Annotated[
     int,
     typer.Option(
+        "--rates-ttl-h",
         "--pricing-catalog-cache-ttl-hours",
         "--pricing-cache-ttl-hours",
-        help="Hours before a cached pricing catalog is considered stale.",
+        help="Hours before a cached rate card goes stale.",
     ),
 ]
 ServiceTierOpt = Annotated[
     str,
-    typer.Option("--codex-service-tier", "--service-tier", help="Codex service tier override."),
+    typer.Option(
+        "--service-tier",
+        "--codex-service-tier",
+        help="Service-tier override. Use this when logs disagree with reality. "
+        "(The 'caliper whatif --tier ...' flag is separate; it picks a hypothetical tier.)",
+    ),
 ]
 UnknownTierOpt = Annotated[
     str,
     typer.Option(
+        "--unknown-tier",
         "--assumed-service-tier",
         "--unknown-service-tier",
-        help="Tier to assume when logs and config do not identify one.",
+        help="Tier to assume when nothing else identifies one.",
     ),
 ]
 TierOverridesOpt = Annotated[
     Path | None,
     typer.Option(
+        "--tier-map",
         "--service-tier-overrides-file",
         "--tier-overrides",
-        help="JSON file with per-session or per-path service-tier overrides.",
+        help="JSON of per-session or per-path tier overrides.",
     ),
 ]
 RatesFileOpt = Annotated[
     Path | None,
-    typer.Option("--rate-card-file", "--rates-file", help="Local rate-card override JSON file."),
+    typer.Option(
+        "--rates",
+        "--rate-card-file",
+        "--rates-file",
+        help="Local rate-card JSON. Pin to match an invoice.",
+    ),
 ]
 NoDedupeOpt = Annotated[
     bool,
-    typer.Option("--disable-deduplication", "--no-dedupe", help="Keep duplicate usage events."),
+    typer.Option(
+        "--no-dedupe",
+        "--disable-deduplication",
+        help="Keep duplicate events. Honest, not preferred.",
+    ),
 ]
 NoParseCacheOpt = Annotated[
     bool,
     typer.Option(
-        "--disable-parse-cache",
+        "--no-cache",
         "--no-parse-cache",
-        help="Reparse source logs without the sidecar cache.",
+        "--disable-parse-cache",
+        help="Bypass the sidecar parse cache.",
     ),
 ]
 DefaultModelOpt = Annotated[
     str,
-    typer.Option("--fallback-model", "--default-model", help="Model assumed when logs omit one."),
+    typer.Option(
+        "--assume-model",
+        "--fallback-model",
+        "--default-model",
+        help="Model assumed when logs omit one.",
+    ),
 ]
 ShowPromptsOpt = Annotated[
     bool,
     typer.Option(
+        "--reveal",
         "--include-sensitive-prompts",
         "--show-prompts",
-        help="Include prompt text and full prompt-derived labels in output.",
+        help="Show prompts and full labels. Off by default.",
     ),
 ]
 OfflineOpt = Annotated[
     bool,
     typer.Option(
+        "--offline/--online",
         "--pricing-offline-only/--allow-pricing-network",
-        "--offline/--no-offline",
-        help="Use only local pricing data, or allow explicit pricing network refresh paths.",
+        help="Network use is opt-in. online only affects rates refresh.",
     ),
 ]
-CompactOpt = Annotated[bool, typer.Option("--compact-output", "--compact")]
+CompactOpt = Annotated[
+    bool,
+    typer.Option(
+        "--compact", "--compact-output", help="Drop columns. Use when the terminal is narrow."
+    ),
+]
 WidthOpt = Annotated[
     int | None,
-    typer.Option("--table-width", "--width", help="Table width override."),
+    typer.Option(
+        "--w", "--width", "--table-width", help="Force column width. Default follows terminal."
+    ),
 ]
 TopThreadsOpt = Annotated[
     int,
-    typer.Option("--row-limit", "--top", "--top-threads", help="Limit grouped output rows."),
+    typer.Option(
+        "--top",
+        "--row-limit",
+        "--top-threads",
+        help="Cap grouped rows. 0 means all.",
+    ),
 ]
 RateLimitSampleLimitOpt = Annotated[
     int,
     typer.Option(
+        "--samples",
         "--rate-limit-sample-limit",
-        help="Recent rate-limit samples to include in grouped JSON reports.",
+        help="Recent rate-limit samples kept in JSON output.",
     ),
 ]
 IncludeAllRateLimitSamplesOpt = Annotated[
     bool,
     typer.Option(
+        "--all-samples",
         "--include-all-rate-limit-samples",
-        help="Include every rate-limit sample in grouped JSON reports.",
+        help="Keep every sample. Bigger payload.",
     ),
 ]
 FormatOpt = Annotated[
     str,
     typer.Option(
-        "--output-format",
         "--format",
+        "--output-format",
         "-f",
-        help="table, json, csv, markdown, or compat-json.",
+        help="table, json, csv, markdown, compat-json.",
     ),
 ]
 StatuslineFormatOpt = Annotated[
@@ -302,59 +353,77 @@ StatuslineFormatOpt = Annotated[
 ]
 OutputOpt = Annotated[
     Path | None,
-    typer.Option("--output-file", "--output", help="Write output to a file."),
+    typer.Option("--out", "--output", "--output-file", help="Write to file. Pipes still work."),
 ]
 OrderOpt = Annotated[
     str,
-    typer.Option("--sort-order", "--order", "-o", help="Sort order: asc or desc."),
+    typer.Option("--order", "--sort-order", "-o", help="asc or desc."),
 ]
 StartOfWeekOpt = Annotated[
     str,
     typer.Option(
-        "--week-start-day",
+        "--week-start",
         "--start-of-week",
-        "-w",
-        help="Day to start weekly reports on.",
+        "--week-start-day",
+        help="Day weekly reports start on.",
         case_sensitive=False,
     ),
 ]
 ProjectOpt = Annotated[
     str | None,
-    typer.Option("--project-filter", "--project", "-p", help="Filter by project path or label."),
+    typer.Option("--project", "--project-filter", "-p", help="Filter by project path or label."),
 ]
 InstancesOpt = Annotated[
     bool,
     typer.Option(
-        "--split-by-project-instance",
+        "--by-project",
         "--instances",
-        "-i",
+        "--split-by-project-instance",
         help="Split daily rows by project instance.",
     ),
 ]
 BreakdownOpt = Annotated[
     bool,
     typer.Option(
-        "--include-model-breakdown",
+        "--per-model",
         "--breakdown",
+        "--include-model-breakdown",
         "-b",
-        help="Show per-model breakdown rows where supported.",
+        help="Show one row per model under each group.",
     ),
 ]
 CostModeOpt = Annotated[
     str,
     typer.Option(
-        "--vendor-cost-mode",
+        "--cost-from",
         "--cost-mode",
+        "--vendor-cost-mode",
         "-m",
-        help="Vendor cost mode: auto, calculate, or display.",
+        help="auto, calculate, or display. Whose number to trust.",
     ),
 ]
 VendorOpt = Annotated[
     list[str] | None,
     typer.Option(
-        "--include-vendor",
+        "--only",
         "--vendor",
-        help="Vendor to include. Repeatable; default all.",
+        "--include-vendor",
+        help="Filter by tool vendor (codex, claude-code, cursor, aider). Repeatable.",
+    ),
+]
+OnlyVendorOpt = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--only-vendor",
+        help="Filter by model vendor (anthropic, openai, anysphere). Repeatable.",
+    ),
+]
+ClassicOpt = Annotated[
+    bool,
+    typer.Option(
+        "--classic",
+        "--no-tui",
+        help="Force the classic Rich render even on a TTY.",
     ),
 ]
 
