@@ -128,3 +128,30 @@ def test_aggregate_populates_model_vendors():
     assert "anthropic" in total.model_vendors
     for breakdown in total.model_breakdowns.values():
         assert breakdown.model_vendor in {"anthropic", "openai", "unknown"}
+
+
+def test_json_payload_includes_model_vendor_fields():
+    """JSON contract gains model_vendor + model_vendors. No removals."""
+    from caliper.models import Aggregate, ModelBreakdown
+    from caliper.render import aggregate_to_dict, model_breakdown_to_dict
+
+    item = Aggregate(key="x", label="x", models={"claude-opus-4.7"}, model_vendors={"anthropic"})
+    item.model_breakdowns = {
+        "claude-opus-4.7|standard": ModelBreakdown(
+            key="claude-opus-4.7|standard",
+            model="claude-opus-4.7",
+            service_tier="standard",
+            model_vendor="anthropic",
+        )
+    }
+    payload = aggregate_to_dict(item)
+    assert payload["model_vendors"] == ["anthropic"]
+    assert "vendors" in payload  # tool-vendor field still present
+    assert payload["model_breakdowns"][0]["model_vendor"] == "anthropic"
+
+    # Direct breakdown serializer
+    breakdown = ModelBreakdown(
+        key="m|s", model="gpt-5.5", service_tier="standard", model_vendor="openai"
+    )
+    out = model_breakdown_to_dict(breakdown)
+    assert out["model_vendor"] == "openai"

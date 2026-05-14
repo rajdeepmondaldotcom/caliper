@@ -58,6 +58,8 @@ class HomeScreen(Screen):
         if not snapshot.overview_windows:
             cards.mount(Static(self._empty_message(snapshot), classes="empty"))
         else:
+            from caliper.render import vendor_chip
+
             for window in snapshot.overview_windows:
                 series = self._series_for(snapshot, window.label)
                 cards.mount(
@@ -66,6 +68,7 @@ class HomeScreen(Screen):
                         api_dollars=float(window.costs.api_dollars),
                         credits=float(window.costs.adjusted_credits),
                         series=series,
+                        vendors=vendor_chip(window),
                     )
                 )
 
@@ -122,9 +125,15 @@ class HomeScreen(Screen):
     def _render_recent(snapshot: AppSnapshot) -> str:
         if not snapshot.sessions:
             return "[dim]No sessions in the active window.[/dim]"
+        from caliper.render import vendor_chip
+
         lines = ["[b]Recent sessions[/b]"]
         for session in snapshot.sessions[:5]:
+            chip = vendor_chip(session)
+            chip_part = f"  [dim]{chip}[/dim]" if chip else ""
             lines.append(
-                f"  {session.label or session.key}   ${float(session.costs.api_dollars):.2f}"
+                f"  {session.label or session.key}   "
+                f"${float(session.costs.api_dollars):.2f}"
+                f"{chip_part}"
             )
         return "\n".join(lines)

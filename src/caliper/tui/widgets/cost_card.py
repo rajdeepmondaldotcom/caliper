@@ -36,6 +36,7 @@ class CostCard(Vertical):
         credits: float,
         series: list[float] | tuple[float, ...] = (),
         delta_pct: float | None = None,
+        vendors: str = "",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -44,10 +45,13 @@ class CostCard(Vertical):
         self._credits = credits
         self._series = list(series)
         self._delta_pct = delta_pct
+        self._vendors = vendors
 
     def compose(self) -> ComposeResult:
         yield Static(self._label, classes="label")
         yield Static(self._headline_text(), classes="headline")
+        if self._vendors:
+            yield Static(self._vendors, classes="meta")
         yield Static(self._meta_text(), classes="meta")
 
     def _headline_text(self) -> str:

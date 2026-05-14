@@ -75,6 +75,7 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "cache_savings_standard_credits_exact": decimal_string(item.cache_savings.standard_credits),
         "cache_savings_api_dollars_exact": decimal_string(item.cache_savings.api_dollars),
         "models": sorted(item.models),
+        "model_vendors": sorted(item.model_vendors),
         "vendors": sorted(item.vendors),
         "service_tiers": sorted(item.service_tiers),
         "plan_types": sorted(item.plan_types),
@@ -124,6 +125,7 @@ def model_breakdown_to_dict(item: ModelBreakdown) -> dict:
     return {
         "key": item.key,
         "model": item.model,
+        "model_vendor": item.model_vendor,
         "service_tier": item.service_tier,
         "events": item.totals.events,
         "input_tokens": item.totals.input_tokens,
