@@ -2,6 +2,14 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.9 - 2026-05-14
+
+Same payload as 0.0.8. The 0.0.8 commit shipped without bumping
+`pyproject.toml`, so the release workflow's tag-validation step
+correctly rejected `v0.0.8`. Tag and version protection on the
+remote blocks force-push and tag delete. We move forward to 0.0.9
+with the version actually pinned.
+
 ## 0.0.8 - 2026-05-14
 
 Unblock the release workflow. Land the foundation for the Textual
