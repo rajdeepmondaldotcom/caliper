@@ -444,6 +444,7 @@ class ModelBreakdown:
     key: str
     model: str
     service_tier: str
+    model_vendor: str = "unknown"
     totals: TokenTotals = field(default_factory=TokenTotals)
     costs: CostTotals = field(default_factory=CostTotals)
     cache_savings: CostTotals = field(default_factory=CostTotals)
@@ -494,6 +495,7 @@ class Aggregate:
     cache_savings: CostTotals = field(default_factory=CostTotals)
     models: set[str] = field(default_factory=set)
     vendors: set[str] = field(default_factory=set)
+    model_vendors: set[str] = field(default_factory=set)
     service_tiers: set[str] = field(default_factory=set)
     plan_types: set[str] = field(default_factory=set)
     usage_sources: set[str] = field(default_factory=set)
@@ -550,8 +552,11 @@ class Aggregate:
         self.cache_savings.add(cache_savings)
 
     def _add_event_identity(self, event: UsageEvent) -> None:
+        from caliper.pricing import model_vendor
+
         if event.model:
             self.models.add(event.model)
+            self.model_vendors.add(model_vendor(event.model))
         if event.vendor:
             self.vendors.add(event.vendor)
         if event.service_tier:
@@ -614,6 +619,8 @@ class Aggregate:
         unknown_model: bool,
         unknown_tier: bool,
     ) -> None:
+        from caliper.pricing import model_vendor
+
         breakdown_key = f"{event.model}\0{event.service_tier}"
         breakdown = self.model_breakdowns.setdefault(
             breakdown_key,
@@ -621,6 +628,7 @@ class Aggregate:
                 key=breakdown_key,
                 model=event.model,
                 service_tier=event.service_tier,
+                model_vendor=model_vendor(event.model),
             ),
         )
         breakdown.add_event(event, costs, cache_savings, long_context, unknown_model, unknown_tier)

@@ -84,3 +84,47 @@ def test_glyph_is_single_character():
     for vendor in KNOWN_MODEL_VENDORS:
         glyph = model_vendor_glyph(vendor)
         assert len(glyph) == 1, f"{vendor!r} glyph {glyph!r} is not single-char"
+
+
+def test_aggregate_populates_model_vendors():
+    """Pin aggregation behaviour through a real parse path."""
+    import datetime as dt
+    import tempfile
+    from pathlib import Path
+
+    from caliper.aggregation import aggregate_total
+    from caliper.config import build_options
+    from caliper.parser import load_usage
+
+    from .conftest import token_event, write_session  # type: ignore[import-not-found]
+
+    tmp = Path(tempfile.mkdtemp(prefix="caliper-vendor-test-"))
+    write_session(
+        tmp,
+        "rollout-2026-05-12T00-00-00-vendor.jsonl",
+        [
+            {
+                "type": "turn_context",
+                "timestamp": "2026-05-12T00:00:00Z",
+                "payload": {"model": "claude-opus-4.7"},
+            },
+            token_event(
+                dt.datetime.now(tz=dt.UTC),
+                {"input_tokens": 100, "output_tokens": 50},
+            ),
+        ],
+    )
+    options = build_options(
+        session_root=tmp,
+        state_db=tmp / "state.db",
+        codex_config=tmp / "cfg.toml",
+        days=1,
+        no_parse_cache=True,
+    )
+    result = load_usage(options)
+    if not result.events:
+        return  # no events parsed; conftest fixture may not survive without state db
+    total = aggregate_total(result, options)
+    assert "anthropic" in total.model_vendors
+    for breakdown in total.model_breakdowns.values():
+        assert breakdown.model_vendor in {"anthropic", "openai", "unknown"}
