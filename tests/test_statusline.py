@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
 from caliper.cli import app
+from caliper.models import ThreadMeta, Usage, UsageEvent
+from caliper.pricing import RateCard
+from caliper.statusline import _top_project, _window_text
+from caliper.windows import WindowState
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 
@@ -98,3 +103,43 @@ def test_statusline_watch_max_ticks(tmp_path) -> None:
 
     assert result.exit_code == 0, result.output
     assert len([line for line in result.output.splitlines() if line.strip()]) == 2
+
+
+def test_statusline_window_text_marks_expired_reset_as_due() -> None:
+    state = WindowState(
+        window="primary",
+        used_percent=28.0,
+        window_minutes=300,
+        reset_at=dt.datetime.now(tz=dt.UTC) - dt.timedelta(seconds=1),
+        seconds_remaining=0,
+        burn_rate_per_hour=None,
+        eta_to_100=None,
+        samples=1,
+        limit_id="codex",
+    )
+
+    assert _window_text(state) == "28% reset due"
+
+
+def test_statusline_top_project_uses_cost_not_sort_order() -> None:
+    now = dt.datetime.now(tz=dt.UTC)
+
+    def event(project: str, tokens: int) -> UsageEvent:
+        return UsageEvent(
+            timestamp=now,
+            path=Path(f"{project}.jsonl"),
+            session_id=project,
+            usage=Usage(input_tokens=tokens, output_tokens=tokens, total_tokens=tokens * 2),
+            model="gpt-5.5",
+            service_tier="standard",
+            tier_source="logged",
+            thread=ThreadMeta(cwd=project),
+        )
+
+    project, cost = _top_project(
+        [event("/tmp/a-expensive", 10_000), event("/tmp/z-cheap", 100)],
+        RateCard.load(None, "model"),
+    )
+
+    assert project == "/tmp/a-expensive"
+    assert cost > 0

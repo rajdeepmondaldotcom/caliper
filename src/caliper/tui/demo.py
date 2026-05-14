@@ -16,7 +16,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from caliper.models import RuntimeOptions
+from caliper.models import VENDOR_OPENAI_CODEX, RuntimeOptions
 
 _DEMO_MODELS = ("gpt-5.5", "gpt-5-codex", "claude-sonnet-4-6")
 _DEMO_PROJECTS = ("caliper-ai", "pr/auth-redo", "spike/parser")
@@ -53,7 +53,17 @@ def materialize_demo(template: RuntimeOptions, seed: int = 0xCA11BE12) -> Runtim
             ),
         ]
         path.write_text("\n".join(json.dumps(event) for event in events) + "\n")
-    return replace(template, session_root=root)
+    config_path = root / "config.toml"
+    config_path.write_text("")
+    return replace(
+        template,
+        session_root=root,
+        state_db=root / "state.sqlite",
+        config_path=config_path,
+        vendors=(VENDOR_OPENAI_CODEX,),
+        tier_overrides=None,
+        project=None,
+    )
 
 
 def _iso(value: dt.datetime) -> str:

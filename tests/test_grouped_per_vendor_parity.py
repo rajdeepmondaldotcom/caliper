@@ -19,20 +19,34 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from caliper.aggregation import aggregate_daily, aggregate_weekly
-from caliper.cli import _render_grouped_per_vendor, _render_overview_per_vendor
+from caliper.cli import (
+    _render_grouped_per_vendor,
+    _render_overview_per_vendor,
+    _scoped_result_for_vendor,
+)
 from caliper.config import build_options
 from caliper.models import (
     VENDOR_CLAUDE_CODE,
     VENDOR_OPENAI_CODEX,
     LoadResult,
+    ParserIssue,
+    RateLimitSample,
     ThreadMeta,
     Usage,
     UsageEvent,
+    VendorParseStats,
 )
 from caliper.pricing import load_rate_card
 
 
-def _event(*, vendor: str, when: dt.datetime, tokens: int = 1000) -> UsageEvent:
+def _event(
+    *,
+    vendor: str,
+    when: dt.datetime,
+    tokens: int = 1000,
+    tier_source: str = "logged",
+    plan_type: str = "pro",
+) -> UsageEvent:
     return UsageEvent(
         timestamp=when,
         path=Path(f"/tmp/{vendor}.jsonl"),
@@ -42,10 +56,10 @@ def _event(*, vendor: str, when: dt.datetime, tokens: int = 1000) -> UsageEvent:
         ),
         model="claude-opus-4.7" if vendor == VENDOR_CLAUDE_CODE else "gpt-5.5",
         service_tier="standard",
-        tier_source="logged",
+        tier_source=tier_source,
         thread=ThreadMeta(cwd="/tmp/project"),
         model_source="turn_context",
-        plan_type="pro",
+        plan_type=plan_type,
         vendor=vendor,
     )
 
@@ -147,3 +161,64 @@ def test_single_vendor_skips_per_vendor_path(tmp_path):
         warnings=[],
     )
     assert _has_multiple_tool_vendors(single) is False
+
+
+def test_scoped_vendor_result_does_not_leak_other_vendor_metadata():
+    now = dt.datetime.now(tz=dt.UTC)
+    result = LoadResult(
+        events=[
+            _event(
+                vendor=VENDOR_CLAUDE_CODE,
+                when=now,
+                tier_source="vendor-default",
+                plan_type="max",
+            ),
+            _event(
+                vendor=VENDOR_OPENAI_CODEX,
+                when=now,
+                tier_source="current-config",
+                plan_type="pro",
+            ),
+        ],
+        duplicates=5,
+        tier_sources={"vendor-default": 1, "current-config": 1},
+        plan_types={"max", "pro"},
+        rate_limit_samples=[
+            RateLimitSample(
+                timestamp=now,
+                path=Path("/tmp/claude.jsonl"),
+                session_id="claude",
+                plan_type="max",
+                vendor=VENDOR_CLAUDE_CODE,
+            ),
+            RateLimitSample(
+                timestamp=now,
+                path=Path("/tmp/codex.jsonl"),
+                session_id="codex",
+                plan_type="pro",
+                vendor=VENDOR_OPENAI_CODEX,
+            ),
+        ],
+        warnings=["global warning"],
+        parser_issues=[
+            ParserIssue(vendor=VENDOR_CLAUDE_CODE, kind="claude", message="claude issue"),
+            ParserIssue(vendor=VENDOR_OPENAI_CODEX, kind="codex", message="codex issue"),
+        ],
+        vendor_stats={
+            VENDOR_CLAUDE_CODE: VendorParseStats(vendor=VENDOR_CLAUDE_CODE, event_count=1),
+            VENDOR_OPENAI_CODEX: VendorParseStats(vendor=VENDOR_OPENAI_CODEX, event_count=1),
+        },
+        dedupe_stats={"event-id": 5},
+    )
+
+    scoped = _scoped_result_for_vendor(result, VENDOR_CLAUDE_CODE)
+
+    assert [event.vendor for event in scoped.events] == [VENDOR_CLAUDE_CODE]
+    assert scoped.duplicates == 0
+    assert scoped.tier_sources == {"vendor-default": 1}
+    assert scoped.plan_types == {"max"}
+    assert [sample.vendor for sample in scoped.rate_limit_samples] == [VENDOR_CLAUDE_CODE]
+    assert [issue.vendor for issue in scoped.parser_issues] == [VENDOR_CLAUDE_CODE]
+    assert set(scoped.vendor_stats) == {VENDOR_CLAUDE_CODE}
+    assert scoped.warnings == []
+    assert scoped.dedupe_stats == {}

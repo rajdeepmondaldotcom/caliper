@@ -107,6 +107,23 @@ def test_render_table_footer_and_warning_paths(tmp_path: Path) -> None:
     assert "Plan types: free" in text
 
 
+def test_render_table_names_non_codex_data_source(tmp_path: Path) -> None:
+    options = _options(tmp_path, compact=True)
+    result = _load_result(_event(vendor="claude-code"))
+    total = aggregate_total(result, options, rate_card=RateCard.load(None, "model"))
+
+    text = render_module.render_table(
+        result,
+        options,
+        [total],
+        "Surface",
+        rate_card=RateCard.load(None, "model"),
+    )
+
+    assert "Data source: Claude Code local logs" in text
+    assert "Session root:" not in text
+
+
 def test_pricing_status_and_warning_branches() -> None:
     agg = Aggregate(key="warn", label="warn")
     agg.costs = CostTotals(

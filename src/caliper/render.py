@@ -441,7 +441,7 @@ def _print_report_header(
 ) -> None:
     console.print(f"[bold]{title}[/bold]")
     console.print(f"Window: {window_label(options.start, options.end, options.timezone)}")
-    console.print(f"Session root: {options.session_root}")
+    _print_data_source(console, result, options)
     vendor_breakdown = _vendor_breakdown(result)
     if vendor_breakdown:
         console.print(f"Vendors: {vendor_breakdown}")
@@ -455,6 +455,26 @@ def _print_report_header(
     for warning in subscription_warnings(total.plan_types):
         console.print(f"[yellow]Subscription:[/yellow] {warning}")
     console.print()
+
+
+def _print_data_source(console: Console, result: LoadResult, options: RuntimeOptions) -> None:
+    vendor = _single_tool_vendor(result)
+    if vendor in {None, "", "openai-codex"}:
+        console.print(f"Session root: {options.session_root}")
+        return
+    labels = {
+        "claude-code": "Claude Code local logs",
+        "cursor": "Cursor local data",
+        "aider": "Aider chat histories",
+    }
+    console.print(f"Data source: {labels.get(vendor, vendor)}")
+
+
+def _single_tool_vendor(result: LoadResult) -> str | None:
+    vendors = {event.vendor for event in result.events if event.vendor}
+    if len(vendors) == 1:
+        return next(iter(vendors))
+    return None
 
 
 def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOptions) -> Table:

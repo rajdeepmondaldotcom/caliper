@@ -5,7 +5,6 @@ import csv
 import datetime as dt
 import io
 import json
-import os
 import subprocess  # nosec
 import sys
 import time
@@ -432,7 +431,7 @@ ClassicOpt = Annotated[
     typer.Option(
         "--classic",
         "--no-tui",
-        help="Force the classic Rich render even on a TTY.",
+        help="Compatibility flag. The default CLI is classic; use `caliper tui` for the TUI.",
     ),
 ]
 
@@ -592,19 +591,9 @@ def _render_grouped_per_vendor(
         "One table per vendor below.\n\n"
     )
     for vendor_id in vendor_ids:
-        scoped_events = [event for event in result.events if event.vendor == vendor_id]
-        if not scoped_events:
+        scoped = _scoped_result_for_vendor(result, vendor_id)
+        if not scoped.events:
             continue
-        scoped = LoadResult(
-            events=scoped_events,
-            duplicates=0,
-            tier_sources=result.tier_sources,
-            plan_types=result.plan_types,
-            rate_limit_samples=result.rate_limit_samples,
-            warnings=[],
-            parser_issues=result.parser_issues,
-            vendor_stats=result.vendor_stats,
-        )
         rows = rows_fn(scoped, options)
         if options.order == "desc" and name in {"daily", "weekly", "monthly"}:
             rows = list(reversed(rows))
@@ -615,7 +604,7 @@ def _render_grouped_per_vendor(
             scoped,
             options,
             rows,
-            f"Caliper - {title}  ({label}, {len(scoped_events):,} events)",
+            f"Caliper - {title}  ({label}, {len(scoped.events):,} events)",
             rate_card=rate_card,
         )
         sys.stdout.write(text)
@@ -838,45 +827,8 @@ def main(
         _run_overview(locals())
 
 
-def _should_launch_tui(
-    *,
-    output_format: str,
-    output: Path | None,
-    classic: bool,
-) -> bool:
-    """Decide between Textual workspace and classic Rich output.
-
-    Returns True only when:
-      - the user did not pass --classic / --no-tui,
-      - CALIPER_NO_TUI is not set in the environment,
-      - --format was left at the default ('table'),
-      - --out was not passed,
-      - stdout AND stdin are TTYs.
-
-    Any failure of those conditions falls through to the classic path,
-    keeping CI exit codes, pipe semantics, and JSON output byte-identical.
-    """
-    if classic:
-        return False
-    if os.environ.get("CALIPER_NO_TUI", "").strip().lower() in {"1", "true", "yes"}:
-        return False
-    if output_format != "table":
-        return False
-    if output is not None:
-        return False
-    return sys.stdout.isatty() and sys.stdin.isatty()
-
-
-def _launch_tui_scoped(options: RuntimeOptions, *, initial_screen: str = "home") -> None:
-    """Boot the Textual workspace pre-scoped to a CLI command."""
-    from caliper.config import load_config, load_tui_config
-    from caliper.tui import run_tui
-
-    tui_config = load_tui_config(load_config(options.config_path))
-    run_tui(options, demo=False, tui_config=tui_config)
-
-
 def _run_overview(values: dict) -> None:
+    values = _with_parent_options(values)
     output_format = values["output_format"]
     _validate_format(output_format)
     now = dt.datetime.now(tz=local_timezone())
@@ -887,13 +839,6 @@ def _run_overview(values: dict) -> None:
         longest_options = build_options(**option_values)
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
-    if _should_launch_tui(
-        output_format=output_format,
-        output=values["output"],
-        classic=bool(values.get("classic", False)),
-    ):
-        _launch_tui_scoped(longest_options)
-        return
     from caliper.cli_progress import cli_parse_progress
 
     with cli_parse_progress(
@@ -961,6 +906,34 @@ def _has_multiple_tool_vendors(result: LoadResult) -> bool:
     return False
 
 
+def _scoped_result_for_vendor(result: LoadResult, vendor_id: str) -> LoadResult:
+    scoped_events = [event for event in result.events if event.vendor == vendor_id]
+    tier_sources: dict[str, int] = {}
+    plan_types: set[str] = set()
+    for event in scoped_events:
+        if event.tier_source:
+            tier_sources[event.tier_source] = tier_sources.get(event.tier_source, 0) + 1
+        if event.plan_type:
+            plan_types.add(event.plan_type)
+    scoped_samples = [sample for sample in result.rate_limit_samples if sample.vendor == vendor_id]
+    for sample in scoped_samples:
+        if sample.plan_type:
+            plan_types.add(sample.plan_type)
+    return LoadResult(
+        events=scoped_events,
+        duplicates=0,
+        tier_sources=tier_sources,
+        plan_types=plan_types,
+        rate_limit_samples=scoped_samples,
+        warnings=[],
+        parser_issues=[issue for issue in result.parser_issues if issue.vendor == vendor_id],
+        vendor_stats={vendor_id: result.vendor_stats[vendor_id]}
+        if vendor_id in result.vendor_stats
+        else {},
+        dedupe_stats={},
+    )
+
+
 def _render_overview_per_vendor(
     result: LoadResult,
     options: RuntimeOptions,
@@ -975,8 +948,6 @@ def _render_overview_per_vendor(
     JSON / CSV / markdown rendering paths fall through to the existing
     single-table render call, which keeps their wire shape unchanged.
     """
-    from caliper.models import LoadResult as _LoadResult
-
     vendor_ids = sorted({event.vendor for event in result.events if event.vendor})
     earliest = result.events[0].timestamp
     latest = result.events[-1].timestamp
@@ -988,19 +959,9 @@ def _render_overview_per_vendor(
     )
 
     for vendor_id in vendor_ids:
-        scoped_events = [event for event in result.events if event.vendor == vendor_id]
-        if not scoped_events:
+        scoped = _scoped_result_for_vendor(result, vendor_id)
+        if not scoped.events:
             continue
-        scoped = _LoadResult(
-            events=scoped_events,
-            duplicates=0,
-            tier_sources=result.tier_sources,
-            plan_types=result.plan_types,
-            rate_limit_samples=result.rate_limit_samples,
-            warnings=[],
-            parser_issues=result.parser_issues,
-            vendor_stats=result.vendor_stats,
-        )
         rows, vendor_total = aggregate_overview_windows(
             scoped,
             options,
@@ -1013,7 +974,7 @@ def _render_overview_per_vendor(
             scoped,
             options,
             rows,
-            f"Caliper - {title}  ({len(scoped_events):,} events)",
+            f"Caliper - {title}  ({len(scoped.events):,} events)",
             rate_card=rate_card,
             total=vendor_total,
         )
@@ -3203,20 +3164,62 @@ def _emit_advisor(
     if not display_rows:
         console.print("No suggestions for this window.")
         return
-    table = Table(show_lines=False)
-    columns = (
-        "rule_id",
-        "events",
-        "sessions",
-        "confidence",
-        "estimated_savings_usd_exact",
-        "action",
-    )
-    for key in columns:
-        table.add_column(key)
+    table = Table(show_lines=False, expand=True)
+    table.add_column("Rule", overflow="fold", max_width=28)
+    table.add_column("Events", justify="right")
+    table.add_column("Sessions", justify="right")
+    table.add_column("Confidence", justify="right")
+    table.add_column("Savings", justify="right")
+    table.add_column("Action", overflow="fold", max_width=48)
     for record in display_rows:
-        table.add_row(*(str(record.get(key, "")) for key in columns))
+        table.add_row(
+            str(record.get("rule_id") or record.get("title") or ""),
+            _advisor_int(record.get("events")),
+            _advisor_int(record.get("sessions")),
+            _advisor_confidence(record.get("confidence")),
+            _advisor_savings(record),
+            str(record.get("action") or record.get("next_command") or ""),
+        )
     console.print(table)
+
+
+def _advisor_int(value: object) -> str:
+    try:
+        return f"{int(value or 0):,}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _advisor_confidence(value: object) -> str:
+    if value is None or value == "":
+        return ""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if 0 <= numeric <= 1:
+        return f"{numeric:.0%}"
+    return f"{numeric:.0f}%"
+
+
+def _advisor_savings(record: dict) -> str:
+    for key in (
+        "estimated_savings_usd_exact",
+        "estimated_savings_usd",
+        "savings_usd_exact",
+        "savings_usd",
+    ):
+        value = record.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            amount = Decimal(str(value))
+        except Exception:
+            return str(value)
+        if amount == 0:
+            return "-"
+        return f"${amount:,.2f}"
+    return "-"
 
 
 def _emit_records(records: list[dict], output_format: str, title: str) -> None:

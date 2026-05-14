@@ -23,6 +23,7 @@ from caliper.models import (
     UsageEvent,
 )
 from caliper.output import records_to_csv, records_to_markdown
+from caliper.pricing import RateCard
 from caliper.rate_audit import dedupe_models, extract_models_from_text, fetch_rate_sources
 
 runner = CliRunner()
@@ -255,6 +256,10 @@ def test_health_checks_cover_warning_and_ok_paths(monkeypatch, tmp_path) -> None
     assert health.check_state_db_readable(state_db).status == "warn"
 
     options = build_options(days=7)
+    monkeypatch.setattr(health, "load_rate_card", lambda _options: RateCard.load(None, "model"))
+    catalog_check = health.check_pricing_catalog(options)
+    assert catalog_check.status == "ok"
+    assert "offline mode" in catalog_check.detail
     assert health.check_cache_creation_rates([], options).status == "ok"
     missing_rate_event = _event(
         model="unknown-model",
@@ -301,6 +306,13 @@ def test_options_wraps_value_error() -> None:
     with pytest.raises(cli.typer.Exit) as exc_info:
         cli._options({"days": -1})
     assert exc_info.value.exit_code == 2
+
+
+def test_advisor_table_format_helpers_are_human_readable() -> None:
+    assert cli._advisor_int(1315) == "1,315"
+    assert cli._advisor_confidence(0.8) == "80%"
+    assert cli._advisor_savings({"estimated_savings_usd_exact": "1315.3240317"}) == "$1,315.32"
+    assert cli._advisor_savings({"estimated_savings_usd_exact": "0"}) == "-"
 
 
 def test_tail_helpers_cover_event_and_session_rows() -> None:

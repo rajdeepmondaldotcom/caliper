@@ -4,7 +4,7 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 
-from caliper.aggregation import aggregate_projects, aggregate_total
+from caliper.aggregation import aggregate_total, event_cost
 from caliper.models import LoadResult, RuntimeOptions, UsageEvent, decimal_string
 from caliper.pricing import RateCard
 from caliper.render import pricing_status, pricing_warnings
@@ -65,8 +65,7 @@ def build_statusline_snapshot(
     today = _totals(today_events, result, options, rate_card, "Today")
     trailing = _totals(trailing_events, result, options, rate_card, "Last 7 days")
     full_total = aggregate_total(result, options, rate_card=rate_card)
-    projects = aggregate_projects(result, options, rate_card=rate_card)
-    top_project = projects[0] if projects else None
+    top_project, top_project_cost = _top_project(result.events, rate_card)
     warnings = tuple(
         result.warnings
         + pricing_warnings(full_total)
@@ -80,8 +79,8 @@ def build_statusline_snapshot(
         events=len(result.events),
         sessions=len(sessions),
         latest_event=max(result.events, key=lambda event: event.timestamp, default=None),
-        top_project=top_project.label if top_project else "",
-        top_project_cost_usd=top_project.costs.cost_usd if top_project else Decimal("0"),
+        top_project=top_project,
+        top_project_cost_usd=top_project_cost,
         today=today,
         trailing_7d=trailing,
         primary=compute_window_state(result.rate_limit_samples, now, "primary"),
@@ -90,6 +89,19 @@ def build_statusline_snapshot(
         pricing_status=pricing_status(full_total),
         warnings=warnings,
     )
+
+
+def _top_project(events: list[UsageEvent], rate_card: RateCard) -> tuple[str, Decimal]:
+    costs_by_project: dict[str, Decimal] = {}
+    for event in events:
+        project = event.thread.cwd
+        if not project:
+            continue
+        costs, _long_context, _unknown_model = event_cost(rate_card, event)
+        costs_by_project[project] = costs_by_project.get(project, Decimal("0")) + costs.cost_usd
+    if not costs_by_project:
+        return "", Decimal("0")
+    return max(costs_by_project.items(), key=lambda item: (item[1], item[0]))
 
 
 def statusline_payload(snapshot: StatuslineSnapshot) -> dict:
@@ -222,7 +234,11 @@ def _window_payload(state: WindowState) -> dict:
 
 def _window_text(state: WindowState) -> str:
     percent = "-" if state.used_percent is None else f"{state.used_percent:.0f}%"
-    reset = format_seconds_remaining(state.seconds_remaining)
+    reset = (
+        "due"
+        if state.reset_at is not None and state.seconds_remaining == 0
+        else format_seconds_remaining(state.seconds_remaining)
+    )
     return f"{percent} reset {reset}"
 
 

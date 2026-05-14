@@ -2,6 +2,32 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.19 - 2026-05-14
+
+Final release QA hardening after live 0.0.18 testing.
+
+### Fixed
+
+- `caliper --format json --vendor openai-codex overview` now honors
+  root-level output and vendor flags instead of falling back to the
+  default table view.
+- The default `caliper` command stays on the classic overview path.
+  The Textual workspace remains explicit via `caliper tui`.
+- `caliper tui --demo` is now fully isolated to synthetic Codex
+  fixture data and no longer scans real Claude Code, Cursor, or Aider
+  paths.
+- Per-vendor split reports now scope tier sources, plan types,
+  rate-limit samples, parser issues, and vendor stats to the active
+  vendor instead of leaking global metadata into each table.
+- Single-vendor non-Codex reports now show a vendor-specific data
+  source label instead of a misleading Codex session root.
+- `caliper advise` table output now uses human-readable column labels,
+  formatted counts, percentages, and USD savings.
+- First-run `caliper doctor` in offline mode now treats the embedded
+  rate card as expected instead of warning about a missing live catalog.
+- `caliper statusline` now reports expired reset windows as `reset due`
+  and chooses the top project by cost.
+
 ## 0.0.18 - 2026-05-14
 
 CI invariant cleanup on top of 0.0.17.

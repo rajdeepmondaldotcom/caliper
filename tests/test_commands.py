@@ -124,6 +124,30 @@ def test_overview_command_accepts_data_source_options(tmp_path) -> None:
     assert payload["totals"]["total_tokens"] == 1100
 
 
+def test_overview_command_accepts_parent_output_options(tmp_path) -> None:
+    session_root, state_db, _until, missing_cfg = _build(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "--format",
+            "json",
+            "--vendor",
+            "openai-codex",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+            "overview",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["command"] == "overview"
+    assert payload["metadata"]["vendor_event_counts"] == {"openai-codex": 1}
+
+
 def test_weekly_smoke(tmp_path) -> None:
     result = runner.invoke(app, ["weekly", *_common_args(tmp_path), "--format", "json"])
     assert result.exit_code == 0, result.output

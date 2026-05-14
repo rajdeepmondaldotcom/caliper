@@ -197,7 +197,7 @@ def check_pricing_catalog(options: RuntimeOptions) -> HealthCheck:
     if not models:
         detail = "no cached live catalog; using embedded rate card"
         if options.offline:
-            return doctor_check("Pricing catalog", "warn", detail)
+            return doctor_check("Pricing catalog", "ok", "offline mode; using embedded rate card")
         return doctor_check("Pricing catalog", "warn", "; ".join([detail, *map(str, warnings)]))
     age_hours = status.get("age_hours")
     age_text = "unknown age" if age_hours is None else f"{float(age_hours):.1f}h old"
