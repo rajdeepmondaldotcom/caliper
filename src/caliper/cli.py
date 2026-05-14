@@ -5,6 +5,7 @@ import csv
 import datetime as dt
 import io
 import json
+import os
 import subprocess  # nosec
 import sys
 import time
@@ -760,6 +761,44 @@ def main(
         _run_overview(locals())
 
 
+def _should_launch_tui(
+    *,
+    output_format: str,
+    output: Path | None,
+    classic: bool,
+) -> bool:
+    """Decide between Textual workspace and classic Rich output.
+
+    Returns True only when:
+      - the user did not pass --classic / --no-tui,
+      - CALIPER_NO_TUI is not set in the environment,
+      - --format was left at the default ('table'),
+      - --out was not passed,
+      - stdout AND stdin are TTYs.
+
+    Any failure of those conditions falls through to the classic path,
+    keeping CI exit codes, pipe semantics, and JSON output byte-identical.
+    """
+    if classic:
+        return False
+    if os.environ.get("CALIPER_NO_TUI", "").strip().lower() in {"1", "true", "yes"}:
+        return False
+    if output_format != "table":
+        return False
+    if output is not None:
+        return False
+    return sys.stdout.isatty() and sys.stdin.isatty()
+
+
+def _launch_tui_scoped(options: RuntimeOptions, *, initial_screen: str = "home") -> None:
+    """Boot the Textual workspace pre-scoped to a CLI command."""
+    from caliper.config import load_config, load_tui_config
+    from caliper.tui import run_tui
+
+    tui_config = load_tui_config(load_config(options.config_path))
+    run_tui(options, demo=False, tui_config=tui_config)
+
+
 def _run_overview(values: dict) -> None:
     output_format = values["output_format"]
     _validate_format(output_format)
@@ -771,6 +810,13 @@ def _run_overview(values: dict) -> None:
         longest_options = build_options(**option_values)
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
+    if _should_launch_tui(
+        output_format=output_format,
+        output=values["output"],
+        classic=bool(values.get("classic", False)),
+    ):
+        _launch_tui_scoped(longest_options)
+        return
     with _interactive_status("Loading 90 days of usage...", output_format, values["output"]):
         longest_result = load_usage(longest_options)
     rate_card = load_rate_card(longest_options)
@@ -821,6 +867,7 @@ def overview(
     rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
     include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
     vendors: VendorOpt = None,
+    classic: ClassicOpt = False,
 ) -> None:
     """Print the rolling 7, 30, and 90 day cost summary. Start here."""
     _run_overview(locals())
