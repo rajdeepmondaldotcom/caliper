@@ -831,6 +831,7 @@ def main(
     rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
     include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
     vendors: VendorOpt = None,
+    classic: ClassicOpt = False,
 ) -> None:
     if ctx.invoked_subcommand is None:
         _run_overview(locals())

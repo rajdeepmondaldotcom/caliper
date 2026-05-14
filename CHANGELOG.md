@@ -2,6 +2,17 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.16 - 2026-05-14
+
+### Fixed
+
+- `caliper --classic` and `caliper --no-tui` at the root now work.
+  The 0.0.5 flag landed on the `overview` command body but not on
+  the root callback, so `caliper --classic` (without `overview`)
+  errored `No such option`. Added `ClassicOpt` to the root
+  callback so both forms accept the flag. Subcommand `overview`
+  still accepts it too.
+
 ## 0.0.15 - 2026-05-14
 
 Release plumbing harden + local publish convenience.
