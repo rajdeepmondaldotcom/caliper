@@ -497,13 +497,34 @@ ROOT_OPTION_DEFAULTS: dict[str, Any] = {
 
 
 def _exit_error(message: str) -> typer.Exit:
-    console.print(f"[red]error:[/red] {message}")
+    # rich.markup.escape protects literals like "caliper-ai[prom]" from being
+    # silently parsed as markup tags by Rich's console.
+    from rich.markup import escape
+
+    console.print(f"[red]error:[/red] {escape(message)}")
     return typer.Exit(2)
 
 
 def _validate_format(output_format: str) -> None:
     if output_format not in OUTPUT_FORMATS:
         raise _exit_error(f"--output-format must be one of: {', '.join(OUTPUT_FORMATS)}")
+
+
+# Root-level options whose CLI type is a path. Click's callback context can
+# hand them back as plain strings; downstream code expects pathlib.Path. The
+# coercion below makes the boundary deterministic regardless of how Click
+# represents the value internally.
+ROOT_PATH_OPTION_KEYS: frozenset[str] = frozenset(
+    {
+        "output",
+        "session_root",
+        "state_db",
+        "codex_config",
+        "config",
+        "tier_overrides",
+        "rates_file",
+    }
+)
 
 
 def _with_parent_options(values: dict) -> dict:
@@ -516,6 +537,8 @@ def _with_parent_options(values: dict) -> dict:
         parent_value = parent.params.get(key, default)
         if parent_value == default:
             continue
+        if key in ROOT_PATH_OPTION_KEYS and isinstance(parent_value, str):
+            parent_value = Path(parent_value)
         current = merged.get(key, default)
         if current == default:
             merged[key] = parent_value
@@ -531,6 +554,24 @@ def _options(values: dict) -> RuntimeOptions:
         raise _exit_error(str(exc)) from exc
 
 
+def _safe_load_rate_card(options: RuntimeOptions) -> Any:
+    """Wrapper that converts a malformed `--rates` file into a friendly CLI
+    error instead of letting the ValueError bubble as a Python traceback."""
+    try:
+        return load_rate_card(options)
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+
+def _safe_load_usage(options: RuntimeOptions, *, progress=None) -> Any:
+    """Wrapper that converts a malformed `--tier-map` (or other parser
+    boundary errors) into a friendly CLI error."""
+    try:
+        return load_usage(options, progress=progress) if progress else load_usage(options)
+    except ValueError as exc:
+        raise _exit_error(str(exc)) from exc
+
+
 def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
     from caliper.cli_progress import cli_parse_progress
 
@@ -541,7 +582,7 @@ def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
         output_format=values["output_format"],
         output=values["output"],
     ) as progress:
-        result = load_usage(options, progress=progress)
+        result = _safe_load_usage(options, progress=progress)
     if name == "daily" and options.instances:
         rows_fn = aggregate_daily_instances
 
@@ -582,7 +623,7 @@ def _render_grouped_per_vendor(
     No combined 'All vendors' table is appended. The user asked for
     vendor truth; combining undoes that.
     """
-    rate_card = load_rate_card(options)
+    rate_card = _safe_load_rate_card(options)
     vendor_ids = sorted({event.vendor for event in result.events if event.vendor})
     title = name.title()
     sys.stdout.write(f"Caliper - {title}, by tool vendor\n")
@@ -615,7 +656,7 @@ def _run_session_id(values: dict, session_id: str) -> None:
     values = _with_parent_options(values)
     _validate_format(values["output_format"])
     options = _options(values)
-    result = load_usage(options)
+    result = _safe_load_usage(options)
     scoped = LoadResult(
         events=[event for event in result.events if event.session_id == session_id],
         duplicates=0,
@@ -652,7 +693,7 @@ def render_json_text(
             options,
             rows,
             name,
-            rate_card=load_rate_card(options),
+            rate_card=_safe_load_rate_card(options),
         )
     if output_format == "csv":
         from caliper.render import render_csv
@@ -669,7 +710,7 @@ def render_json_text(
         options,
         rows,
         f"Caliper - {name.title()}",
-        rate_card=load_rate_card(options),
+        rate_card=_safe_load_rate_card(options),
     )
 
 
@@ -679,7 +720,7 @@ def _compat_json(
     total = aggregate_total(
         result,
         options,
-        rate_card=load_rate_card(options),
+        rate_card=_safe_load_rate_card(options),
     )
     if name == "daily" and options.instances:
         projects: dict[str, list[dict[str, Any]]] = {}
@@ -845,8 +886,8 @@ def _run_overview(values: dict) -> None:
         output_format=output_format,
         output=values["output"],
     ) as progress:
-        longest_result = load_usage(longest_options, progress=progress)
-    rate_card = load_rate_card(longest_options)
+        longest_result = _safe_load_usage(longest_options, progress=progress)
+    rate_card = _safe_load_rate_card(longest_options)
     overview_windows = [
         (f"Last {days} days", now - dt.timedelta(days=days)) for days in (7, 30, 90)
     ]
@@ -1231,8 +1272,8 @@ def blocks(
 
     _validate_format(output_format)
     options = _options(locals())
-    result = load_usage(options)
-    rate_card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
     rows = build_blocks(result, options, rate_card, session_length_hours=session_length)
     if recent:
         rows = filter_recent_blocks(rows)
@@ -1399,8 +1440,8 @@ def evidence(
     """Show where each event came from and how confident the parser is in it."""
     _validate_format(output_format)
     options = _options(locals())
-    result = load_usage(options)
-    rate_card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
     total = aggregate_total(result, options, rate_card=rate_card)
     rows = evidence_rows(result, total)
     payload = {
@@ -1495,7 +1536,7 @@ def limits(
     """Show recent rate-limit hits and credit-cap samples by window."""
     _validate_format(output_format)
     options = _options(locals())
-    result = load_usage(options)
+    result = _safe_load_usage(options)
     render_limits(result, options, output_format, output)
 
 
@@ -1530,8 +1571,8 @@ def insights(
     if output_format not in {"table", "json", "markdown"}:
         raise _exit_error("--output-format must be one of: table, json, markdown")
     options = _options(locals())
-    result = load_usage(options)
-    card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    card = _safe_load_rate_card(options)
     items = build_insights(result, options, rate_card=card)[: options.top_threads]
     if output_format == "json":
         text = json_dumps_enveloped(insights_payload(items)) + "\n"
@@ -1614,7 +1655,7 @@ def tail(
     if output_format not in {"table", "json", "csv"}:
         raise _exit_error("--output-format must be one of: table, json, csv")
     options = _options(locals() | {"top_threads": n})
-    result = load_usage(options)
+    result = _safe_load_usage(options)
     rows = _recent_tail_rows(result, n, by)
     if output_format == "json":
         text = json_dumps_enveloped({"by": by, f"{by}s": rows}) + "\n"
@@ -1725,7 +1766,7 @@ def doctor(
 
     files = list(options.session_root.glob("**/*.jsonl")) if options.session_root.exists() else []
     vendor_file_count = _discovered_vendor_file_count(options)
-    result = load_usage(options) if vendor_file_count else None
+    result = _safe_load_usage(options) if vendor_file_count else None
     checks = build_health_report(
         options=options,
         session_file_count=len(files),
@@ -2040,7 +2081,7 @@ def rates_show(
             pricing_cache_ttl_hours=pricing_cache_ttl_hours,
             offline=offline,
         )
-        card = load_rate_card(options)
+        card = _safe_load_rate_card(options)
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
     payload["pricing_source"] = pricing_source
@@ -2164,7 +2205,7 @@ def rates_catalog(
                 pricing_cache_ttl_hours=pricing_cache_ttl_hours,
                 offline=not allow_network,
             )
-            catalog = load_rate_card(options).pricing_catalog or catalog
+            catalog = _safe_load_rate_card(options).pricing_catalog or catalog
         except ValueError as exc:
             raise _exit_error(str(exc)) from exc
     rows = catalog_model_records(catalog)
@@ -2294,8 +2335,8 @@ def forecast(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
-    result = load_usage(options)
-    rate_card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
     total = aggregate_total(result, options, rate_card=rate_card)
     status = pricing_status(total)
     warnings = pricing_warnings(total)
@@ -2473,8 +2514,8 @@ def compare(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
-    result = load_usage(options)
-    rate_card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
     agg_a = aggregate_interval(result.events, options, rate_card, interval_a, "A")
     agg_b = aggregate_interval(result.events, options, rate_card, interval_b, "B")
 
@@ -2822,7 +2863,7 @@ def _render_commit_scope(
     options: RuntimeOptions,
     output_format: str,
 ) -> None:
-    result = load_usage(options)
+    result = _safe_load_usage(options)
     scoped = LoadResult(
         events=[event for event in result.events if event.thread.git_sha in shas],
         duplicates=0,
@@ -2831,7 +2872,7 @@ def _render_commit_scope(
         rate_limit_samples=[],
         warnings=result.warnings,
     )
-    rate_card = load_rate_card(options)
+    rate_card = _safe_load_rate_card(options)
     total = aggregate_total(scoped, options, rate_card=rate_card)
     vendor_rows = _commit_scope_vendor_rows(scoped, options, rate_card)
     payload: dict[str, Any] = {
@@ -3050,8 +3091,8 @@ def whatif(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
-    result = load_usage(options)
-    rate_card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
     report = build_whatif_report(
         result,
         options,
@@ -3127,8 +3168,8 @@ def advise(
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
-    result = load_usage(options)
-    rate_card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
     threshold = 0.8 if strict else 0.6
     rows = [item.to_record() for item in suggest_arbitrage(result.events, threshold)]
     recommendations = [
@@ -3383,8 +3424,8 @@ def export_receipt(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
-    result = load_usage(options)
-    rate_card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
 
     in_month = [event for event in result.events if start <= event.timestamp < end]
     scoped = LoadResult(
@@ -3567,8 +3608,8 @@ def budgets_check(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
-    result = load_usage(options)
-    rate_card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
     total = aggregate_total(result, options, rate_card=rate_card)
     status = pricing_status(total)
     warnings = pricing_warnings(total)
@@ -3704,8 +3745,8 @@ def _statusline_text(
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
-    result = load_usage(options)
-    rate_card = load_rate_card(options)
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
     snapshot = build_statusline_snapshot(result, options, rate_card, now=options.end)
     if output_format == "json":
         return (

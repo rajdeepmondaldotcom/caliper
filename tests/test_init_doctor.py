@@ -125,9 +125,11 @@ def test_doctor_json_summarizes_repeated_parser_warnings(monkeypatch, tmp_path) 
 
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
+    # Cursor token-coverage gets its own dedicated row. The legacy
+    # duplicate "Parser warning" entry with the same Cursor detail was
+    # removed in 0.0.20 — see CHANGELOG.
     parser_warnings = [check for check in payload["checks"] if check["label"] == "Parser warning"]
-    assert len(parser_warnings) == 1
-    assert "5 Cursor files have no per-event token counts" in parser_warnings[0]["detail"]
+    assert parser_warnings == []
     cursor_coverage = next(
         check for check in payload["checks"] if check["label"] == "Cursor token coverage"
     )

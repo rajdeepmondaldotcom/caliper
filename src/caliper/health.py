@@ -333,18 +333,15 @@ CURSOR_TOKEN_WARNING_PREFIX = "Cursor session has no per-event token counts: "  
 def parser_warning_checks(
     warnings: list[str], parser_issues: list[ParserIssue] | None = None
 ) -> list[HealthCheck]:
+    """Emit "Parser warning" rows for the doctor table.
+
+    The cursor token-coverage signal is intentionally skipped here because
+    the dedicated ``check_cursor_token_coverage`` check already surfaces it
+    as its own row. Including both produced an identical WARN line under
+    two headers in earlier releases.
+    """
     checks: list[HealthCheck] = []
     issues = parser_issues or []
-    grouped = parser_warning_summary(warnings, issues)
-    for summary in grouped:
-        if summary.kind == "cursor-token-coverage":
-            checks.append(
-                doctor_check(
-                    "Parser warning",
-                    "warn",
-                    _cursor_token_warning_detail(summary),
-                )
-            )
     consumed = set(warnings_from_parser_issues(issues))
     for warning in warnings:
         if warning.startswith(CURSOR_TOKEN_WARNING_PREFIX) or warning in consumed:
@@ -376,9 +373,3 @@ def parser_warning_summary(
             )
         )
     return summaries
-
-
-def _cursor_token_warning_detail(summary: WarningSummary) -> str:
-    noun = "file" if summary.count == 1 else "files"
-    examples = "; ".join(summary.examples)
-    return f"{summary.count:,} Cursor {noun} have no per-event token counts (examples: {examples})"

@@ -40,10 +40,13 @@ def default_codex_config() -> Path:
     return default_codex_home() / "config.toml"
 
 
-def load_config(explicit_path: Path | None = None) -> dict:
-    paths = [USER_CONFIG, LOCAL_CONFIG]
+def load_config(explicit_path: Path | str | None = None) -> dict:
+    paths: list[Path] = [USER_CONFIG, LOCAL_CONFIG]
     if explicit_path:
-        paths.append(explicit_path)
+        # Coerce defensively: Typer callback paths can arrive as plain strings
+        # despite the Path annotation, depending on how Click registers the
+        # underlying click type. Keep this boundary safe.
+        paths.append(explicit_path if isinstance(explicit_path, Path) else Path(explicit_path))
     loaded: dict = {}
     for path in paths:
         if path is None:
@@ -294,7 +297,7 @@ def _start_time(
     timezone: dt.tzinfo,
 ) -> dt.datetime:
     if since:
-        return parse_datetime(since, default_tz=timezone)
+        return _parse_since(since, end=end, timezone=timezone)
     if days is not None:
         if days <= 0:
             raise ValueError("--lookback-days must be greater than 0")
@@ -303,6 +306,32 @@ def _start_time(
     if default_days <= 0:
         raise ValueError("default_days must be greater than 0")
     return end - dt.timedelta(days=default_days)
+
+
+def _parse_since(
+    since: str,
+    *,
+    end: dt.datetime,
+    timezone: dt.tzinfo,
+) -> dt.datetime:
+    """Resolve `--since` accepting both ISO timestamps and natural-language windows.
+
+    Tries the natural-language window parser first when the input starts with
+    a letter (e.g. "last 7 days", "yesterday", "this week"). Falls back to
+    the strict ISO/date parser so existing scripts keep working.
+    """
+    raw = since.strip()
+    if raw and raw[0].isalpha():
+        from caliper.intervals import parse_interval
+
+        now = end if end.tzinfo else end.replace(tzinfo=timezone)
+        try:
+            return parse_interval(raw, now).start.astimezone(timezone)
+        except ValueError as exc:
+            raise ValueError(
+                f"--since does not match an ISO date or a known window expression: {raw!r}"
+            ) from exc
+    return parse_datetime(since, default_tz=timezone)
 
 
 def _service_tier(loaded: dict, value: str) -> str:

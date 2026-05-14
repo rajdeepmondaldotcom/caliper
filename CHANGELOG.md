@@ -2,6 +2,42 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.20 - 2026-05-15
+
+Live-QA fallout cleanup after a brutal first-time-user pass on 0.0.19.
+
+### Fixed
+
+- `caliper --config <bad.toml> overview`, `--rates <bad.json>`, and
+  `--tier-map <bad.json>` now print a one-line `error: …` and exit 2
+  instead of dumping a Python traceback. The bug was that the parent
+  Typer callback handed those Path options back as plain strings via
+  Click's parent context, which slipped past the `Path` annotation on
+  the inner consumer. The boundary is now coerced once in
+  `_with_parent_options` and defensively again in `load_config`,
+  `RateCard.load`, and `load_tier_overrides`.
+- `_exit_error` now Rich-escapes the user-facing message. The
+  Prometheus install hint correctly renders `pip install
+  'caliper-ai[prom]'`; Rich was previously eating the `[prom]` literal
+  as a style tag and the user only saw `'caliper-ai'`.
+- The Markdown `overview` table no longer prints a fictitious `**Total**`
+  row that summed the three overlapping rolling windows (7d + 30d + 90d).
+  The Markdown renderer now accepts an optional `total` from the caller
+  and renders that row verbatim. Grouped commands (daily/weekly/monthly)
+  still fall back to summing their own non-overlapping rows. The CSV
+  and JSON envelopes were never affected and are unchanged.
+- `--since "last 7 days"`, `--since "yesterday"`, `--since "this week"`,
+  and the rest of the natural-language window vocabulary now work on
+  every command that takes `--since` (daily, session, project, advise,
+  evidence, …), not just `compare --a/--b`. Previously the ISO parser
+  in `_time_window` was reached directly and rejected anything with
+  letters in it. Routing through `intervals.parse_interval` keeps the
+  ISO path intact.
+- `caliper doctor` no longer prints the Cursor token-coverage warning
+  twice. The dedicated `Cursor token coverage` row is the canonical
+  signal; the duplicate `Parser warning` row that wrapped the same
+  detail was an artifact of the parser-warning summarizer.
+
 ## 0.0.19 - 2026-05-14
 
 Final release QA hardening after live 0.0.18 testing.

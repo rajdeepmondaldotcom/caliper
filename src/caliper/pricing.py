@@ -379,7 +379,7 @@ class RateCard:
     @classmethod
     def load(
         cls,
-        path: Path | None,
+        path: Path | str | None,
         pricing_mode: str = "model",
         catalog: PricingCatalog | None = None,
     ) -> RateCard:
@@ -390,6 +390,7 @@ class RateCard:
                 catalog_cards=_catalog_cards(catalog),
                 pricing_catalog=catalog,
             )
+        path = path if isinstance(path, Path) else Path(path)
         try:
             raw = json.loads(path.expanduser().read_text())
         except (OSError, json.JSONDecodeError) as exc:

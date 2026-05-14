@@ -717,7 +717,22 @@ def render_csv(rows: list[Aggregate], show_prompts: bool) -> str:
     return output.getvalue()
 
 
-def render_markdown(rows: list[Aggregate], show_prompts: bool) -> str:
+def render_markdown(
+    rows: list[Aggregate],
+    show_prompts: bool,
+    *,
+    total: Aggregate | None = None,
+) -> str:
+    """Render a Markdown table.
+
+    The optional ``total`` row, when supplied by the caller, is rendered
+    verbatim instead of being computed by summing ``rows``. This keeps
+    overview-style output honest: its rows are overlapping rolling
+    windows (7d/30d/90d), so summing them would triple-count spend.
+    For grouped commands (daily/weekly/monthly) where rows are
+    non-overlapping, the caller can omit ``total`` and the row sum is
+    used as before.
+    """
     headers = [
         "Group",
         "Events",
@@ -734,17 +749,17 @@ def render_markdown(rows: list[Aggregate], show_prompts: bool) -> str:
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
     ]
-    totals = TokenTotals()
-    costs = CostTotals()
+    summed_tokens = TokenTotals()
+    summed_costs = CostTotals()
     row_statuses: set[str] = set()
     for row in rows:
         row_statuses.add(pricing_status(row))
-        totals.events += row.totals.events
-        totals.input_tokens += row.totals.input_tokens
-        totals.cached_input_tokens += row.totals.cached_input_tokens
-        totals.output_tokens += row.totals.output_tokens
-        totals.total_tokens += row.totals.total_tokens
-        costs.add(row.costs)
+        summed_tokens.events += row.totals.events
+        summed_tokens.input_tokens += row.totals.input_tokens
+        summed_tokens.cached_input_tokens += row.totals.cached_input_tokens
+        summed_tokens.output_tokens += row.totals.output_tokens
+        summed_tokens.total_tokens += row.totals.total_tokens
+        summed_costs.add(row.costs)
         lines.append(
             "| "
             + " | ".join(
@@ -768,26 +783,35 @@ def render_markdown(rows: list[Aggregate], show_prompts: bool) -> str:
             + " |"
         )
     if rows:
-        total_status = (
-            "partial"
-            if "partial" in row_statuses
-            else "estimated"
-            if "estimated" in row_statuses
-            else "exact"
-        )
+        if total is not None:
+            total_tokens = total.totals
+            total_costs = total.costs
+            total_status = pricing_status(total)
+        else:
+            total_tokens = summed_tokens
+            total_costs = summed_costs
+            total_status = (
+                "partial"
+                if "partial" in row_statuses
+                else "estimated"
+                if "estimated" in row_statuses
+                else "exact"
+            )
         lines.append(
             "| "
             + " | ".join(
                 [
                     "**Total**",
-                    str(totals.events),
-                    str(totals.input_tokens),
-                    str(totals.cached_input_tokens),
-                    str(totals.output_tokens),
-                    str(totals.total_tokens),
-                    f"{costs.cost_usd:.2f}",
-                    f"{costs.reported_cost_usd:.2f}" if costs.vendor_reported_events else "",
-                    f"{costs.calculated_cost_usd:.2f}",
+                    str(total_tokens.events),
+                    str(total_tokens.input_tokens),
+                    str(total_tokens.cached_input_tokens),
+                    str(total_tokens.output_tokens),
+                    str(total_tokens.total_tokens),
+                    f"{total_costs.cost_usd:.2f}",
+                    f"{total_costs.reported_cost_usd:.2f}"
+                    if total_costs.vendor_reported_events
+                    else "",
+                    f"{total_costs.calculated_cost_usd:.2f}",
                     total_status,
                 ]
             )
@@ -811,7 +835,7 @@ def render(
     elif output_format == "csv":
         text = render_csv(rows, options.show_prompts)
     elif output_format == "markdown":
-        text = render_markdown(rows, options.show_prompts)
+        text = render_markdown(rows, options.show_prompts, total=total)
     else:
         text = render_table(
             result,

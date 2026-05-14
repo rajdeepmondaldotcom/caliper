@@ -296,9 +296,10 @@ def current_config_service_tier(config_path: Path) -> str:
     return tier
 
 
-def load_tier_overrides(path: Path | None) -> list[TierOverride]:
+def load_tier_overrides(path: Path | str | None) -> list[TierOverride]:
     if path is None:
         return []
+    path = path if isinstance(path, Path) else Path(path)
     try:
         raw = json.loads(path.expanduser().read_text())
     except (OSError, json.JSONDecodeError) as exc:
