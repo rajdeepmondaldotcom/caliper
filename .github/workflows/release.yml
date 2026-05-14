@@ -178,7 +178,7 @@ jobs:
           set -euo pipefail
           # Allow the PyPI index a moment to propagate the new release.
           for i in 1 2 3 4 5; do
-            if uvx --refresh "caliper-ai==${{ steps.ver.outputs.version }}" caliper --version; then
+            if uvx --refresh --from "caliper-ai==${{ steps.ver.outputs.version }}" caliper --version; then
               exit 0
             fi
             echo "Attempt $i failed; sleeping…"
