@@ -163,6 +163,7 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["metadata"]["tier_sources"] == {"logged": 1}
     assert payload["metadata"]["model_sources"] == {"turn_context": 1}
     assert payload["metadata"]["plan_types"] == ["pro"]
+    assert payload["metadata"]["path_redaction"] == "redacted"
     assert payload["metadata"]["workspace_coverage"] == {
         "events": 1,
         "events_with_project": 1,
@@ -180,7 +181,7 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert len(payload["breakdowns"]) == 1
     assert len(payload["projects"]) == 1
     assert payload["projects"][0]["session_count"] == 1
-    assert payload["projects"][0]["project_paths"] == ["/tmp/project-alpha"]
+    assert payload["projects"][0]["project_paths"] == ["<redacted-path>"]
     assert payload["projects"][0]["project_names"] == ["project-alpha"]
     assert payload["projects"][0]["git_origins"] == ["https://github.com/example/project-alpha"]
     assert payload["projects"][0]["git_branches"] == ["main"]
@@ -505,6 +506,7 @@ def test_project_json_exposes_workspace_provenance(tmp_path) -> None:
             str(state_db),
             "--codex-config",
             str(missing_cfg),
+            "--show-paths",
             "--format",
             "json",
         ]

@@ -13,7 +13,7 @@ cost. Offline. No login.
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ```bash
-uvx --from caliper-ai caliper
+uvx --isolated --from caliper-ai caliper
 ```
 
 </div>
@@ -25,10 +25,11 @@ uvx --from caliper-ai caliper
 Caliper is a small, local-first Python CLI that turns AI coding session logs
 into one usage record and prints what each pull request cost.
 
-It supports four sources today: OpenAI Codex CLI, Claude Code, Cursor, and
-Aider. It reads files those tools already write to your disk, joins them into
-one frozen event shape, prices them with sourced rate cards, and attributes
-the cost to a PR, a commit, or a project.
+It supports token-bearing logs from OpenAI Codex CLI, Claude Code, Cursor,
+and Aider. It reads files those tools already write to your disk, joins them
+into one frozen event shape, prices them with sourced rate cards, and
+attributes the cost to a PR, a commit, or a project when the local evidence
+contains enough git context.
 
 There is no daemon, no SDK, no account, and no telemetry. The default code
 path makes zero network calls. The only network call in the whole codebase is
@@ -130,8 +131,9 @@ Caliper - PR #42
 ```
 
 `caliper pr <N>` resolves the PR commits and filters local events whose
-recorded git SHA matches those commits. If the PR cannot be resolved
-automatically, pass an explicit range:
+recorded git SHA matches those commits. The receipt carries evidence grades,
+so missing local git attribution is visible instead of being silently treated
+as exact. If the PR cannot be resolved automatically, pass an explicit range:
 
 ```bash
 caliper pr --git-range main...feature-branch
@@ -158,8 +160,8 @@ network calls.
 Requires Python 3.11+. Pick the line that fits your setup.
 
 ```bash
-# Zero-install. Always pulls the latest version. Recommended.
-uvx --from caliper-ai caliper
+# Zero-install. Ignores any persistent uv tool install. Recommended.
+uvx --isolated --from caliper-ai caliper
 
 # Persistent global tool (uv). Good for daily use.
 uv tool install caliper-ai
@@ -176,7 +178,10 @@ python -m pip install caliper-ai
 
 PyPI distribution name is `caliper-ai`. Command and Python import are
 both `caliper`. `uvx caliper` (without `--from`) hits a different,
-unrelated package; always use `--from caliper-ai caliper`.
+unrelated package; always use `--from caliper-ai caliper`. If
+`uvx --from caliper-ai caliper --version` shows an older version on your
+machine, uv is reusing a persistent tool install; run `uv tool upgrade
+caliper-ai` or use the isolated command above.
 
 If you see `error: No virtual environment found` from `uv pip
 install`, that command only installs into an active venv. Use one of
@@ -234,6 +239,9 @@ keeps working exactly the way it did before — the TUI is an
 - Prompts and titles are redacted in default output. Pass `--show-prompts`
   if you want them. JSON output never leaks session titles when redaction
   is on. It falls back to session IDs.
+- Absolute local paths are redacted in machine-readable output by default.
+  Pass `--show-paths` only when you explicitly want filesystem paths in
+  JSON.
 - The only network call in the codebase is the opt-in pricing refresh,
   gated by `--allow-network`. The privacy invariant is tested.
 
@@ -335,9 +343,9 @@ Environment overrides:
 ## FAQ
 
 **Does it work with Cursor today?**
-Yes, for session files. Some Cursor files do not carry per-event token
-counts. `caliper doctor` flags those and the event still appears in
-session-level rollups.
+Yes, when Cursor's local data includes token-bearing records. Some Cursor
+files are transcript-only and do not carry per-event token counts. `caliper
+doctor` flags those so Cursor coverage is visible instead of being implied.
 
 **Why not just read the vendor dashboards?**
 Because the dashboards are per-vendor and per-account. They do not know

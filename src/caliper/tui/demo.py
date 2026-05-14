@@ -18,7 +18,7 @@ from pathlib import Path
 
 from caliper.models import VENDOR_OPENAI_CODEX, RuntimeOptions
 
-_DEMO_MODELS = ("gpt-5.5", "gpt-5-codex", "claude-sonnet-4-6")
+_DEMO_MODELS = ("gpt-5.5", "gpt-5.4", "gpt-5.4-mini")
 _DEMO_PROJECTS = ("caliper-ai", "pr/auth-redo", "spike/parser")
 
 
@@ -35,6 +35,10 @@ def materialize_demo(template: RuntimeOptions, seed: int = 0xCA11BE12) -> Runtim
         session_dir.mkdir(parents=True, exist_ok=True)
         safe = project.replace("/", "-")
         path = session_dir / f"rollout-{when:%Y-%m-%dT%H-%M-%S}-{safe}.jsonl"
+        input_tokens = rng.randint(2_000, 20_000)
+        cached_input_tokens = rng.randint(0, min(4_000, input_tokens))
+        output_tokens = rng.randint(200, 4_000)
+        reasoning_tokens = rng.randint(0, 800)
         events = [
             {
                 "type": "turn_context",
@@ -44,11 +48,11 @@ def materialize_demo(template: RuntimeOptions, seed: int = 0xCA11BE12) -> Runtim
             _token_event(
                 when,
                 {
-                    "input_tokens": rng.randint(2_000, 20_000),
-                    "cached_input_tokens": rng.randint(0, 4_000),
-                    "output_tokens": rng.randint(200, 4_000),
-                    "reasoning_output_tokens": rng.randint(0, 800),
-                    "total_tokens": 0,
+                    "input_tokens": input_tokens,
+                    "cached_input_tokens": cached_input_tokens,
+                    "output_tokens": output_tokens,
+                    "reasoning_output_tokens": reasoning_tokens,
+                    "total_tokens": input_tokens + output_tokens + reasoning_tokens,
                 },
             ),
         ]

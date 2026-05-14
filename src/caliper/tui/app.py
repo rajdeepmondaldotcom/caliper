@@ -13,7 +13,6 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.css.query import NoMatches
 from textual.reactive import reactive
-from textual.widgets import Footer, Header
 from textual.worker import Worker, get_current_worker
 
 from caliper.config import TuiConfig, load_config, load_tui_config
@@ -132,8 +131,7 @@ class CaliperApp(App):
         self._progress_stage = "idle"
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        yield Footer()
+        yield from ()
 
     def on_mount(self) -> None:
         self._apply_theme()
@@ -380,6 +378,7 @@ class CaliperApp(App):
             load_files_done=self._progress_done,
             load_files_cached=self._progress_cached,
         )
+        self._progress_stage = "done"
         self._hide_loading_overlay()
 
     def on_load_failed(self, event: LoadFailed) -> None:

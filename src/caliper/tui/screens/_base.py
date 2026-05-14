@@ -23,7 +23,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Container
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Header, Static
 
 
 class CaliperScreen(Screen):
@@ -66,7 +66,6 @@ class CaliperScreen(Screen):
                 yield widget
         with Container(id="footer-band"):
             yield Static(self.footer_pills(), id="footer-pills")
-        yield Footer()
 
     def top(self):
         """Yield top-band widgets. Override in the subclass."""
@@ -88,3 +87,7 @@ class CaliperScreen(Screen):
         refresh = getattr(self.app, "action_refresh", None)
         if callable(refresh):
             refresh()
+
+    def update_from_snapshot(self, _snapshot) -> None:
+        """Hook for screens with explicit reactive redraw needs."""
+        return None

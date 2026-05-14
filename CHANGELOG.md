@@ -2,6 +2,33 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.21 - 2026-05-15
+
+Launch-hardening pass after live first-run, empty-state, privacy, and TUI
+review.
+
+### Fixed
+
+- `caliper --version` no longer reports the caller repository's git SHA.
+  The output is now stable package metadata plus the embedded pricing
+  catalog freshness date.
+- Machine-readable reports redact absolute local paths by default. Pass
+  `--show-paths` only when you intentionally want filesystem paths in JSON.
+- Empty first-run overview output now explains that no local AI coding logs
+  were found and points users to `caliper doctor` and `caliper tui --demo`
+  instead of showing a zero-valued budget table.
+- Table output now labels cost evidence and git attribution separately,
+  avoiding an overbroad `Accuracy: exact` footer on reports with partial
+  attribution evidence.
+- The TUI demo renders real Home content on first paint, removes the
+  wrapped default footer, keeps project/model labels visible at narrow
+  terminal widths, and uses internally consistent token/cost demo events.
+- Insight actions now emit concrete copy-pasteable commands instead of a
+  placeholder `<cheaper>` command.
+- README install guidance now recommends `uvx --isolated --from
+  caliper-ai caliper` for first-run/latest checks and documents the stale
+  persistent-tool edge case.
+
 ## 0.0.20 - 2026-05-15
 
 Live-QA fallout cleanup after a brutal first-time-user pass on 0.0.19.

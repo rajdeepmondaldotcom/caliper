@@ -129,6 +129,7 @@ def test_tracking_dataclass_defaults_are_stable(tmp_path) -> None:
         parse_cache=True,
         default_model="gpt-5.5",
         show_prompts=False,
+        show_paths=False,
         offline=True,
         compact=False,
         width=None,

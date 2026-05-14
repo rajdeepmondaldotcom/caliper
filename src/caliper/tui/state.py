@@ -72,6 +72,7 @@ def apply_scope(
     service_tier: str | None = ...,  # type: ignore[assignment]
     vendors: tuple[str, ...] | None = ...,  # type: ignore[assignment]
     show_prompts: bool | None = None,
+    show_paths: bool | None = None,
 ) -> AppSnapshot:
     """Return a new snapshot whose ``RuntimeOptions`` reflect the changes.
 
@@ -89,6 +90,8 @@ def apply_scope(
         options = replace(options, vendors=vendors or ("all",))
     if show_prompts is not None:
         options = replace(options, show_prompts=show_prompts)
+    if show_paths is not None:
+        options = replace(options, show_paths=show_paths)
     scope = snapshot.scope if interval is None else replace(snapshot.scope, interval=interval)
     return replace(
         snapshot,

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from caliper.humanize import short_table_label
-from caliper.tui.formatting import format_cost_usd_cell
+from caliper.tui.formatting import format_cost_usd_cell, format_vendor_label
 from caliper.tui.screens._base import CaliperScreen
 from caliper.tui.state import AppSnapshot
 
@@ -20,8 +20,7 @@ class ProjectsScreen(CaliperScreen):
     SCREEN_QUESTION = "Which working directory is the biggest spender."
 
     DEFAULT_CSS = """
-    ProjectsScreen Tree { height: 1fr; }
-    ProjectsScreen DataTable { height: 1fr; }
+    ProjectsScreen #project-table { height: 1fr; overflow-y: auto; }
     """
 
     BINDINGS = [
@@ -39,41 +38,45 @@ class ProjectsScreen(CaliperScreen):
             )
 
     def middle(self):
-        table = DataTable(id="project-table", cursor_type="row", zebra_stripes=True)
-        table.add_columns("Project", "Top model", "Vendor", "Cost $", "Events")
-        yield table
+        snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
+        if snap is None or not snap.projects:
+            yield Static("(no projects yet)", id="project-table")
+            return
+        lines = [_format_project_header()]
+        for project in list(snap.projects)[:50]:
+            lines.append(_format_project_row(project))
+        yield Static("\n".join(lines), id="project-table", markup=False)
 
     def footer_pills(self) -> str:
         return "[ r refresh ]  [ esc back ]"
 
-    def on_mount(self) -> None:
-        snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
-        from textual.css.query import NoMatches
 
-        try:
-            table = self.query_one("#project-table", DataTable)
-        except NoMatches:
-            return
-        if snap is None or not snap.projects:
-            table.add_row("(no projects yet)", "-", "-", "-", "-")
-            return
-        for project in list(snap.projects)[:50]:
-            breakdowns = getattr(project, "model_breakdowns", None) or {}
-            if breakdowns:
-                ranked = sorted(
-                    breakdowns.values(),
-                    key=lambda mb: mb.costs.cost_usd,
-                    reverse=True,
-                )
-                top_model = ranked[0].model
-                vendor = getattr(ranked[0], "model_vendor", "unknown").title()
-            else:
-                top_model = next(iter(sorted(getattr(project, "models", set()) or set())), "-")
-                vendor = "-"
-            table.add_row(
-                _project_table_label(project),
-                top_model,
-                vendor,
-                format_cost_usd_cell(project),
-                f"{project.totals.events:,}",
-            )
+def _render_project_row(project) -> tuple[str, str, str, str, str]:
+    breakdowns = getattr(project, "model_breakdowns", None) or {}
+    if breakdowns:
+        ranked = sorted(
+            breakdowns.values(),
+            key=lambda mb: mb.costs.cost_usd,
+            reverse=True,
+        )
+        top_model = ranked[0].model
+        vendor = format_vendor_label(getattr(ranked[0], "model_vendor", "unknown"))
+    else:
+        top_model = next(iter(sorted(getattr(project, "models", set()) or set())), "-")
+        vendor = "-"
+    return (
+        _project_table_label(project),
+        top_model,
+        vendor,
+        format_cost_usd_cell(project),
+        f"{project.totals.events:,}",
+    )
+
+
+def _format_project_header() -> str:
+    return f"{'Project':<24} {'Cost $':>10} {'Events':>8} {'Top model':<18} {'Vendor':<10}"
+
+
+def _format_project_row(project) -> str:
+    label, top_model, vendor, cost, events = _render_project_row(project)
+    return f"{label[:24]:<24} {cost:>10} {events:>8} {top_model[:18]:<18} {vendor[:10]:<10}"

@@ -5,7 +5,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Header, Static
 
 from caliper.tui.formatting import format_cost_usd_cell
 from caliper.tui.state import AppSnapshot
@@ -19,8 +19,14 @@ class HomeScreen(Screen):
     BINDINGS = []
 
     DEFAULT_CSS = """
+    HomeScreen #home-body { height: 1fr; }
     HomeScreen #cards { height: 7; }
     HomeScreen #windows { height: 9; }
+    HomeScreen #home-footer {
+        height: 1;
+        padding: 0 1;
+        color: $foreground 70%;
+    }
     HomeScreen #insights {
         padding: 1 2;
         border: round $primary 40%;
@@ -40,11 +46,14 @@ class HomeScreen(Screen):
             Horizontal(id="windows"),
             Static("", id="insights"),
             Static("", id="recent"),
+            Static("[ r refresh ]  [ ? help ]  [ q quit ]", id="home-footer"),
+            id="home-body",
         )
-        yield Footer()
 
     def on_mount(self) -> None:
-        self.update_from_snapshot(self.app.snapshot)  # type: ignore[attr-defined]
+        self.call_after_refresh(
+            lambda: self.update_from_snapshot(self.app.snapshot)  # type: ignore[attr-defined]
+        )
 
     def update_from_snapshot(self, snapshot: AppSnapshot) -> None:
         from textual.css.query import NoMatches

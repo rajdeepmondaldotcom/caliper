@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from caliper.tui.formatting import format_cost_usd_cell
 from caliper.tui.screens._base import CaliperScreen
@@ -24,7 +24,7 @@ class ModelsScreen(CaliperScreen):
     SCREEN_QUESTION = "Which model and tier is bleeding the budget."
 
     DEFAULT_CSS = """
-    ModelsScreen DataTable { height: 1fr; }
+    ModelsScreen #models-table { height: 1fr; overflow-y: auto; }
     """
 
     BINDINGS = [
@@ -42,39 +42,37 @@ class ModelsScreen(CaliperScreen):
             )
 
     def middle(self):
-        table = DataTable(id="models-table", cursor_type="row", zebra_stripes=True)
-        table.add_columns("V", "Model", "Tier", "Events", "Cost $")
-        yield table
+        snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
+        if snap is None or not snap.models:
+            yield Static("(no models yet)", id="models-table")
+            return
+        lines = [_format_model_header()]
+        for row in list(snap.models)[:50]:
+            lines.append(_format_model_row(row))
+        yield Static("\n".join(lines), id="models-table", markup=False)
 
     def footer_pills(self) -> str:
         return "[ r refresh ]  [ esc back ]"
 
-    def on_mount(self) -> None:
-        snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
-        from textual.css.query import NoMatches
 
-        try:
-            table = self.query_one("#models-table", DataTable)
-        except NoMatches:
-            return
-        if snap is None or not snap.models:
-            table.add_row("?", "(no models yet)", "-", "-", "-")
-            return
-        for row in list(snap.models)[:50]:
-            breakdowns = list((getattr(row, "model_breakdowns", None) or {}).values())
-            if breakdowns:
-                breakdown = max(breakdowns, key=lambda mb: mb.costs.cost_usd)
-                glyph = _VENDOR_GLYPH.get(getattr(breakdown, "model_vendor", "unknown"), "?")
-                model = breakdown.model
-                tier = breakdown.service_tier
-            else:
-                glyph = "?"
-                model = next(iter(sorted(getattr(row, "models", set()) or set())), "-")
-                tier = "-"
-            table.add_row(
-                glyph,
-                model,
-                tier,
-                f"{row.totals.events:,}",
-                format_cost_usd_cell(row),
-            )
+def _render_model_row(row) -> tuple[str, str, str, str, str]:
+    breakdowns = list((getattr(row, "model_breakdowns", None) or {}).values())
+    if breakdowns:
+        breakdown = max(breakdowns, key=lambda mb: mb.costs.cost_usd)
+        glyph = _VENDOR_GLYPH.get(getattr(breakdown, "model_vendor", "unknown"), "?")
+        model = breakdown.model
+        tier = breakdown.service_tier
+    else:
+        glyph = "?"
+        model = next(iter(sorted(getattr(row, "models", set()) or set())), "-")
+        tier = "-"
+    return glyph, model, tier, f"{row.totals.events:,}", format_cost_usd_cell(row)
+
+
+def _format_model_header() -> str:
+    return f"{'Model':<22} {'Tier':<10} {'Events':>8} {'Cost $':>10} {'V':<2}"
+
+
+def _format_model_row(row) -> str:
+    glyph, model, tier, events, cost = _render_model_row(row)
+    return f"{model[:22]:<22} {tier[:10]:<10} {events:>8} {cost:>10} {glyph:<2}"

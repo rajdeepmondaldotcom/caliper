@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from textual.widgets import DataTable, Static, TabbedContent, TabPane
 
-from caliper.tui.formatting import format_cost_usd_cell
+from caliper.tui.formatting import format_cost_usd_cell, format_vendor_label
 from caliper.tui.screens._base import CaliperScreen
 from caliper.tui.state import AppSnapshot
 
@@ -37,27 +37,25 @@ class IntervalsScreen(CaliperScreen):
             )
 
     def middle(self):
-        tabs = TabbedContent(id="interval-tabs")
-        yield tabs
+        snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
+        with TabbedContent(id="interval-tabs"):
+            for label, rows in (
+                ("Daily", snap.daily if snap else ()),
+                ("Weekly", snap.weekly if snap else ()),
+                ("Monthly", snap.monthly if snap else ()),
+            ):
+                with TabPane(label):
+                    table = DataTable(cursor_type="row", zebra_stripes=True)
+                    table.add_columns(*_COLUMNS)
+                    if rows:
+                        for row in list(rows)[:50]:
+                            table.add_row(*_render_row(row))
+                    else:
+                        table.add_row("(no data yet)", "-", "-", "-", "-")
+                    yield table
 
     def footer_pills(self) -> str:
         return "[ r refresh ]  [ [ prev ]  [ ] next ]  [ esc home ]"
-
-    def on_mount(self) -> None:
-        snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
-        tabs = self.query_one("#interval-tabs", TabbedContent)
-        for label, rows in (
-            ("Daily", snap.daily if snap else ()),
-            ("Weekly", snap.weekly if snap else ()),
-            ("Monthly", snap.monthly if snap else ()),
-        ):
-            pane = TabPane(label)
-            tabs.add_pane(pane)
-            table = DataTable(cursor_type="row", zebra_stripes=True)
-            table.add_columns(*_COLUMNS)
-            for row in list(rows)[:50]:
-                table.add_row(*_render_row(row))
-            pane.mount(table)
 
 
 def _render_row(item) -> tuple[str, ...]:
@@ -69,7 +67,9 @@ def _render_row(item) -> tuple[str, ...]:
             reverse=True,
         )
         top_model = ranked[0].model if ranked else "-"
-        vendor = getattr(ranked[0], "model_vendor", "unknown") if ranked else "-"
+        vendor = (
+            format_vendor_label(getattr(ranked[0], "model_vendor", "unknown")) if ranked else "-"
+        )
     else:
         models = sorted(getattr(item, "models", set()) or set())
         top_model = next(iter(models), "-")
@@ -77,7 +77,7 @@ def _render_row(item) -> tuple[str, ...]:
     return (
         item.label or item.key,
         top_model,
-        vendor.title(),
+        vendor,
         format_cost_usd_cell(item),
         f"{item.totals.events:,}",
     )

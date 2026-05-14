@@ -5,7 +5,6 @@ import csv
 import datetime as dt
 import io
 import json
-import subprocess  # nosec
 import sys
 import time
 from collections.abc import Callable
@@ -301,6 +300,14 @@ ShowPromptsOpt = Annotated[
         help="Show prompts and full labels. Off by default.",
     ),
 ]
+ShowPathsOpt = Annotated[
+    bool,
+    typer.Option(
+        "--show-paths",
+        "--include-local-paths",
+        help="Include absolute local paths in machine-readable output. Redacted by default.",
+    ),
+]
 OfflineOpt = Annotated[
     bool,
     typer.Option(
@@ -457,6 +464,7 @@ OPTION_KEYS = (
     "no_parse_cache",
     "default_model",
     "show_prompts",
+    "show_paths",
     "offline",
     "compact",
     "width",
@@ -488,6 +496,7 @@ ROOT_OPTION_DEFAULTS: dict[str, Any] = {
     "no_dedupe": False,
     "no_parse_cache": False,
     "default_model": "gpt-5.5",
+    "show_paths": False,
     "compact": False,
     "width": None,
     "rate_limit_sample_limit": 100,
@@ -812,20 +821,7 @@ def version_callback(value: bool) -> None:
 
 def _version_label() -> str:
     checked = max(source.checked for source in PRICING_SOURCES)
-    try:
-        completed = subprocess.run(  # noqa: S603 # nosec
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=1,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        sha = ""
-    else:
-        sha = completed.stdout.strip()
-    suffix = f", commit {sha}" if sha else ""
-    return f"{__version__} (rates checked {checked}{suffix})"
+    return f"{__version__} (rates checked {checked})"
 
 
 @app.callback(invoke_without_command=True)
@@ -857,6 +853,7 @@ def main(
     no_dedupe: NoDedupeOpt = False,
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
+    show_paths: ShowPathsOpt = False,
     compact: CompactOpt = False,
     width: WidthOpt = None,
     rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
@@ -1046,6 +1043,7 @@ def overview(
     no_dedupe: NoDedupeOpt = False,
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
+    show_paths: ShowPathsOpt = False,
     compact: CompactOpt = False,
     width: WidthOpt = None,
     rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
@@ -1078,6 +1076,7 @@ def daily(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
@@ -1116,6 +1115,7 @@ def weekly(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
@@ -1154,6 +1154,7 @@ def monthly(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
@@ -1191,6 +1192,7 @@ def session_command(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
@@ -1355,6 +1357,7 @@ def project(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
@@ -1392,6 +1395,7 @@ def models(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
@@ -1527,6 +1531,7 @@ def limits(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
@@ -1561,6 +1566,7 @@ def insights(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
@@ -1642,6 +1648,7 @@ def tail(
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
     show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,

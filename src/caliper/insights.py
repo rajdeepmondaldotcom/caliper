@@ -156,7 +156,7 @@ def _model_concentration_insight(total) -> Insight | None:
             f"You don't have a cost problem. You have a {top.model} problem. "
             "Try a cheaper sibling and re-run whatif to compare."
         ),
-        action=f"caliper whatif --hypothetical-model <cheaper> against {top.model}",
+        action="caliper whatif --hypothetical-model claude-sonnet-4.6",
         scope=SCOPE_HOME,
         evidence=(f"{share:.0%} on {top.model}",),
         next_command="caliper whatif --hypothetical-model claude-sonnet-4.6",
@@ -170,7 +170,7 @@ def _model_concentration_insight(total) -> Insight | None:
             "model": top.model,
             "events": top.totals.events,
         },
-        commands=("caliper models --per-model", "caliper whatif --hypothetical-model <model>"),
+        commands=("caliper models", "caliper whatif --hypothetical-model claude-sonnet-4.6"),
     )
 
 

@@ -4,6 +4,7 @@ import csv
 import datetime as dt
 import io
 import json
+import re
 import shutil
 import sys
 from dataclasses import asdict, replace
@@ -250,6 +251,51 @@ def rate_limit_sample_to_dict(sample) -> dict:
     return item
 
 
+def _redact_paths(payload: Any, options: RuntimeOptions) -> Any:
+    """Remove absolute local paths from default machine-readable output."""
+    if options.show_paths:
+        return payload
+    if isinstance(payload, dict):
+        return {key: _redact_paths(value, options) for key, value in payload.items()}
+    if isinstance(payload, list):
+        return [_redact_paths(value, options) for value in payload]
+    if isinstance(payload, tuple):
+        return tuple(_redact_paths(value, options) for value in payload)
+    if isinstance(payload, str):
+        return _redact_path_string(payload, options)
+    return payload
+
+
+def _redact_path_string(value: str, options: RuntimeOptions) -> str:
+    if "://" in value:
+        return value
+    roots = {
+        Path.home(),
+        options.session_root,
+        options.session_root.parent,
+        options.state_db,
+        options.state_db.parent,
+        options.config_path,
+        options.config_path.parent,
+    }
+    redacted = value
+    root_strings: set[str] = set()
+    for path in roots:
+        expanded = path.expanduser()
+        text = str(expanded)
+        if not text or text == "." or text == expanded.anchor:
+            continue
+        root_strings.add(text)
+    for root in sorted(root_strings, key=len, reverse=True):
+        if root and root in redacted:
+            redacted = redacted.replace(root, "<redacted-path>")
+    if redacted != value:
+        return redacted
+    if value.startswith("/"):
+        return "<redacted-path>"
+    return re.sub(r"(?<![:\w])/(?:[^\s;,)]+)", "<redacted-path>", value)
+
+
 def report_payload(
     result: LoadResult,
     options: RuntimeOptions,
@@ -268,7 +314,7 @@ def report_payload(
     projects = sorted(project_rows, key=budget_impact_sort_key)
     model_mode = sorted(model_mode_rows, key=budget_impact_sort_key)
     samples = _report_rate_limit_samples(result.rate_limit_samples, options)
-    return {
+    payload = {
         "caliper": {
             "version": __version__,
             "schema_version": SCHEMA_VERSION,
@@ -321,10 +367,12 @@ def report_payload(
             if options.include_all_rate_limit_samples
             else options.rate_limit_sample_limit,
             "rate_limit_samples_truncated": len(samples) < len(result.rate_limit_samples),
+            "path_redaction": "visible" if options.show_paths else "redacted",
         },
         "rate_limit_samples": [rate_limit_sample_to_dict(sample) for sample in samples],
         "warnings": result.warnings,
     }
+    return _redact_paths(payload, options)
 
 
 def _total_key(_event) -> tuple[str, str]:
@@ -425,11 +473,31 @@ def render_table(
     buffer = io.StringIO()
     console = _make_console(buffer, options)
     total = total or aggregate_total(result, options, rate_card=rate_card or _rate_card(options))
+    if title == "Caliper - Overview" and total.totals.events == 0:
+        _print_no_data_overview(console, options)
+        return buffer.getvalue()
     _print_report_header(console, result, options, title, total)
     console.print(_usage_table(rows, total, options))
     console.print()
     _print_report_footer(console, result, total)
     return buffer.getvalue()
+
+
+def _print_no_data_overview(console: Console, options: RuntimeOptions) -> None:
+    console.print("[bold]Caliper - Overview[/bold]")
+    console.print("No AI coding usage logs found in the active window.")
+    console.print()
+    console.print("Checked:")
+    if options.show_paths:
+        console.print(f"- Codex sessions: {options.session_root}")
+        console.print(f"- Codex state DB: {options.state_db}")
+    else:
+        console.print("- Codex sessions directory")
+        console.print("- Codex state DB")
+    console.print()
+    console.print("Next:")
+    console.print("- Run `caliper doctor` to inspect local setup.")
+    console.print("- Run `caliper tui --demo` to explore Caliper with sample data.")
 
 
 def _print_report_header(
@@ -640,13 +708,17 @@ def _print_report_footer(console: Console, result: LoadResult, total: Aggregate)
 
 def _print_accuracy_footer(console: Console, result: LoadResult, total: Aggregate) -> None:
     dimensions = evidence_dimensions(result, total)
-    grade = worst_grade([dimension.grade for dimension in dimensions])
-    if grade == "exact":
-        console.print("Accuracy: exact")
-        return
-    reasons = [reason for dimension in dimensions for reason in dimension.reasons]
-    detail = f" ({reasons[0]})" if reasons else ""
-    console.print(f"[yellow]Accuracy:[/yellow] {grade}{detail}")
+    by_name = {dimension.name: dimension for dimension in dimensions}
+    cost_names = ("usage", "model", "tier", "pricing", "project")
+    cost_dimensions = [by_name[name] for name in cost_names if name in by_name]
+    cost_grade = worst_grade([dimension.grade for dimension in cost_dimensions])
+    cost_reasons = [reason for dimension in cost_dimensions for reason in dimension.reasons]
+    cost_detail = f" ({cost_reasons[0]})" if cost_reasons else ""
+    console.print(f"Cost evidence: {cost_grade}{cost_detail}")
+    git = by_name.get("git_attribution")
+    if git is not None:
+        git_detail = f" ({git.reasons[0]})" if git.reasons else ""
+        console.print(f"Git attribution: {git.grade}{git_detail}")
 
 
 def _table_int(value: int, options: RuntimeOptions) -> str:

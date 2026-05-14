@@ -213,6 +213,7 @@ class RuntimeOptions:
     parse_cache: bool
     default_model: str
     show_prompts: bool
+    show_paths: bool
     offline: bool
     compact: bool
     width: int | None

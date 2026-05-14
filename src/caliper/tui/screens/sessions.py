@@ -65,48 +65,41 @@ class SessionsScreen(CaliperScreen):
     def middle(self):
         snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
         vendors = self._vendors_with_data(snap)
+        if self._active_vendor not in vendors:
+            self._active_vendor = "all"
         tabs = Tabs(
             *(Tab(_VENDOR_LABELS.get(v, v.title()), id=f"v-{v}") for v in vendors), id="vendor-tabs"
         )
         yield tabs
         table = DataTable(id="sessions-table", cursor_type="row", zebra_stripes=True)
-        table.add_columns("When", "Vendor", "Model", "Tier", "Tokens", "Cost $")
+        table.add_column("When", width=32)
+        table.add_column("Vendor", width=13)
+        table.add_column("Model", width=20)
+        table.add_column("Tier", width=11)
+        table.add_column("Tokens", width=12)
+        table.add_column("Cost $", width=10)
+        rows = list(self._rows_for(snap.sessions if snap else (), vendor=self._active_vendor))
+        if rows:
+            for row in rows[:50]:
+                table.add_row(*row)
+        else:
+            table.add_row("(no sessions)", "", "", "", "", "")
         yield table
 
     def footer_pills(self) -> str:
         return "[ r refresh ]  [ esc home ]"
 
     # ------------------------------------------------------------------ hooks
-    def on_mount(self) -> None:
-        snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
-        self._populate_table(snap, vendor="all")
-
     def on_tabs_tab_activated(self, event) -> None:
         new_vendor = event.tab.id.removeprefix("v-") if event.tab and event.tab.id else "all"
         self._active_vendor = new_vendor
-        snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
-        self._populate_table(snap, vendor=new_vendor)
+        self.refresh(recompose=True)
 
     def action_refresh(self) -> None:
         if hasattr(self.app, "action_refresh"):
             self.app.action_refresh()
 
     # ------------------------------------------------------------------ helpers
-    def _populate_table(self, snap: AppSnapshot | None, *, vendor: str) -> None:
-        from textual.css.query import NoMatches
-
-        try:
-            table = self.query_one("#sessions-table", DataTable)
-        except NoMatches:
-            return
-        table.clear()
-        if snap is None or not snap.sessions:
-            table.add_row("(no sessions)", "", "", "", "", "")
-            return
-        rows = list(self._rows_for(snap.sessions, vendor=vendor))
-        for row in rows[:50]:  # cap at 50 per the UX standard
-            table.add_row(*row)
-
     def _rows_for(self, sessions: Iterable, *, vendor: str):
         for session in sessions:
             session_vendors = getattr(session, "vendors", set()) or set()

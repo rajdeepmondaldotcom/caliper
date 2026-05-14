@@ -447,7 +447,7 @@ def test_project_smoke(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["command"] == "project"
-    assert payload["breakdowns"][0]["label"] == "/tmp/project-alpha"
+    assert payload["breakdowns"][0]["label"] == "<redacted-path>"
 
 
 def test_models_smoke(tmp_path) -> None:
