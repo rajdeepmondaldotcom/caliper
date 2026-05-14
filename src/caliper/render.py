@@ -392,8 +392,18 @@ def _project_paths(events) -> set[str]:
 def write_output(text: str, output: Path | None) -> None:
     if output:
         output.expanduser().write_text(text)
-    else:
+        return
+    try:
         sys.stdout.write(text)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # `caliper daily --format json | head` is a real usage pattern.
+        # Swallow the broken pipe and exit clean. Mirrors the pattern in
+        # most POSIX line-oriented tools.
+        try:
+            sys.stdout.close()
+        except BrokenPipeError:
+            pass
 
 
 def render_table(
