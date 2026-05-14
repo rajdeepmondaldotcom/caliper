@@ -2,6 +2,35 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.13 - 2026-05-14
+
+Routing fix. Stub screens were still rendered on 1..9.
+
+### Fixed
+
+- `CaliperApp` imported every screen from `caliper.tui.screens.stub`
+  in 0.0.10..0.0.12 even though real screens existed under their own
+  modules. The `_SCREENS` map still pointed at the stub classes, so
+  pressing `2..9` rendered "This screen lands in a later commit
+  (T09-T20)" instead of the real screen. Imports now resolve to the
+  real `IntervalsScreen`, `ProjectsScreen`, `ModelsScreen`,
+  `LimitsScreen`, `LiveScreen`, `ForecastScreen`, `WhatIfScreen`,
+  `BudgetsScreen`, `InsightsScreen`, `DoctorScreen`, `ReceiptScreen`,
+  `WelcomeScreen`.
+- `Sparkline._render(values)` clashed with Textual's
+  `Widget._render()` virtual method, raising `TypeError: missing 1
+  required positional argument` mid-paint. Renamed the helper to
+  `_render_text` so the Widget pipeline stays intact.
+
+### Added
+
+- `CaliperScreen.status_line()` returns one honest line describing
+  what is happening: `Booting...`, `Loading X / Y files...`, the
+  refresh timestamp, or the error string. Never silent.
+- Welcome screen shows on first run when
+  `TuiConfig.show_demo_on_first_run` is true and the state sidecar
+  has no `welcome_seen_at`.
+
 ## 0.0.12 - 2026-05-14
 
 Lint fix on the screens smoke test. 0.0.11 release failed CI's

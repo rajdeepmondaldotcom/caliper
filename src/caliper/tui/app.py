@@ -29,21 +29,20 @@ from caliper.tui.messages import (
     WorkerCancelled,
 )
 from caliper.tui.progress import TextualParseProgress
+from caliper.tui.screens.budgets import BudgetsScreen
+from caliper.tui.screens.doctor import DoctorScreen
+from caliper.tui.screens.forecast import ForecastScreen
 from caliper.tui.screens.home import HomeScreen
+from caliper.tui.screens.insights import InsightsScreen
+from caliper.tui.screens.intervals import IntervalsScreen
+from caliper.tui.screens.limits import LimitsScreen
+from caliper.tui.screens.live import LiveScreen
+from caliper.tui.screens.models import ModelsScreen
+from caliper.tui.screens.projects import ProjectsScreen
+from caliper.tui.screens.receipt import ReceiptScreen
 from caliper.tui.screens.sessions import SessionsScreen
-from caliper.tui.screens.stub import (
-    BudgetsScreen,
-    DoctorScreen,
-    ForecastScreen,
-    InsightsScreen,
-    IntervalsScreen,
-    LimitsScreen,
-    LiveScreen,
-    ModelsScreen,
-    ProjectsScreen,
-    ReceiptScreen,
-    WhatIfScreen,
-)
+from caliper.tui.screens.welcome import WelcomeScreen, welcome_already_seen
+from caliper.tui.screens.whatif import WhatIfScreen
 from caliper.tui.state import AppSnapshot, default_scope
 from caliper.tui.workers import build_overview, run_load
 
@@ -122,6 +121,8 @@ class CaliperApp(App):
     def on_mount(self) -> None:
         self._apply_theme()
         self.push_screen(HomeScreen())
+        if self._tui_config.show_demo_on_first_run and not welcome_already_seen():
+            self.push_screen(WelcomeScreen())
         self.action_refresh()
 
     # ------------------------------------------------------------------ themes
