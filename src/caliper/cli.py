@@ -105,7 +105,14 @@ from caliper.rate_audit import (
     rate_card_payload,
     rate_card_records,
 )
-from caliper.render import format_int, pricing_status, pricing_warnings, render, render_limits
+from caliper.render import (
+    format_int,
+    pricing_status,
+    pricing_warnings,
+    render,
+    render_limits,
+    render_table,
+)
 from caliper.scenarios import (
     aggregate_interval,
     aggregate_interval_by_vendor,
@@ -831,14 +838,36 @@ def _run_overview(values: dict) -> None:
     ) as progress:
         longest_result = load_usage(longest_options, progress=progress)
     rate_card = load_rate_card(longest_options)
+    overview_windows = [
+        (f"Last {days} days", now - dt.timedelta(days=days)) for days in (7, 30, 90)
+    ]
     with _interactive_status("Aggregating overview windows...", output_format, values["output"]):
         rows, total = aggregate_overview_windows(
             longest_result,
             longest_options,
-            [(f"Last {days} days", now - dt.timedelta(days=days)) for days in (7, 30, 90)],
+            overview_windows,
             rate_card=rate_card,
             detailed=output_format == "json",
         )
+
+    # Per-vendor split. Only triggers on the classic Rich table path
+    # when more than one tool vendor is present. JSON / CSV / markdown
+    # paths keep their shape so scripts read the same envelope.
+    if (
+        output_format == "table"
+        and values["output"] is None
+        and _has_multiple_tool_vendors(longest_result)
+    ):
+        _render_overview_per_vendor(
+            longest_result,
+            longest_options,
+            overview_windows,
+            rate_card,
+            total,
+            rows,
+        )
+        return
+
     render(
         longest_result,
         longest_options,
@@ -848,6 +877,94 @@ def _run_overview(values: dict) -> None:
         values["output"],
         total=total,
     )
+
+
+_VENDOR_DISPLAY_LABELS: dict[str, str] = {
+    "openai-codex": "OpenAI Codex",
+    "claude-code": "Claude Code",
+    "cursor": "Cursor",
+    "aider": "Aider",
+}
+
+
+def _has_multiple_tool_vendors(result: LoadResult) -> bool:
+    seen: set[str] = set()
+    for event in result.events:
+        if event.vendor:
+            seen.add(event.vendor)
+            if len(seen) >= 2:
+                return True
+    return False
+
+
+def _render_overview_per_vendor(
+    result: LoadResult,
+    options: RuntimeOptions,
+    windows: list[tuple[str, dt.datetime]],
+    rate_card: RateCard,
+    total: Aggregate,
+    rows_all: list[Aggregate],
+) -> None:
+    """Print one Rich table per tool vendor, then a unified totals table.
+
+    Triggers only on the classic table path with multiple vendors. The
+    JSON / CSV / markdown rendering paths fall through to the existing
+    single-table render call, which keeps their wire shape unchanged.
+    """
+    from caliper.models import LoadResult as _LoadResult
+
+    vendor_ids = sorted({event.vendor for event in result.events if event.vendor})
+    earliest = result.events[0].timestamp
+    latest = result.events[-1].timestamp
+    sys.stdout.write("Caliper - Overview, by tool vendor\n")
+    sys.stdout.write(f"Window: {earliest:%Y-%m-%d} to {latest:%Y-%m-%d}\n")
+    sys.stdout.write(
+        f"{len(vendor_ids)} tool vendors with {len(result.events):,} events. "
+        "One table per vendor below, then the unified totals.\n\n"
+    )
+
+    for vendor_id in vendor_ids:
+        scoped_events = [event for event in result.events if event.vendor == vendor_id]
+        if not scoped_events:
+            continue
+        scoped = _LoadResult(
+            events=scoped_events,
+            duplicates=0,
+            tier_sources=result.tier_sources,
+            plan_types=result.plan_types,
+            credit_samples=result.credit_samples,
+            warnings=[],
+            parser_issues=result.parser_issues,
+            vendor_stats=result.vendor_stats,
+        )
+        rows, vendor_total = aggregate_overview_windows(
+            scoped,
+            options,
+            windows,
+            rate_card=rate_card,
+            detailed=False,
+        )
+        title = _VENDOR_DISPLAY_LABELS.get(vendor_id, vendor_id)
+        text = render_table(
+            scoped,
+            options,
+            rows,
+            f"Caliper - {title}  ({len(scoped_events):,} events)",
+            rate_card=rate_card,
+            total=vendor_total,
+        )
+        sys.stdout.write(text)
+        sys.stdout.write("\n")
+
+    text = render_table(
+        result,
+        options,
+        rows_all,
+        f"Caliper - All vendors  ({len(result.events):,} events)",
+        rate_card=rate_card,
+        total=total,
+    )
+    sys.stdout.write(text)
 
 
 def _interactive_status(message: str, output_format: str, output: Path | None):
