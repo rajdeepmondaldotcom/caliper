@@ -74,7 +74,7 @@ def test_insights_json_reports_cache_tier_and_project_concentration(tmp_path) ->
     titles = {item["title"] for item in payload["insights"]}
     assert "High cache reuse" in titles
     assert "Service tier inferred" in titles
-    assert "Spend concentrated in one project" in titles
+    assert any("is 100% of credits" in title for title in titles)  # project concentration
 
 
 def test_insights_markdown_renders_actions(tmp_path) -> None:

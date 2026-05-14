@@ -18,6 +18,35 @@ class Insight:
     title: str
     detail: str
     action: str
+    scope: str = "home"
+    evidence: tuple[str, ...] = ()
+    next_command: str = ""
+
+
+# Canonical scope labels. Every insight names which screen it speaks to.
+SCOPE_HOME = "home"
+SCOPE_DAILY = "daily"
+SCOPE_SESSIONS = "sessions"
+SCOPE_PROJECTS = "projects"
+SCOPE_MODELS = "models"
+SCOPE_LIMITS = "limits"
+SCOPE_FORECAST = "forecast"
+SCOPE_BUDGETS = "budgets"
+SCOPE_DOCTOR = "doctor"
+SCOPE_RECEIPT = "receipt"
+
+KNOWN_INSIGHT_SCOPES: tuple[str, ...] = (
+    SCOPE_HOME,
+    SCOPE_DAILY,
+    SCOPE_SESSIONS,
+    SCOPE_PROJECTS,
+    SCOPE_MODELS,
+    SCOPE_LIMITS,
+    SCOPE_FORECAST,
+    SCOPE_BUDGETS,
+    SCOPE_DOCTOR,
+    SCOPE_RECEIPT,
+)
 
 
 def build_insights(
@@ -58,8 +87,63 @@ def build_insights_from(
         _service_tier_insight(result),
         _project_concentration_insight(projects, total),
         _daily_acceleration_insight(daily),
+        _model_concentration_insight(total),
+        _vendor_mix_insight(total),
     ]
     return [item for item in candidates if item is not None]
+
+
+def _model_concentration_insight(total) -> Insight | None:
+    """Surface the single model that owns the most spend."""
+    breakdowns = getattr(total, "model_breakdowns", None) or {}
+    if not breakdowns or not total.costs.adjusted_credits:
+        return None
+    top = max(breakdowns.values(), key=lambda mb: float(mb.costs.adjusted_credits))
+    share = float(top.costs.adjusted_credits) / float(total.costs.adjusted_credits or 1)
+    if share < 0.5:
+        return None
+    return Insight(
+        severity="info",
+        title=f"{top.model} is {share:.0%} of credits",
+        detail=(
+            f"You don't have a cost problem. You have a {top.model} problem. "
+            "Try a cheaper sibling and re-run whatif to compare."
+        ),
+        action=f"caliper whatif --hypothetical-model <cheaper> against {top.model}",
+        scope=SCOPE_HOME,
+        evidence=(f"{share:.0%} on {top.model}",),
+        next_command="caliper whatif --hypothetical-model claude-sonnet-4.6",
+    )
+
+
+def _vendor_mix_insight(total) -> Insight | None:
+    """Surface the model-vendor mix when more than one vendor is present."""
+    breakdowns = getattr(total, "model_breakdowns", None) or {}
+    if not breakdowns:
+        return None
+    by_vendor: dict[str, float] = {}
+    for mb in breakdowns.values():
+        vendor = getattr(mb, "model_vendor", "unknown") or "unknown"
+        by_vendor[vendor] = by_vendor.get(vendor, 0.0) + float(mb.costs.api_dollars)
+    if len(by_vendor) < 2:
+        return None
+    total_dollars = sum(by_vendor.values()) or 1.0
+    parts = [
+        f"{vendor.title()} {dollars / total_dollars:.0%}"
+        for vendor, dollars in sorted(by_vendor.items(), key=lambda kv: -kv[1])
+    ]
+    return Insight(
+        severity="info",
+        title="Spend splits across vendors",
+        detail=(
+            "Vendor mix: " + ", ".join(parts) + ". "
+            "If you hold an enterprise contract on one side, that is the lever."
+        ),
+        action="caliper models --per-model to drill down.",
+        scope=SCOPE_MODELS,
+        evidence=tuple(parts),
+        next_command="caliper models --per-model",
+    )
 
 
 def _cache_reuse_insight(result: LoadResult, total, card: RateCard) -> Insight | None:
@@ -71,11 +155,13 @@ def _cache_reuse_insight(result: LoadResult, total, card: RateCard) -> Insight |
         severity="info",
         title="High cache reuse" if cache_ratio >= 0.5 else "Low cache reuse",
         detail=(
-            f"{cache_ratio:.1%} of input tokens were served from cache, "
-            f"saving about {savings.adjusted_credits:,.2f} credits and "
+            f"{cache_ratio:.1%} of input tokens came from cache. "
+            f"That saved {savings.adjusted_credits:,.0f} credits and "
             f"${savings.api_dollars:,.2f}."
         ),
-        action="Keep prompts and file context stable to preserve cache hits.",
+        action="Stable prompts keep that working.",
+        scope=SCOPE_HOME,
+        evidence=(f"{cache_ratio:.1%} cache hit",),
     )
 
 
@@ -90,9 +176,11 @@ def _service_tier_insight(result: LoadResult) -> Insight | None:
         title="Service tier inferred",
         detail=(
             f"{assumed:,} of {len(result.events):,} events used an inferred tier "
-            "rather than a logged tier."
+            "instead of a logged one. Pin it to sharpen the number."
         ),
-        action="Pin known usage with --service-tier or --tier-overrides for sharper costs.",
+        action="caliper --service-tier <name> to pin.",
+        scope=SCOPE_MODELS,
+        next_command="caliper --service-tier standard",
     )
 
 
@@ -103,14 +191,30 @@ def _project_concentration_insight(projects: list, total) -> Insight | None:
     share = float(top.costs.adjusted_credits / total.costs.adjusted_credits)
     if share < 0.4:
         return None
+    label = _safe_project_label(top.label)
     return Insight(
         severity="info",
-        title="Spend concentrated in one project",
+        title=f"{label} is {share:.0%} of credits",
         detail=(
-            f"{top.label} accounts for {share:.1%} of credits ({top.costs.adjusted_credits:,.2f})."
+            f"{label} ran up {top.costs.adjusted_credits:,.0f} credits. "
+            "The next projects together are less. Decide if that is the intent."
         ),
-        action="Run caliper project --top 5 to inspect the largest workspaces.",
+        action="caliper project --top 5 to inspect the rest.",
+        scope=SCOPE_PROJECTS,
+        next_command="caliper project --top 5",
     )
+
+
+def _safe_project_label(label: str) -> str:
+    """Trim a project label to a basename so insights do not leak full paths."""
+    if not label:
+        return ""
+    if label.startswith(("/", "~")):
+        from pathlib import Path
+
+        name = Path(label).name
+        return name or label
+    return label
 
 
 def _daily_acceleration_insight(daily: list) -> Insight | None:
@@ -122,8 +226,13 @@ def _daily_acceleration_insight(daily: list) -> Insight | None:
     return Insight(
         severity="warn",
         title="Daily usage is accelerating",
-        detail=f"Recent daily credits are {later / earlier:.1f}x the earlier average.",
-        action="Run caliper forecast --cap <plan-credits> to check depletion risk.",
+        detail=(
+            f"Recent daily credits average {later:,.0f}. The earlier average was "
+            f"{earlier:,.0f}. The trend is up, not noisy."
+        ),
+        action="caliper forecast --cap <plan-credits> to test depletion risk.",
+        scope=SCOPE_DAILY,
+        next_command="caliper forecast",
     )
 
 
