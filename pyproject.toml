@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "caliper-ai"
-version = "0.0.9"
+version = "0.0.10"
 description = "The cost layer for AI-assisted development. Reads local Codex, Claude Code, Cursor, and Aider logs and prints what each PR cost. Offline. No login."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -93,7 +93,10 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/caliper"]
-artifacts = ["src/caliper/tui/tcss/*.tcss"]
+artifacts = [
+  "src/caliper/tui/tcss/*.tcss",
+  "src/caliper/tui/tcss/themes/*.tcss",
+]
 
 [tool.ruff]
 line-length = 100

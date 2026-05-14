@@ -1,0 +1,48 @@
+/* Slate: warm dark gray base + indigo accent. Default theme. */
+
+Screen {
+    background: #14181f;
+    color: #cdd1d8;
+}
+
+Header {
+    background: #1c2230;
+    color: #cdd1d8;
+}
+
+Footer {
+    background: #1c2230;
+    color: #9ba1ad;
+}
+
+#top {
+    background: #181d26;
+    border-bottom: solid #2c3245;
+}
+
+#middle {
+    background: #14181f;
+}
+
+#footer-band {
+    background: #1c2230;
+    color: #9ba1ad;
+}
+
+CostCard, WindowPanel {
+    border: round #6b78b0;
+}
+
+CostCard .label, WindowPanel .label {
+    color: #9ba1ad;
+}
+
+CostCard .headline {
+    color: #cad0e0;
+    text-style: bold;
+}
+
+DataTable > .datatable--header {
+    background: #1c2230;
+    color: #cdd1d8;
+}

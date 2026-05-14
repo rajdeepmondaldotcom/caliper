@@ -2,6 +2,34 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.10 - 2026-05-14
+
+Textual workspace, holistic.
+
+### Added
+
+- Eleven real screens replace the stub set:
+  Intervals, Projects, Models, Limits, Live, Forecast, What-If,
+  Budgets, Insights, Doctor, Receipt, Welcome. Each subclasses
+  `CaliperScreen` for the three-band layout, answers one question
+  at the top, primary widget in the middle, decision pills in the
+  footer.
+- Four bespoke TCSS themes under `src/caliper/tui/tcss/themes/`:
+  `slate.tcss` (dark default), `parchment.tcss` (light),
+  `colorblind.tcss` (Okabe-Ito), `monochrome.tcss` (NO_COLOR).
+  `CSS_PATH` loads `base.tcss` + `slate.tcss` by default.
+- Command palette provider `caliper.tui.palette.CaliperCommands`.
+  Surfaces every navigation, refresh, theme cycle, redact toggle,
+  and interval scrub action by name with voice help strings.
+- Doctor screen pulls live health checks via
+  `caliper.health.build_health_report` and renders status glyphs in
+  a DataTable.
+- Welcome screen runs once per machine. State at
+  `${XDG_CONFIG_HOME:-~/.config}/caliper/state.json`.
+- Wheel ships every TCSS theme file (`force-include`
+  `themes/*.tcss`).
+
+
 ## 0.0.9 - 2026-05-14
 
 Same payload as 0.0.8. The 0.0.8 commit shipped without bumping

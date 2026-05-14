@@ -1,0 +1,48 @@
+/* Parchment: off-white + sienna accent. Light theme. */
+
+Screen {
+    background: #f6f2ea;
+    color: #1f2024;
+}
+
+Header {
+    background: #ece5d5;
+    color: #1f2024;
+}
+
+Footer {
+    background: #ece5d5;
+    color: #5a5751;
+}
+
+#top {
+    background: #f0ead9;
+    border-bottom: solid #c8b594;
+}
+
+#middle {
+    background: #f6f2ea;
+}
+
+#footer-band {
+    background: #ece5d5;
+    color: #5a5751;
+}
+
+CostCard, WindowPanel {
+    border: round #a8623b;
+}
+
+CostCard .label, WindowPanel .label {
+    color: #5a5751;
+}
+
+CostCard .headline {
+    color: #1f2024;
+    text-style: bold;
+}
+
+DataTable > .datatable--header {
+    background: #ece5d5;
+    color: #1f2024;
+}

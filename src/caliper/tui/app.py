@@ -55,7 +55,10 @@ class CaliperApp(App):
     refreshes, and routes keymaps to the Home screen + numbered jumps.
     """
 
-    CSS_PATH = Path(__file__).parent / "tcss" / "base.tcss"
+    CSS_PATH = [
+        Path(__file__).parent / "tcss" / "base.tcss",
+        Path(__file__).parent / "tcss" / "themes" / "slate.tcss",
+    ]
     TITLE = "Caliper"
 
     BINDINGS = [

@@ -1,0 +1,48 @@
+/* Monochrome: foreground + dim foreground only. Forced under NO_COLOR. */
+
+Screen {
+    background: #000000;
+    color: #d0d0d0;
+}
+
+Header {
+    background: #000000;
+    color: #d0d0d0;
+}
+
+Footer {
+    background: #000000;
+    color: #909090;
+}
+
+#top {
+    background: #000000;
+    border-bottom: solid #707070;
+}
+
+#middle {
+    background: #000000;
+}
+
+#footer-band {
+    background: #000000;
+    color: #909090;
+}
+
+CostCard, WindowPanel {
+    border: round #707070;
+}
+
+CostCard .label, WindowPanel .label {
+    color: #909090;
+}
+
+CostCard .headline {
+    color: #f0f0f0;
+    text-style: bold;
+}
+
+DataTable > .datatable--header {
+    background: #000000;
+    color: #d0d0d0;
+}

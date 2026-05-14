@@ -1,0 +1,53 @@
+/* Colorblind: Okabe-Ito palette. Blue+orange severity, no red/green. */
+
+Screen {
+    background: #14181f;
+    color: #e9ecf2;
+}
+
+Header {
+    background: #1c2230;
+    color: #e9ecf2;
+}
+
+Footer {
+    background: #1c2230;
+    color: #b5bac6;
+}
+
+#top {
+    background: #181d26;
+    border-bottom: solid #0072b2;
+}
+
+#middle {
+    background: #14181f;
+}
+
+#footer-band {
+    background: #1c2230;
+    color: #b5bac6;
+}
+
+CostCard, WindowPanel {
+    border: round #56b4e9;
+}
+
+CostCard .label, WindowPanel .label {
+    color: #b5bac6;
+}
+
+CostCard .headline {
+    color: #f0e442;
+    text-style: bold;
+}
+
+.alarm, .severity-fail, .severity-breach {
+    color: #e69f00;
+    text-style: bold;
+}
+
+DataTable > .datatable--header {
+    background: #1c2230;
+    color: #e9ecf2;
+}
