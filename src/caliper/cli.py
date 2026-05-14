@@ -544,6 +544,18 @@ def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
         result = load_usage(options, progress=progress)
     if name == "daily" and options.instances:
         rows_fn = aggregate_daily_instances
+
+    # Per-vendor split. Same rules everywhere: TTY classic table only,
+    # more than one vendor, no --out. JSON / CSV / markdown / compat-
+    # json keep one envelope so scripts read the same shape.
+    if (
+        values["output_format"] == "table"
+        and values["output"] is None
+        and _has_multiple_tool_vendors(result)
+    ):
+        _render_grouped_per_vendor(name, rows_fn, result, options)
+        return
+
     rows = rows_fn(result, options)
     if options.order == "desc" and name in {"daily", "weekly", "monthly"}:
         rows = list(reversed(rows))
@@ -557,6 +569,56 @@ def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
             typer.echo(text, nl=False)
         return
     render(result, options, rows, name, values["output_format"], values["output"])
+
+
+def _render_grouped_per_vendor(
+    name: str,
+    rows_fn: RowsFn,
+    result: LoadResult,
+    options: RuntimeOptions,
+) -> None:
+    """Emit one classic-Rich table per tool vendor for a grouped report.
+
+    No combined 'All vendors' table is appended. The user asked for
+    vendor truth; combining undoes that.
+    """
+    rate_card = load_rate_card(options)
+    vendor_ids = sorted({event.vendor for event in result.events if event.vendor})
+    title = name.title()
+    sys.stdout.write(f"Caliper - {title}, by tool vendor\n")
+    sys.stdout.write(
+        f"{len(vendor_ids)} tool vendors with {len(result.events):,} events. "
+        "One table per vendor below.\n\n"
+    )
+    for vendor_id in vendor_ids:
+        scoped_events = [event for event in result.events if event.vendor == vendor_id]
+        if not scoped_events:
+            continue
+        scoped = LoadResult(
+            events=scoped_events,
+            duplicates=0,
+            tier_sources=result.tier_sources,
+            plan_types=result.plan_types,
+            credit_samples=result.credit_samples,
+            warnings=[],
+            parser_issues=result.parser_issues,
+            vendor_stats=result.vendor_stats,
+        )
+        rows = rows_fn(scoped, options)
+        if options.order == "desc" and name in {"daily", "weekly", "monthly"}:
+            rows = list(reversed(rows))
+        if options.top_threads:
+            rows = rows[: options.top_threads]
+        label = _VENDOR_DISPLAY_LABELS.get(vendor_id, vendor_id)
+        text = render_table(
+            scoped,
+            options,
+            rows,
+            f"Caliper - {title}  ({label}, {len(scoped_events):,} events)",
+            rate_card=rate_card,
+        )
+        sys.stdout.write(text)
+        sys.stdout.write("\n")
 
 
 def _run_session_id(values: dict, session_id: str) -> None:
@@ -955,16 +1017,6 @@ def _render_overview_per_vendor(
         )
         sys.stdout.write(text)
         sys.stdout.write("\n")
-
-    text = render_table(
-        result,
-        options,
-        rows_all,
-        f"Caliper - All vendors  ({len(result.events):,} events)",
-        rate_card=rate_card,
-        total=total,
-    )
-    sys.stdout.write(text)
 
 
 def _interactive_status(message: str, output_format: str, output: Path | None):

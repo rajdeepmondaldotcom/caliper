@@ -2,6 +2,30 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.7 - 2026-05-14
+
+Per-vendor tables on every grouped report. No combined table.
+
+### Changed
+
+- `caliper daily`, `caliper weekly`, `caliper monthly`, `caliper
+  session`, `caliper project`, `caliper models`, `caliper blocks`,
+  and every other grouped report now emit one Rich table per tool
+  vendor on the classic table path when more than one vendor is
+  present. Each vendor has its own header, row set, and footer.
+  Cursor and Aider get their own tables when they have events.
+- The 'All vendors' combined totals table that 0.0.6 appended to the
+  overview output is removed. Holistic vendor truth means no
+  combining. Users who want a single rolled-up number can run
+  `caliper --format json` and post-process.
+
+### Unchanged
+
+- JSON / CSV / markdown / compat-json paths keep a single envelope so
+  scripts and pipes read the same wire shape they did before.
+- Single-vendor windows still print one table (no header overhead).
+- Every existing CLI flag, every JSON key, every exit code unchanged.
+
 ## 0.0.6 - 2026-05-14
 
 Honest loading + per-vendor tables on the overview command.
