@@ -1,14 +1,13 @@
 """Caliper's house voice: Calm, Accountable Clarity.
 
-Single source of truth for the persona rules that govern every
-user-visible string Caliper prints. Lifted from
-`docs/persona-overhaul/01-plan.md` and `VOICE_PROFILE_RAJDEEP.md`.
+The rules that govern every user-facing string Caliper prints. Sourced
+from `docs/persona-overhaul/01-plan.md` and `VOICE_PROFILE_RAJDEEP.md`.
 
-The :func:`voice_lint` function returns a list of human-readable
-violations for a given string. Callers can run it in tests, in CI, or
-inline before shipping copy. An empty list means the string passes.
+:func:`voice_lint` returns a list of violations for a given string.
+Callers run it in tests, in CI, or inline before shipping copy. Empty
+list means the string passes.
 
-Rules are intentionally short. Each one has a one-line rationale so a
+Rules stay short on purpose. Each one carries a one-line reason so a
 maintainer reading a failure knows what to change.
 """
 
