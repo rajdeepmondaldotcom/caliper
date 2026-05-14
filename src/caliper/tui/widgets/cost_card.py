@@ -32,8 +32,7 @@ class CostCard(Vertical):
         self,
         label: str,
         *,
-        api_dollars: float,
-        credits: float,
+        cost_usd: float,
         series: list[float] | tuple[float, ...] = (),
         delta_pct: float | None = None,
         vendors: str = "",
@@ -41,8 +40,7 @@ class CostCard(Vertical):
     ) -> None:
         super().__init__(**kwargs)
         self._label = label
-        self._api_dollars = api_dollars
-        self._credits = credits
+        self._cost_usd = cost_usd
         self._series = list(series)
         self._delta_pct = delta_pct
         self._vendors = vendors
@@ -55,7 +53,7 @@ class CostCard(Vertical):
         yield Static(self._meta_text(), classes="meta")
 
     def _headline_text(self) -> str:
-        return f"${compact_number(self._api_dollars)}  ·  {compact_number(self._credits)} credits"
+        return f"${compact_number(self._cost_usd)}"
 
     def _meta_text(self) -> str:
         spark = sparkline(self._series) if self._series else "—"

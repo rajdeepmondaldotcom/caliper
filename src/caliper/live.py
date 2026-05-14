@@ -35,9 +35,8 @@ from caliper.windows import (
 @dataclass(frozen=True)
 class LiveFrame:
     now: dt.datetime
-    today_credits: float
-    today_api_dollars: float
-    week_credits: float
+    today_cost_usd: float
+    week_cost_usd: float
     primary: WindowState
     secondary: WindowState
     plan_types: tuple[str, ...]
@@ -78,7 +77,7 @@ def collect_frame(options: RuntimeOptions, now: dt.datetime | None = None) -> Li
         duplicates=0,
         tier_sources=result.tier_sources,
         plan_types=result.plan_types,
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
     week_result = LoadResult(
@@ -86,34 +85,33 @@ def collect_frame(options: RuntimeOptions, now: dt.datetime | None = None) -> Li
         duplicates=0,
         tier_sources=result.tier_sources,
         plan_types=result.plan_types,
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
 
     today_total = aggregate_total(today_result, options, label="Today", rate_card=rate_card)
     week_total = aggregate_total(week_result, options, label="Last 7 days", rate_card=rate_card)
 
-    primary = compute_window_state(result.credit_samples, now, "primary")
-    secondary = compute_window_state(result.credit_samples, now, "secondary")
+    primary = compute_window_state(result.rate_limit_samples, now, "primary")
+    secondary = compute_window_state(result.rate_limit_samples, now, "secondary")
 
     return LiveFrame(
         now=now,
-        today_credits=float(today_total.costs.adjusted_credits),
-        today_api_dollars=float(today_total.costs.api_dollars),
-        week_credits=float(week_total.costs.adjusted_credits),
+        today_cost_usd=float(today_total.costs.cost_usd),
+        week_cost_usd=float(week_total.costs.cost_usd),
         primary=primary,
         secondary=secondary,
         plan_types=tuple(sorted(result.plan_types)),
         events_loaded=len(result.events),
-        today_cache_savings=float(today_total.cache_savings.api_dollars),
-        today_sparkline=_sparkline(_hourly_credit_series(today_events, rate_card, now)),
+        today_cache_savings=float(today_total.cache_savings.cost_usd),
+        today_sparkline=_sparkline(_hourly_cost_series(today_events, rate_card, now)),
         refresh_ms=(time.perf_counter() - started) * 1000,
         pricing_status=pricing_status(today_total),
         pricing_warnings=tuple(pricing_warnings(today_total)),
     )
 
 
-def _hourly_credit_series(events, rate_card: RateCard, now: dt.datetime) -> list[float]:
+def _hourly_cost_series(events, rate_card: RateCard, now: dt.datetime) -> list[float]:
     local_now = now.astimezone(local_timezone())
     buckets = [0.0] * (local_now.hour + 1)
     for event in events:
@@ -121,7 +119,7 @@ def _hourly_credit_series(events, rate_card: RateCard, now: dt.datetime) -> list
         if local_event.date() != local_now.date():
             continue
         costs, _, _ = event_cost(rate_card, event)
-        buckets[local_event.hour] += float(costs.adjusted_credits)
+        buckets[local_event.hour] += float(costs.cost_usd)
     return buckets
 
 
@@ -156,9 +154,9 @@ def _usage_panel(frame: LiveFrame) -> Panel:
     grid.add_column()
     grid.add_row(
         "Today",
-        f"{frame.today_credits:,.2f} credits  /  ${frame.today_api_dollars:,.2f}",
+        f"${frame.today_cost_usd:,.2f}",
     )
-    grid.add_row("Last 7d", f"{frame.week_credits:,.2f} credits")
+    grid.add_row("Last 7d", f"${frame.week_cost_usd:,.2f}")
     grid.add_row("Events loaded", f"{frame.events_loaded:,}")
     if frame.plan_types:
         grid.add_row("Plan", ", ".join(frame.plan_types))

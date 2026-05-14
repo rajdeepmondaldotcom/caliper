@@ -39,7 +39,7 @@ def _fixture(tmp_path: Path, *, tier: str = "fast") -> tuple[Path, Path, str, Pa
         state_db.unlink()
     make_state_db(state_db, session_path)
     config = tmp_path / ".caliper.toml"
-    config.write_text("[budgets]\ndaily_credits = 1000000\n")
+    config.write_text("[budgets]\ndaily_cost_usd = 1000000\n")
     return (
         session_root,
         state_db,
@@ -164,10 +164,10 @@ def test_budgets_json_output_carries_caliper_envelope(tmp_path: Path) -> None:
         (["evidence"], "table", "Caliper - Evidence"),
         (["evidence"], "csv", "dimension"),
         (["evidence"], "markdown", "| section |"),
-        (["forecast", "--days", "7"], "csv", "api_dollars"),
+        (["forecast", "--days", "7"], "csv", "cost_usd"),
         (["forecast", "--days", "7"], "markdown", "| unit |"),
         (["compare", "--a", "last 1 days", "--b", "previous 1 days"], "table", "Compare"),
-        (["compare", "--a", "last 1 days", "--b", "previous 1 days"], "csv", "credits"),
+        (["compare", "--a", "last 1 days", "--b", "previous 1 days"], "csv", "cost_usd"),
         (["compare", "--a", "last 1 days", "--b", "previous 1 days"], "markdown", "| metric |"),
         (
             ["compare", "--a", "last 1 days", "--b", "previous 1 days", "--by", "vendor"],

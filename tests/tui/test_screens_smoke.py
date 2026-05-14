@@ -84,3 +84,21 @@ def test_theme_files_exist_on_disk():
     base = Path(__file__).parent.parent.parent / "src" / "caliper" / "tui" / "tcss" / "themes"
     for name in ("slate.tcss", "parchment.tcss", "colorblind.tcss", "monochrome.tcss"):
         assert (base / name).exists(), f"missing theme file: {name}"
+
+
+def test_tui_screens_do_not_expose_placeholder_copy():
+    from pathlib import Path
+
+    base = Path(__file__).parent.parent.parent / "src" / "caliper" / "tui" / "screens"
+    forbidden = (
+        "coming soon",
+        "follow-up",
+        "lands in",
+        "lands with",
+        "This screen lands",
+        "enter drill",
+    )
+    for path in base.glob("*.py"):
+        text = path.read_text()
+        for phrase in forbidden:
+            assert phrase not in text, f"{path.name} still exposes {phrase!r}"

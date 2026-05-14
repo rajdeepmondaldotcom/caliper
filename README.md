@@ -62,9 +62,9 @@ caliper overview
 Caliper - Overview
 Vendors: claude-code (74,590 events) · openai-codex (20,500 events)
 
-Last 7 days     48,727 credits     $3,383
-Last 30 days    52,691 credits    $10,516
-Last 90 days    52,691 credits    $10,897
+Last 7 days       $3,383
+Last 30 days     $10,516
+Last 90 days     $10,897
 
 Events: 95,090
 Cache savings: $65,871 at 99.3% cache hit
@@ -85,9 +85,9 @@ caliper project --lookback-days 30
 ```
 
 ```text
-SlidesDockerTemp    4 models    18,746 credits    $3,009
-ace-ai              4 models    15,603 credits    $1,160
-caliper             3 models     9,219 credits      $443
+SlidesDockerTemp    4 models    $3,009
+ace-ai              4 models    $1,160
+caliper             3 models      $443
 ```
 
 Real numbers, one machine, one developer, ninety days. No account. No upload.
@@ -193,7 +193,9 @@ caliper                              # rolling 7 / 30 / 90 summary
 caliper doctor                       # verifies your local setup
 caliper daily --lookback-days 7      # daily rollup
 caliper project --lookback-days 30   # which projects cost what
-caliper insights                     # cache and tier signals
+caliper insights                     # ranked signals with next commands
+caliper advise                       # grouped model/tier recommendations
+caliper evidence                     # explain how trustworthy the numbers are
 ```
 
 The first run parses everything and writes a sidecar cache. Later runs reuse
@@ -212,11 +214,13 @@ caliper tui --demo                       # synthetic fixture, zero disk reads
 The TUI is a single Python process built on
 [Textual](https://github.com/Textualize/textual). It reuses every pure
 module the classic CLI uses (parser, pricing, aggregation, windows,
-insights) and adds only presentation: a Home overview with cost
-cards, primary/secondary limit panels, the insights feed, and recent
-sessions. The remaining screens (Sessions, Projects, Models, Limits,
-Live, Forecast, What-If, Budgets, Doctor, Receipt) navigate via `1..9`
-and fill in over subsequent releases.
+insights) and adds only presentation: a Home overview with cost cards,
+primary/secondary limit panels, the insights feed, and recent sessions.
+The workspace includes real screens for Sessions, Intervals, Projects,
+Models, Limits, Live, Forecast, What-If, Budgets, Insights, Doctor, and
+Receipt. Number keys jump across the core screens, `r` refreshes, `t`
+cycles themes, `p` toggles prompt-derived labels, and `[` / `]` step
+the active time window.
 
 Offline by default. No login. No telemetry. The classic CLI surface
 keeps working exactly the way it did before — the TUI is an
@@ -246,6 +250,10 @@ If you do not trust the claim, read `src/caliper/parser.py` and
   guessed.
 - The embedded rate card carries a `checked` date. `caliper doctor` warns
   past 30 days and fails past 90.
+- Report evidence is graded as `exact`, `estimated`, `partial`, or
+  `unsupported`. JSON reports carry the evidence metadata; table and
+  receipt outputs surface the status so budget numbers do not look more
+  certain than the local logs allow.
 
 ```bash
 caliper rates show
@@ -266,9 +274,9 @@ Caliper exits with stable codes so CI can gate on cost.
 ```toml
 # .caliper.toml
 [budgets]
-daily_credits = 25000
-weekly_credits = 100000
-monthly_api_dollars = 500
+daily_cost_usd = 25
+weekly_cost_usd = 100
+monthly_cost_usd = 500
 ```
 
 ```bash
@@ -339,7 +347,9 @@ require a login, which is the wrong fit for offline-only workflows.
 **How accurate are the costs?**
 As accurate as the rate card. The rate card ships embedded with a
 `checked` date and warns when it ages. You can pin a local rate card to
-match an invoice exactly.
+match an invoice exactly. Run `caliper evidence` when you need to know
+whether usage, model, tier, pricing, project, and git attribution are exact
+or inferred for the active window.
 
 **What about the Anthropic admin API or the OpenAI usage API?**
 Out of scope on purpose. Caliper is local-only. The trade-off is named:

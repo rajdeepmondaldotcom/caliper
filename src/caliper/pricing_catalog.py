@@ -38,7 +38,6 @@ PORTKEY_GITHUB_BASE_URL = (
 LITELLM_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 )
-CODEX_RATE_CARD_URL = "https://help.openai.com/en/articles/20001106-codex-rate-card"
 
 
 @dataclass(frozen=True)
@@ -46,7 +45,6 @@ class CatalogModel:
     name: str
     provider: str
     api_rates: Rates | None = None
-    credit_rates: Rates | None = None
     long_context: LongContextRule | None = None
     context_window: int = 0
     max_output_tokens: int = 0
@@ -212,9 +210,6 @@ def fetch_pricing_catalog(pricing_source: str = "auto") -> dict[str, Any]:
         portkey_records, portkey_sources = _fetch_portkey_records()
         records.extend(portkey_records)
         sources.extend(portkey_sources)
-        codex_records, codex_source = _fetch_codex_credit_records()
-        records.extend(codex_records)
-        sources.append(codex_source)
 
     if source in {"auto", "litellm"}:
         litellm_records, litellm_source = _fetch_litellm_records()
@@ -272,14 +267,12 @@ def catalog_model_records(catalog: PricingCatalog) -> list[dict[str, Any]]:
 
 def catalog_model_record(model: CatalogModel) -> dict[str, Any]:
     api = _rates_payload(model.api_rates)
-    credits = _rates_payload(model.credit_rates)
     return {
         "provider": model.provider,
         "model": model.name,
         "api_input": (api or {}).get("input", ""),
         "api_cached_input": (api or {}).get("cached_input", ""),
         "api_output": (api or {}).get("output", ""),
-        "credits_input": (credits or {}).get("input", ""),
         "context_window": model.context_window or "",
         "max_output_tokens": model.max_output_tokens or "",
         "source": model.source,
@@ -339,25 +332,6 @@ def _fetch_litellm_records() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return records, {
         "name": "LiteLLM model cost map",
         "url": LITELLM_URL,
-        "status": "ok",
-        "models": len(records),
-    }
-
-
-def _fetch_codex_credit_records() -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    try:
-        text = _fetch_text(CODEX_RATE_CARD_URL)
-    except OSError as exc:
-        return [], {
-            "name": "OpenAI Codex rate card",
-            "url": CODEX_RATE_CARD_URL,
-            "status": "error",
-            "error": str(exc),
-        }
-    records = _records_from_codex_rate_card(text, CODEX_RATE_CARD_URL)
-    return records, {
-        "name": "OpenAI Codex rate card",
-        "url": CODEX_RATE_CARD_URL,
         "status": "ok",
         "models": len(records),
     }
@@ -425,28 +399,6 @@ def _records_from_litellm(raw: Any, source_url: str) -> list[dict[str, Any]]:
                 "long_context": _long_context_from_litellm(item),
                 "context_window": _safe_int(item.get("max_input_tokens") or item.get("max_tokens")),
                 "max_output_tokens": _safe_int(item.get("max_output_tokens")),
-            }
-        )
-    return records
-
-
-def _records_from_codex_rate_card(text: str, source_url: str) -> list[dict[str, Any]]:
-    normalized = _normal_text(text)
-    records: list[dict[str, Any]] = []
-    pattern = re.compile(
-        r"\b(GPT-[A-Za-z0-9.\-]+)\s+([0-9.]+)\s+credits\s+([0-9.]+)\s+credits\s+([0-9.]+)\s+credits",
-        flags=re.IGNORECASE,
-    )
-    for match in pattern.finditer(normalized):
-        name = _clean_model_name(match.group(1))
-        rates = Rates(match.group(2), match.group(3), match.group(4))
-        records.append(
-            {
-                "name": name,
-                "provider": "openai-codex",
-                "source": "openai-codex-rate-card",
-                "source_url": source_url,
-                "credits": _rates_payload(rates),
             }
         )
     return records
@@ -596,7 +548,6 @@ def _merge_record(
     result = base.copy()
     for field_name in (
         "api",
-        "credits",
         "long_context",
         "context_window",
         "max_output_tokens",
@@ -627,7 +578,6 @@ def _catalog_model_from_record(raw: dict[str, Any]) -> CatalogModel:
         name=_clean_model_name(str(raw["name"])),
         provider=str(raw.get("provider") or ""),
         api_rates=_rates_from_payload(raw.get("api")),
-        credit_rates=_rates_from_payload(raw.get("credits")),
         long_context=_long_context_from_payload(raw.get("long_context")),
         context_window=_safe_int(raw.get("context_window")),
         max_output_tokens=_safe_int(raw.get("max_output_tokens")),

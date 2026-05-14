@@ -7,23 +7,26 @@ import datetime as dt
 import os
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.css.query import NoMatches
 from textual.reactive import reactive
 from textual.widgets import Footer, Header
 from textual.worker import Worker, get_current_worker
 
 from caliper.config import TuiConfig, load_config, load_tui_config
+from caliper.intervals import Interval
 from caliper.models import RuntimeOptions
 from caliper.timeutil import local_timezone
 from caliper.tui.demo import materialize_demo
+from caliper.tui.manifest import TuiLoadManifest, build_load_manifest
 from caliper.tui.messages import (
     LoadCancelled,
     LoadFailed,
-    LoadFileCacheHit,
-    LoadFileDone,
     LoadFinished,
+    LoadProgress,
     LoadStarted,
     LoadSucceeded,
     WorkerCancelled,
@@ -43,7 +46,8 @@ from caliper.tui.screens.receipt import ReceiptScreen
 from caliper.tui.screens.sessions import SessionsScreen
 from caliper.tui.screens.welcome import WelcomeScreen, welcome_already_seen
 from caliper.tui.screens.whatif import WhatIfScreen
-from caliper.tui.state import AppSnapshot, default_scope
+from caliper.tui.state import AppSnapshot, apply_scope, default_scope
+from caliper.tui.widgets.loading_overlay import LoadingOverlay
 from caliper.tui.workers import build_overview, run_load
 
 
@@ -65,6 +69,7 @@ class CaliperApp(App):
         Binding("question_mark", "show_help", "help"),
         Binding("r", "refresh", "refresh"),
         Binding("t", "cycle_theme", "theme"),
+        Binding("p", "toggle_redact", "redact", show=False),
         Binding("1", "go('home')", "Home"),
         Binding("2", "go('intervals')", "Daily/Weekly"),
         Binding("3", "go('sessions')", "Sessions"),
@@ -113,6 +118,18 @@ class CaliperApp(App):
             options=options,
             scope=default_scope(dt.datetime.now(tz=local_timezone())),
         )
+        self._load_generation = 0
+        self._last_manifest: TuiLoadManifest | None = None
+        self._last_load_result = None
+        self._last_rate_card = None
+        self._last_derived: dict[str, Any] | None = None
+        self._watch_observer = None
+        self._refresh_timer = None
+        self._poll_timer = None
+        self._progress_total = 0
+        self._progress_done = 0
+        self._progress_cached = 0
+        self._progress_stage = "idle"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -124,6 +141,10 @@ class CaliperApp(App):
         if self._tui_config.show_demo_on_first_run and not welcome_already_seen():
             self.push_screen(WelcomeScreen())
         self.action_refresh()
+        self._start_refresh_monitoring()
+
+    def on_unmount(self) -> None:
+        self._stop_refresh_monitoring()
 
     # ------------------------------------------------------------------ themes
     def _apply_theme(self) -> None:
@@ -166,10 +187,34 @@ class CaliperApp(App):
         self.push_screen(screen_cls())
 
     def action_step_back(self) -> None:
-        self.notify("Time scrubber lands with T23 — coming soon.", timeout=3)
+        self._step_interval(-1)
 
     def action_step_forward(self) -> None:
-        self.notify("Time scrubber lands with T23 — coming soon.", timeout=3)
+        self._step_interval(1)
+
+    def _step_interval(self, direction: int) -> None:
+        snapshot = self.snapshot
+        if snapshot is None:
+            return
+        current = snapshot.scope.interval
+        span = current.end - current.start
+        start = current.start + span * direction
+        end = current.end + span * direction
+        label = f"{start:%Y-%m-%d} to {end:%Y-%m-%d}"
+        self.snapshot = apply_scope(
+            snapshot,
+            interval=Interval(start=start, end=end, label=label),
+        )
+        self.action_refresh()
+
+    def action_toggle_redact(self) -> None:
+        snapshot = self.snapshot
+        if snapshot is None:
+            return
+        show_prompts = not snapshot.options.show_prompts
+        self.snapshot = apply_scope(snapshot, show_prompts=show_prompts)
+        self.notify("Prompt labels shown" if show_prompts else "Prompt labels redacted")
+        self.action_refresh()
 
     def action_show_help(self) -> None:
         self.notify(
@@ -182,6 +227,8 @@ class CaliperApp(App):
         snapshot = self.snapshot
         if snapshot is None:
             return
+        self._load_generation += 1
+        generation = self._load_generation
         self.snapshot = replace(
             snapshot,
             refresh_started_at=dt.datetime.now(tz=local_timezone()),
@@ -192,42 +239,130 @@ class CaliperApp(App):
             load_files_cached=0,
             cancelled=False,
         )
+        self._set_overlay_progress(
+            total=0,
+            done=0,
+            cached=0,
+            stage="discovering",
+        )
         self.run_worker(
-            self._load_worker(),
+            self._load_worker(
+                generation=generation,
+                snapshot=self.snapshot,
+                previous_manifest=self._last_manifest,
+                previous_result=self._last_load_result,
+                previous_card=self._last_rate_card,
+                previous_derived=self._last_derived,
+            ),
             thread=True,
             exclusive=True,
             group="data",
             exit_on_error=False,
         )
 
-    def _load_worker(self):
-        snapshot = self.snapshot
-        progress = TextualParseProgress(self)
+    def _load_worker(
+        self,
+        *,
+        generation: int,
+        snapshot: AppSnapshot,
+        previous_manifest: TuiLoadManifest | None,
+        previous_result,
+        previous_card,
+        previous_derived: dict[str, Any] | None,
+    ):
+        progress = TextualParseProgress(self, generation=generation)
 
         def _body():
             worker = get_current_worker()
             try:
+                manifest = build_load_manifest(snapshot.options)
+                if worker.is_cancelled:
+                    self.post_message(LoadCancelled(generation=generation))
+                    return
+                if (
+                    manifest == previous_manifest
+                    and previous_result is not None
+                    and previous_card is not None
+                    and previous_derived is not None
+                ):
+                    progress.reused(len(manifest.files))
+                    self.post_message(
+                        LoadSucceeded(
+                            previous_result,
+                            previous_card,
+                            previous_derived,
+                            manifest,
+                            reused=True,
+                            generation=generation,
+                        )
+                    )
+                    return
                 result, card = run_load(snapshot.options, progress)
                 if worker.is_cancelled:
-                    self.post_message(LoadCancelled())
+                    self.post_message(LoadCancelled(generation=generation))
                     return
+                progress.aggregating()
                 derived = build_overview(result, snapshot.options, card)
-                self.post_message(LoadSucceeded(result, card))
-                # Hand the derived aggregates over through the same reactive.
-                self.call_from_thread(self._apply_derived, derived)
+                self.post_message(
+                    LoadSucceeded(
+                        result,
+                        card,
+                        derived,
+                        manifest,
+                        generation=generation,
+                    )
+                )
             except WorkerCancelled:
-                self.post_message(LoadCancelled())
+                self.post_message(LoadCancelled(generation=generation))
             except Exception as exc:  # pragma: no cover - surfaced to UI
-                self.post_message(LoadFailed(exc))
+                self.post_message(LoadFailed(exc, generation=generation))
 
         return _body
 
-    def _apply_derived(self, derived: dict) -> None:
-        snapshot = self.snapshot
-        if snapshot is None:
+    # ------------------------------------------------------------------ messages
+    def on_load_started(self, event: LoadStarted) -> None:
+        if not self._is_current(event):
             return
+        self._set_overlay_progress(
+            total=event.total,
+            done=self._progress_done,
+            cached=self._progress_cached,
+            stage="reading",
+        )
+
+    def on_load_progress(self, event: LoadProgress) -> None:
+        if not self._is_current(event):
+            return
+        self._set_overlay_progress(
+            total=event.total,
+            done=event.done,
+            cached=event.cached,
+            stage=event.stage,
+        )
+
+    def on_load_finished(self, event: LoadFinished) -> None:
+        if not self._is_current(event):
+            return
+        self._set_overlay_progress(
+            total=self._progress_total,
+            done=self._progress_done,
+            cached=self._progress_cached,
+            stage="aggregating",
+        )
+
+    def on_load_succeeded(self, event: LoadSucceeded) -> None:
+        if not self._is_current(event):
+            return
+        snap = self.snapshot
+        derived = event.derived
+        self._last_manifest = event.manifest
+        self._last_load_result = event.result
+        self._last_rate_card = event.rate_card
+        self._last_derived = derived
         self.snapshot = replace(
-            snapshot,
+            snap,
+            load_result=event.result,
+            rate_card=event.rate_card,
             overview_windows=derived["overview_windows"],
             overview_total=derived["overview_total"],
             daily=derived["daily"],
@@ -240,48 +375,129 @@ class CaliperApp(App):
             primary_window=derived["primary_window"],
             secondary_window=derived["secondary_window"],
             refresh_completed_at=dt.datetime.now(tz=local_timezone()),
+            refresh_error=None,
+            load_total_files=self._progress_total,
+            load_files_done=self._progress_done,
+            load_files_cached=self._progress_cached,
         )
-
-    # ------------------------------------------------------------------ messages
-    def on_load_started(self, event: LoadStarted) -> None:
-        self.snapshot = replace(self.snapshot, load_total_files=event.total)
-
-    def on_load_file_done(self, event: LoadFileDone) -> None:
-        snap = self.snapshot
-        self.snapshot = replace(snap, load_files_done=snap.load_files_done + 1)
-
-    def on_load_file_cache_hit(self, event: LoadFileCacheHit) -> None:
-        snap = self.snapshot
-        self.snapshot = replace(snap, load_files_cached=snap.load_files_cached + 1)
-
-    def on_load_finished(self, event: LoadFinished) -> None:
-        pass  # actual completion happens in _apply_derived
-
-    def on_load_succeeded(self, event: LoadSucceeded) -> None:
-        snap = self.snapshot
-        self.snapshot = replace(snap, load_result=event.result, rate_card=event.rate_card)
+        self._hide_loading_overlay()
 
     def on_load_failed(self, event: LoadFailed) -> None:
+        if not self._is_current(event):
+            return
         snap = self.snapshot
         self.snapshot = replace(
             snap,
             refresh_completed_at=dt.datetime.now(tz=local_timezone()),
             refresh_error=str(event.error),
         )
+        self._hide_loading_overlay()
 
     def on_load_cancelled(self, event: LoadCancelled) -> None:
+        if not self._is_current(event):
+            return
         snap = self.snapshot
         self.snapshot = replace(snap, cancelled=True, refresh_completed_at=None)
+        self._hide_loading_overlay()
 
     # ------------------------------------------------------------------ reactive
     def watch_snapshot(self, snapshot: AppSnapshot) -> None:
         if snapshot is None:
             return
-        # Forward to the active HomeScreen if visible.
         if self.screen_stack:
             top = self.screen_stack[-1]
-            if isinstance(top, HomeScreen):
-                top.update_from_snapshot(snapshot)
+            update = getattr(top, "update_from_snapshot", None)
+            if callable(update):
+                update(snapshot)
+
+    # ------------------------------------------------------------------ loading overlay
+    def _is_current(self, event) -> bool:
+        return getattr(event, "generation", self._load_generation) == self._load_generation
+
+    def _set_overlay_progress(self, *, total: int, done: int, cached: int, stage: str) -> None:
+        self._progress_total = total
+        self._progress_done = done
+        self._progress_cached = cached
+        self._progress_stage = stage
+        overlay = self._ensure_loading_overlay()
+        if overlay is None:
+            return
+        with contextlib.suppress(NoMatches):
+            overlay.update_progress(total=total, done=done, cached=cached, stage=stage)
+
+    def _ensure_loading_overlay(self) -> LoadingOverlay | None:
+        if not self.screen_stack:
+            return None
+        parent = self.screen_stack[-1]
+        with contextlib.suppress(NoMatches):
+            return parent.query_one("#loading-overlay", LoadingOverlay)
+        overlay = LoadingOverlay(id="loading-overlay")
+        parent.mount(overlay)
+        return overlay
+
+    def _hide_loading_overlay(self) -> None:
+        for overlay in list(self.query(LoadingOverlay)):
+            overlay.remove()
+
+    # ------------------------------------------------------------------ refresh monitoring
+    def _start_refresh_monitoring(self) -> None:
+        if self._tui_config.no_watchdog:
+            self._poll_timer = self.set_interval(30.0, self._refresh_if_manifest_changed)
+            return
+        try:
+            from watchdog.events import FileSystemEventHandler
+            from watchdog.observers import Observer
+        except Exception:
+            self._poll_timer = self.set_interval(30.0, self._refresh_if_manifest_changed)
+            return
+
+        app = self
+
+        class _Handler(FileSystemEventHandler):
+            def on_any_event(self, event) -> None:  # noqa: ANN001
+                if getattr(event, "is_directory", False):
+                    return
+                app.call_from_thread(app._schedule_debounced_refresh)
+
+        observer = Observer()
+        roots = _watch_roots(self.snapshot.options) if self.snapshot is not None else []
+        for root in roots:
+            with contextlib.suppress(Exception):
+                observer.schedule(_Handler(), str(root), recursive=True)
+        if not getattr(observer, "emitters", None):
+            self._poll_timer = self.set_interval(30.0, self._refresh_if_manifest_changed)
+            return
+        observer.start()
+        self._watch_observer = observer
+
+    def _stop_refresh_monitoring(self) -> None:
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+            self._refresh_timer = None
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+            self._poll_timer = None
+        observer = self._watch_observer
+        if observer is not None:
+            observer.stop()
+            observer.join(timeout=1)
+            self._watch_observer = None
+
+    def _schedule_debounced_refresh(self) -> None:
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+        self._refresh_timer = self.set_timer(0.75, self._refresh_if_manifest_changed)
+
+    def _refresh_if_manifest_changed(self) -> None:
+        snapshot = self.snapshot
+        if snapshot is None or snapshot.is_loading():
+            return
+        try:
+            manifest = build_load_manifest(snapshot.options)
+        except Exception:
+            return
+        if manifest != self._last_manifest:
+            self.action_refresh()
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:  # noqa: D401
         # Hook for future logging / status pill; intentionally quiet today.
@@ -302,3 +518,29 @@ def run_tui(
 def build_demo_options(template: RuntimeOptions) -> RuntimeOptions:
     """Back-compat shim — :func:`materialize_demo` is the canonical path."""
     return materialize_demo(template)
+
+
+def _watch_roots(options: RuntimeOptions) -> list[Path]:
+    roots = {options.session_root}
+    claude_override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if claude_override:
+        for item in claude_override.split(os.pathsep):
+            for part in item.split(","):
+                if part.strip():
+                    roots.add(Path(part).expanduser() / "projects")
+    else:
+        roots.add(Path.home() / ".claude" / "projects")
+        xdg = os.environ.get("XDG_CONFIG_HOME")
+        roots.add((Path(xdg).expanduser() if xdg else Path.home() / ".config") / "claude")
+    cursor_override = os.environ.get("CALIPER_CURSOR_HOME", "").strip()
+    if cursor_override:
+        roots.add(Path(cursor_override).expanduser())
+    else:
+        with contextlib.suppress(Exception):
+            from platformdirs import user_data_dir
+
+            roots.add(Path(user_data_dir("Cursor")).expanduser())
+        roots.add(Path.home() / ".cursor")
+    aider_root = Path(os.environ.get("CALIPER_AIDER_ROOT", ".")).expanduser()
+    roots.add(aider_root)
+    return sorted(root for root in roots if root.exists())

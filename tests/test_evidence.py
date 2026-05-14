@@ -41,7 +41,7 @@ def _result(*events: UsageEvent) -> LoadResult:
         duplicates=0,
         tier_sources={"logged": len(events)},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
 
@@ -65,7 +65,7 @@ def test_evidence_dimensions_surface_partial_and_unsupported_reasons() -> None:
         duplicates=0,
         tier_sources={},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
         parser_issues=[
             ParserIssue(
@@ -90,8 +90,7 @@ def test_evidence_dimensions_surface_partial_and_unsupported_reasons() -> None:
     total = Aggregate(key="total", label="Total")
     total.totals.events = 1
     total.costs = CostTotals(
-        api_unpriced_events=1,
-        credit_unpriced_events=1,
+        unpriced_events=1,
         estimated_events=1,
         ambiguous_reasoning_events=1,
     )
@@ -154,7 +153,7 @@ def test_tracking_dataclass_defaults_are_stable(tmp_path) -> None:
         duplicates=0,
         tier_sources={},
         plan_types=set(),
-        credit_samples=[sample],
+        rate_limit_samples=[sample],
         warnings=[],
     )
 

@@ -1,7 +1,7 @@
 """Forecast helpers: linear and EWMA projection, confidence band.
 
-Pure functions over a list of per-day numeric samples (credits, dollars, tokens —
-unit-agnostic). I/O lives in the CLI layer.
+Pure functions over a list of per-day numeric samples (dollars, tokens, or
+another caller-provided unit). I/O lives in the CLI layer.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def project(
     daily_values: list[float],
     days_remaining: int,
     *,
-    unit: str = "credits",
+    unit: str = "cost_usd",
     cap: float | None = None,
     alpha: float = DEFAULT_EWMA_ALPHA,
 ) -> Projection:

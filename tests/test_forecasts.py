@@ -40,7 +40,7 @@ def test_ewma_alpha_validated() -> None:
 
 def test_project_linear_total_matches_mean_times_days() -> None:
     daily = [10.0] * 7
-    projection = project(daily, days_remaining=14, unit="credits")
+    projection = project(daily, days_remaining=14, unit="cost_usd")
     assert projection.daily_mean == 10.0
     assert projection.linear_total == 140.0
     assert projection.ewma_total == 140.0

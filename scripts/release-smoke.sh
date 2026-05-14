@@ -8,7 +8,7 @@ mkdir -p "$OUT"
 export CALIPER_CACHE_DIR="$ROOT/cache"
 export XDG_DATA_HOME="$ROOT/data"
 
-printf '[budgets]\ndaily_credits = 999999999\nweekly_credits = 999999999\nmonthly_api_dollars = 999999999\n' > "$ROOT/.caliper.toml"
+printf '[budgets]\ndaily_cost_usd = 999999999\nweekly_cost_usd = 999999999\nmonthly_cost_usd = 999999999\n' > "$ROOT/.caliper.toml"
 printf '%s\n' '{"timestamp":"2026-05-12T00:00:00Z","path":"/tmp/session.jsonl","session_id":"session","usage":{"input_tokens":1,"total_tokens":1},"model":"gpt-5.5","service_tier":"standard","tier_source":"logged","thread":{}}' > "$ROOT/event.json"
 
 json_ok() {

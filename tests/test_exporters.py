@@ -16,9 +16,9 @@ from caliper.exporters import (
 from caliper.models import Aggregate, CostTotals, TokenTotals
 
 
-def _aggregate(label: str, credits: float = 10.0, dollars: float = 1.0) -> Aggregate:
+def _aggregate(label: str, cost_usd: float = 10.0) -> Aggregate:
     totals = TokenTotals(events=1, input_tokens=100, output_tokens=10, total_tokens=110)
-    costs = CostTotals(api_dollars=dollars, standard_credits=credits, adjusted_credits=credits)
+    costs = CostTotals(cost_usd=cost_usd)
     agg = Aggregate(key=label, label=label, totals=totals, costs=costs)
     agg.models.add("gpt-5.5")
     agg.service_tiers.add("standard")
@@ -26,15 +26,14 @@ def _aggregate(label: str, credits: float = 10.0, dollars: float = 1.0) -> Aggre
 
 
 def _payload() -> ReceiptInputs:
-    totals = _aggregate("Month", credits=1234.5, dollars=12.34)
+    totals = _aggregate("Month", cost_usd=12.34)
     totals.totals.input_tokens = 1_000
     totals.totals.cached_input_tokens = 500
     totals.totals.output_tokens = 200
     totals.totals.reasoning_output_tokens = 50
     totals.totals.total_tokens = 1750
     totals.totals.events = 3
-    totals.cache_savings.api_dollars = 9.87
-    totals.cache_savings.adjusted_credits = 246.8
+    totals.cache_savings.cost_usd = 9.87
     return ReceiptInputs(
         month="2026-05",
         totals=totals,
@@ -71,7 +70,7 @@ def test_receipt_markdown_includes_sections_and_totals() -> None:
     assert "## Models" in text
     assert "## Top sessions" in text
     assert "## Top projects" in text
-    assert "1,234.50" in text
+    assert "$12.34" in text
     assert "$12.34" in text
     assert "Cache savings" in text
     assert "$9.87" in text
@@ -90,8 +89,8 @@ def test_grafana_dashboard_has_required_panels() -> None:
     dashboard = grafana_dashboard()
     assert dashboard["title"] == "Caliper"
     panel_titles = {panel["title"] for panel in dashboard["panels"]}
-    assert "Credits used (current 5h)" in panel_titles
-    assert "Burn rate (credits/hour)" in panel_titles
+    assert "Cost $ used (current 5h)" in panel_titles
+    assert "Burn rate (% points/hour)" in panel_titles
     assert "Primary window %" in panel_titles
     assert "Secondary window %" in panel_titles
 

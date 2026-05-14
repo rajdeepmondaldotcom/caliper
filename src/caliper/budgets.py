@@ -16,7 +16,7 @@ from caliper.models import LoadResult, RuntimeOptions, decimal_string
 from caliper.pricing import RateCard
 
 VALID_PERIODS = ("daily", "weekly", "monthly")
-VALID_METRICS = ("credits", "api_dollars", "tokens")
+VALID_METRICS = ("cost_usd", "tokens")
 SEVERITY_OK = "ok"
 SEVERITY_WARN = "warn"
 SEVERITY_BREACH = "breach"
@@ -90,12 +90,11 @@ def usage_for_periods(
             duplicates=0,
             tier_sources={},
             plan_types=set(),
-            credit_samples=[],
+            rate_limit_samples=[],
             warnings=[],
         )
         aggregate = aggregate_total(result, options, label=period, rate_card=rate_card)
-        usage[f"{period}.credits"] = aggregate.costs.adjusted_credits
-        usage[f"{period}.api_dollars"] = aggregate.costs.api_dollars
+        usage[f"{period}.cost_usd"] = aggregate.costs.cost_usd
         usage[f"{period}.tokens"] = float(aggregate.totals.total_tokens)
     return usage
 
@@ -156,9 +155,9 @@ def parse_budgets_table(table: dict) -> list[Budget]:
     """Convert a parsed TOML `[budgets]` table into a list of Budget dataclasses.
 
     Recognized shapes:
-    - {"daily_credits": 25000, "weekly_dollars": 12.50}
-    - {"daily": {"credits": 25000, "api_dollars": 5.0, "warn_at": 0.9}}
-    - {"items": [{"period": "daily", "metric": "credits", "limit": 25000}]}
+    - {"daily_cost_usd": 25.00}
+    - {"daily": {"cost_usd": 5.0, "warn_at": 0.9}}
+    - {"items": [{"period": "daily", "metric": "cost_usd", "limit": 25.00}]}
     """
     if not table:
         return []

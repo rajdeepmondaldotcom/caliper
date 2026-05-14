@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from caliper.dedupe import DedupeStats, dedupe_usage_events
 from caliper.models import (
     VENDOR_OPENAI_CODEX,
     LoadResult,
@@ -42,7 +43,7 @@ class UsageLoadAccumulator:
     seen: set[tuple] = field(default_factory=set)
     tier_sources: dict[str, int] = field(default_factory=dict)
     plan_types: set[str] = field(default_factory=set)
-    credit_samples: list[RateLimitSample] = field(default_factory=list)
+    rate_limit_samples: list[RateLimitSample] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     reset_warnings: set[Path] = field(default_factory=set)
     event_paths: set[Path] = field(default_factory=set)
@@ -57,14 +58,14 @@ class UsageLoadAccumulator:
         self._add_usage_event(path, record.event)
 
     def result(self, vendor_stats: dict[str, VendorParseStats] | None = None) -> LoadResult:
-        self.credit_samples.sort(key=lambda sample: sample.timestamp)
+        self.rate_limit_samples.sort(key=lambda sample: sample.timestamp)
         self.events.sort(key=lambda event: event.timestamp)
         return LoadResult(
             events=self.events,
             duplicates=self.duplicates,
             tier_sources=self.tier_sources,
             plan_types=self.plan_types,
-            credit_samples=self.credit_samples,
+            rate_limit_samples=self.rate_limit_samples,
             warnings=self.warnings,
             vendor_stats=vendor_stats or {},
         )
@@ -72,7 +73,7 @@ class UsageLoadAccumulator:
     def _add_sample(self, sample: RateLimitSample | None) -> None:
         if sample is None or not (self.start_utc <= sample.timestamp < self.end_utc):
             return
-        self.credit_samples.append(sample)
+        self.rate_limit_samples.append(sample)
         if sample.plan_type:
             self.plan_types.add(sample.plan_type)
 
@@ -485,7 +486,6 @@ def _rate_limit_identity_fields(rate_limits: dict) -> dict:
         "plan_type": str(rate_limits.get("plan_type") or ""),
         "limit_id": str(rate_limits.get("limit_id") or ""),
         "limit_name": str(rate_limits.get("limit_name") or ""),
-        "credits": rate_limits.get("credits"),
         "rate_limit_reached_type": str(rate_limits.get("rate_limit_reached_type") or ""),
     }
 
@@ -611,10 +611,11 @@ def load_usage(
     duplicates = 0
     tier_sources: dict[str, int] = {}
     plan_types: set[str] = set()
-    credit_samples: list[RateLimitSample] = []
+    rate_limit_samples: list[RateLimitSample] = []
     warnings: list[str] = []
     parser_issues = []
     vendor_stats: dict[str, VendorParseStats] = {}
+    dedupe_stats = DedupeStats()
     vendors = enabled_vendors(options)
     total_files = 0
     for vendor in vendors:
@@ -630,16 +631,23 @@ def load_usage(
         for key, value in result.tier_sources.items():
             tier_sources[key] = tier_sources.get(key, 0) + value
         plan_types.update(result.plan_types)
-        credit_samples.extend(result.credit_samples)
+        rate_limit_samples.extend(result.rate_limit_samples)
         warnings.extend(result.warnings)
         parser_issues.extend(result.parser_issues)
         vendor_stats.update(result.vendor_stats)
+        dedupe_stats = dedupe_stats.merged(
+            DedupeStats(
+                duplicates=result.duplicates,
+                by_strategy=result.dedupe_stats,
+            )
+        )
     if options.project:
         events = [event for event in events if _event_matches_project(event, options.project)]
-    events, loaded_duplicates = _dedupe_loaded_events(events, options)
-    duplicates += loaded_duplicates
+    events, loaded_stats = _dedupe_loaded_events(events, options)
+    duplicates += loaded_stats.duplicates
+    dedupe_stats = dedupe_stats.merged(loaded_stats)
     events.sort(key=lambda event: event.timestamp)
-    credit_samples.sort(key=lambda sample: sample.timestamp)
+    rate_limit_samples.sort(key=lambda sample: sample.timestamp)
     warnings.extend(warnings_from_parser_issues(parser_issues))
     progress.finished()
     return LoadResult(
@@ -647,10 +655,11 @@ def load_usage(
         duplicates=duplicates,
         tier_sources=tier_sources,
         plan_types=plan_types,
-        credit_samples=credit_samples,
+        rate_limit_samples=rate_limit_samples,
         warnings=warnings,
         parser_issues=parser_issues,
         vendor_stats=vendor_stats,
+        dedupe_stats=dedupe_stats.by_strategy,
     )
 
 
@@ -670,23 +679,8 @@ def _event_matches_project(event: UsageEvent, project: str) -> bool:
 
 def _dedupe_loaded_events(
     events: list[UsageEvent], options: RuntimeOptions
-) -> tuple[list[UsageEvent], int]:
-    if not options.dedupe:
-        return events, 0
-    seen: set[tuple[str, str]] = set()
-    unique: list[UsageEvent] = []
-    duplicates = 0
-    for event in events:
-        if not event.dedupe_key:
-            unique.append(event)
-            continue
-        key = (event.vendor, event.dedupe_key)
-        if key in seen:
-            duplicates += 1
-            continue
-        seen.add(key)
-        unique.append(event)
-    return unique, duplicates
+) -> tuple[list[UsageEvent], DedupeStats]:
+    return dedupe_usage_events(events, enabled=options.dedupe)
 
 
 def _parse_session(

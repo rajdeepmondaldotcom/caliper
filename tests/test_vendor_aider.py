@@ -31,8 +31,8 @@ def test_aider_history_cost_line_round_trip(monkeypatch, tmp_path) -> None:
     assert len(result.events) == 1
     assert result.events[0].vendor == VENDOR_AIDER
     assert result.events[0].usage.input_tokens == 1500
-    assert result.events[0].vendor_reported_api_dollars == Decimal("0.05")
-    assert total.costs.api_dollars == Decimal("0.05")
+    assert result.events[0].vendor_reported_cost_usd == Decimal("0.05")
+    assert total.costs.cost_usd == Decimal("0.05")
     assert pricing_status(total) == "vendor-reported"
 
 
@@ -53,7 +53,7 @@ def test_aider_vendor_reported_cost_survives_parse_cache(monkeypatch, tmp_path) 
 
     warmed = load_usage(options)
 
-    assert warmed.events[0].vendor_reported_api_dollars == Decimal("0.05")
+    assert warmed.events[0].vendor_reported_cost_usd == Decimal("0.05")
 
     def explode(*args, **kwargs):  # pragma: no cover - only called on cache miss
         raise AssertionError("Aider history was reparsed instead of read from cache")
@@ -62,5 +62,5 @@ def test_aider_vendor_reported_cost_survives_parse_cache(monkeypatch, tmp_path) 
     cached = load_usage(options)
     total = aggregate_total(cached, options)
 
-    assert cached.events[0].vendor_reported_api_dollars == Decimal("0.05")
-    assert total.costs.api_dollars == Decimal("0.05")
+    assert cached.events[0].vendor_reported_cost_usd == Decimal("0.05")
+    assert total.costs.cost_usd == Decimal("0.05")

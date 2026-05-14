@@ -23,7 +23,7 @@ def test_init_writes_template(tmp_path) -> None:
     assert "top_threads" in text
     assert "no_parse_cache" in text
     assert "[budgets]" in text
-    assert "daily_credits" in text
+    assert "daily_cost_usd" in text
 
 
 def test_init_refuses_to_overwrite_without_force(tmp_path) -> None:

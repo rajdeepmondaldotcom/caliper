@@ -1,86 +1,33 @@
-"""Placeholder screens for areas not yet implemented in full.
-
-Each stub keeps the keymap navigable end-to-end so the user can move
-between sections without getting stuck. Replaced with real screens in
-later commits (T09-T20).
-"""
+"""Compatibility imports for the pre-0.0.12 TUI screen module path."""
 
 from __future__ import annotations
 
-from textual.app import ComposeResult
-from textual.screen import Screen
-from textual.widgets import Footer, Header, Static
+from caliper.tui.screens.budgets import BudgetsScreen
+from caliper.tui.screens.doctor import DoctorScreen
+from caliper.tui.screens.forecast import ForecastScreen
+from caliper.tui.screens.insights import InsightsScreen
+from caliper.tui.screens.intervals import IntervalsScreen
+from caliper.tui.screens.limits import LimitsScreen
+from caliper.tui.screens.live import LiveScreen
+from caliper.tui.screens.models import ModelsScreen
+from caliper.tui.screens.projects import ProjectsScreen
+from caliper.tui.screens.receipt import ReceiptScreen
+from caliper.tui.screens.sessions import SessionsScreen
+from caliper.tui.screens.welcome import WelcomeScreen
+from caliper.tui.screens.whatif import WhatIfScreen
 
-
-class _StubScreen(Screen):
-    DEFAULT_CSS = """
-    _StubScreen Static { content-align: center middle; width: 1fr; height: 1fr; }
-    """
-
-    TITLE: str = "Caliper"
-    HEADLINE: str = ""
-
-    def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        yield Static(
-            f"[b]{self.HEADLINE}[/b]\n\n"
-            "This screen lands in a later commit (T09-T20).\n"
-            "Press `esc` to return Home.",
-        )
-        yield Footer()
-
-    def on_key(self, event) -> None:  # noqa: D401
-        if event.key == "escape":
-            self.app.pop_screen()
-
-
-class SessionsScreen(_StubScreen):
-    HEADLINE = "Sessions"
-
-
-class IntervalsScreen(_StubScreen):
-    HEADLINE = "Daily / Weekly / Monthly"
-
-
-class ProjectsScreen(_StubScreen):
-    HEADLINE = "Projects"
-
-
-class ModelsScreen(_StubScreen):
-    HEADLINE = "Models + Tiers"
-
-
-class LimitsScreen(_StubScreen):
-    HEADLINE = "Limits"
-
-
-class LiveScreen(_StubScreen):
-    HEADLINE = "Live"
-
-
-class ForecastScreen(_StubScreen):
-    HEADLINE = "Forecast"
-
-
-class WhatIfScreen(_StubScreen):
-    HEADLINE = "What-If"
-
-
-class BudgetsScreen(_StubScreen):
-    HEADLINE = "Budgets"
-
-
-class InsightsScreen(_StubScreen):
-    HEADLINE = "Insights"
-
-
-class DoctorScreen(_StubScreen):
-    HEADLINE = "Doctor"
-
-
-class ReceiptScreen(_StubScreen):
-    HEADLINE = "Receipt"
-
-
-class WelcomeScreen(_StubScreen):
-    HEADLINE = "Welcome to Caliper"
+__all__ = [
+    "BudgetsScreen",
+    "DoctorScreen",
+    "ForecastScreen",
+    "InsightsScreen",
+    "IntervalsScreen",
+    "LimitsScreen",
+    "LiveScreen",
+    "ModelsScreen",
+    "ProjectsScreen",
+    "ReceiptScreen",
+    "SessionsScreen",
+    "WelcomeScreen",
+    "WhatIfScreen",
+]

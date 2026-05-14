@@ -47,7 +47,7 @@ def _receipt_fixture(tmp_path, when: dt.datetime | None = None) -> tuple:
 
 def test_metrics_text_includes_all_expected_metric_names() -> None:
     snapshot = MetricsSnapshot(
-        credits_used=123.45,
+        cost_usd=123.45,
         burn_per_hour=10.5,
         primary_window_percent=42.0,
         secondary_window_percent=8.0,
@@ -60,7 +60,7 @@ def test_metrics_text_includes_all_expected_metric_names() -> None:
     )
     body = build_metrics_text(snapshot).decode()
     for metric in (
-        "caliper_credits_used",
+        "caliper_cost_usd",
         "caliper_burn_per_hour",
         "caliper_window_used_percent",
         "caliper_tokens_total",
@@ -76,7 +76,7 @@ def test_metrics_text_includes_all_expected_metric_names() -> None:
 
 def test_metrics_text_handles_empty_tokens_dict() -> None:
     snapshot = MetricsSnapshot(
-        credits_used=0.0,
+        cost_usd=0.0,
         burn_per_hour=0.0,
         primary_window_percent=0.0,
         secondary_window_percent=0.0,
@@ -84,12 +84,12 @@ def test_metrics_text_handles_empty_tokens_dict() -> None:
         long_context_events_total=0,
     )
     body = build_metrics_text(snapshot).decode()
-    assert "caliper_credits_used 0.0" in body
+    assert "caliper_cost_usd 0.0" in body
 
 
 def test_metrics_handler_serves_metrics_and_404s() -> None:
     snapshot = MetricsSnapshot(
-        credits_used=1.0,
+        cost_usd=1.0,
         burn_per_hour=2.0,
         primary_window_percent=3.0,
         secondary_window_percent=4.0,
@@ -123,7 +123,7 @@ def test_metrics_handler_serves_metrics_and_404s() -> None:
     ok.do_GET()
     assert ok.status == 200
     assert ok.headers["Content-Type"].startswith("text/plain")
-    assert b"caliper_credits_used 1.0" in ok.wfile.getvalue()
+    assert b"caliper_cost_usd 1.0" in ok.wfile.getvalue()
 
     missing = TestHandler("/")
     missing.do_GET()
@@ -151,7 +151,7 @@ def test_serve_forever_closes_server(monkeypatch) -> None:
         "127.0.0.1",
         0,
         lambda: MetricsSnapshot(
-            credits_used=0,
+            cost_usd=0,
             burn_per_hour=0,
             primary_window_percent=0,
             secondary_window_percent=0,

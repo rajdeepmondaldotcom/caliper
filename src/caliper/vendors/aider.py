@@ -97,7 +97,7 @@ class AiderParser:
             duplicates=0,
             tier_sources={"vendor-default": len(events)} if events else {},
             plan_types=set(),
-            credit_samples=[],
+            rate_limit_samples=[],
             warnings=warnings,
             parser_issues=issues,
             vendor_stats={
@@ -209,7 +209,7 @@ def _parse_history(path: Path) -> list[UsageEvent]:
                 model_source="aider-history",
                 usage_source="aider-history",
                 vendor=VENDOR_AIDER,
-                vendor_reported_api_dollars=Decimal(message_cost),
+                vendor_reported_cost_usd=Decimal(message_cost),
                 source_line=index,
                 event_id=f"{path}:{index}",
                 dedupe_key=f"{path}:{index}:{message_cost}",

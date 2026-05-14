@@ -15,9 +15,8 @@ from caliper.windows import WindowState, compute_window_state, format_seconds_re
 
 @dataclass(frozen=True)
 class StatuslineTotals:
-    credits: Decimal
-    api_dollars: Decimal
-    cache_savings_api_dollars: Decimal
+    cost_usd: Decimal
+    cache_savings_cost_usd: Decimal
     input_tokens: int
     cached_input_tokens: int
     output_tokens: int
@@ -40,7 +39,7 @@ class StatuslineSnapshot:
     sessions: int
     latest_event: UsageEvent | None
     top_project: str
-    top_project_credits: Decimal
+    top_project_cost_usd: Decimal
     today: StatuslineTotals
     trailing_7d: StatuslineTotals
     primary: WindowState
@@ -82,11 +81,11 @@ def build_statusline_snapshot(
         sessions=len(sessions),
         latest_event=max(result.events, key=lambda event: event.timestamp, default=None),
         top_project=top_project.label if top_project else "",
-        top_project_credits=top_project.costs.adjusted_credits if top_project else Decimal("0"),
+        top_project_cost_usd=top_project.costs.cost_usd if top_project else Decimal("0"),
         today=today,
         trailing_7d=trailing,
-        primary=compute_window_state(result.credit_samples, now, "primary"),
-        secondary=compute_window_state(result.credit_samples, now, "secondary"),
+        primary=compute_window_state(result.rate_limit_samples, now, "primary"),
+        secondary=compute_window_state(result.rate_limit_samples, now, "secondary"),
         plan_types=tuple(sorted(result.plan_types)),
         pricing_status=pricing_status(full_total),
         warnings=warnings,
@@ -115,8 +114,8 @@ def statusline_payload(snapshot: StatuslineSnapshot) -> dict:
         },
         "top_project": {
             "label": snapshot.top_project,
-            "credits": float(snapshot.top_project_credits),
-            "credits_exact": decimal_string(snapshot.top_project_credits),
+            "cost_usd": float(snapshot.top_project_cost_usd),
+            "cost_usd_exact": decimal_string(snapshot.top_project_cost_usd),
         },
         "today": _totals_payload(snapshot.today),
         "trailing_7d": _totals_payload(snapshot.trailing_7d),
@@ -144,8 +143,8 @@ def render_statusline_text(snapshot: StatuslineSnapshot) -> str:
         identity = f"{model}/{tier}"
     parts = [
         identity,
-        f"today {_amount(snapshot.today.credits)} cr (${snapshot.today.api_dollars:,.2f})",
-        f"7d {_amount(snapshot.trailing_7d.credits)} cr",
+        f"today ${snapshot.today.cost_usd:,.2f}",
+        f"7d ${snapshot.trailing_7d.cost_usd:,.2f}",
         f"5h {_window_text(snapshot.primary)}",
         f"weekly {_window_text(snapshot.secondary)}",
         f"cache {snapshot.today.cache_ratio:.0%}",
@@ -177,14 +176,13 @@ def _totals(
         duplicates=0,
         tier_sources=result.tier_sources,
         plan_types=result.plan_types,
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
     total = aggregate_total(scoped, options, label=label, rate_card=rate_card)
     return StatuslineTotals(
-        credits=total.costs.adjusted_credits,
-        api_dollars=total.costs.api_dollars,
-        cache_savings_api_dollars=total.cache_savings.api_dollars,
+        cost_usd=total.costs.cost_usd,
+        cache_savings_cost_usd=total.cache_savings.cost_usd,
         input_tokens=total.totals.input_tokens,
         cached_input_tokens=total.totals.cached_input_tokens,
         output_tokens=total.totals.output_tokens,
@@ -201,12 +199,10 @@ def _totals_payload(totals: StatuslineTotals) -> dict:
         "output_tokens": totals.output_tokens,
         "total_tokens": totals.total_tokens,
         "cache_ratio": totals.cache_ratio,
-        "credits": float(totals.credits),
-        "credits_exact": decimal_string(totals.credits),
-        "api_dollars": float(totals.api_dollars),
-        "api_dollars_exact": decimal_string(totals.api_dollars),
-        "cache_savings_api_dollars": float(totals.cache_savings_api_dollars),
-        "cache_savings_api_dollars_exact": decimal_string(totals.cache_savings_api_dollars),
+        "cost_usd": float(totals.cost_usd),
+        "cost_usd_exact": decimal_string(totals.cost_usd),
+        "cache_savings_cost_usd": float(totals.cache_savings_cost_usd),
+        "cache_savings_cost_usd_exact": decimal_string(totals.cache_savings_cost_usd),
     }
 
 

@@ -62,7 +62,7 @@ def _two_vendor_result() -> LoadResult:
         duplicates=0,
         tier_sources={"logged": 3},
         plan_types={"pro"},
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
 
@@ -143,7 +143,7 @@ def test_single_vendor_skips_per_vendor_path(tmp_path):
         duplicates=0,
         tier_sources={"logged": 1},
         plan_types={"pro"},
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
     assert _has_multiple_tool_vendors(single) is False

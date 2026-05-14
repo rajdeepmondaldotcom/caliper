@@ -15,7 +15,7 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0+local"
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 __all__ = [
     "SCHEMA_VERSION",

@@ -71,7 +71,6 @@ def _token_event(when: dt.datetime, usage: dict) -> dict:
                 "plan_type": "pro",
                 "limit_id": "codex",
                 "limit_name": None,
-                "credits": None,
                 "primary": {"used_percent": 12.0, "window_minutes": 300},
                 "secondary": {"used_percent": 34.0, "window_minutes": 10_080},
             },

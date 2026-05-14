@@ -34,7 +34,7 @@ def test_persona_module_docstring_passes():
 def test_house_strings_pass():
     """A small set of strings the rest of the codebase will rely on."""
     house = [
-        "Last 7 days. 48,727 credits. $3,383.",
+        "Last 7 days. 48,727 cost_usd. $3,383.",
         "Decision: ship the smaller version on Tuesday.",
         "Pin tier with --tier anthropic-priority and re-run to compare.",
         "Run caliper rates refresh --online or pin with --rates.",

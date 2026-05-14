@@ -14,8 +14,8 @@ from rich.console import Console
 from rich.table import Table
 
 from caliper import SCHEMA_VERSION, __version__
-from caliper.aggregation import aggregate_many, aggregate_total
-from caliper.evidence import evidence_metadata
+from caliper.aggregation import aggregate_many, aggregate_total, budget_impact_sort_key
+from caliper.evidence import evidence_dimensions, evidence_metadata, worst_grade
 from caliper.humanize import compact_number, format_int, redact, short_table_label
 from caliper.models import (
     UNKNOWN_PROJECT,
@@ -26,6 +26,7 @@ from caliper.models import (
     RuntimeOptions,
     TokenTotals,
     decimal_string,
+    decimal_value,
 )
 from caliper.pricing import PRICING_SOURCES, RateCard, load_rate_card, pricing_catalog_status
 from caliper.subscriptions import subscription_plan_payload, subscription_warnings
@@ -49,6 +50,7 @@ def _make_console(buffer: io.StringIO, options: RuntimeOptions) -> Console:
 
 
 def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
+    reported = item.costs.reported_cost_usd if item.costs.vendor_reported_events else None
     return {
         "key": item.key,
         "label": redact(item.label, show_prompts),
@@ -62,18 +64,18 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "output_tokens": item.totals.output_tokens,
         "reasoning_output_tokens": item.totals.reasoning_output_tokens,
         "total_tokens": item.totals.total_tokens,
-        "credits": float(item.costs.adjusted_credits),
-        "standard_credits": float(item.costs.standard_credits),
-        "api_dollars": float(item.costs.api_dollars),
-        "credits_exact": decimal_string(item.costs.adjusted_credits),
-        "standard_credits_exact": decimal_string(item.costs.standard_credits),
-        "api_dollars_exact": decimal_string(item.costs.api_dollars),
-        "cache_savings_credits": float(item.cache_savings.adjusted_credits),
-        "cache_savings_standard_credits": float(item.cache_savings.standard_credits),
-        "cache_savings_api_dollars": float(item.cache_savings.api_dollars),
-        "cache_savings_credits_exact": decimal_string(item.cache_savings.adjusted_credits),
-        "cache_savings_standard_credits_exact": decimal_string(item.cache_savings.standard_credits),
-        "cache_savings_api_dollars_exact": decimal_string(item.cache_savings.api_dollars),
+        "cost_usd": float(item.costs.cost_usd),
+        "reported_cost_usd": float(reported) if reported is not None else None,
+        "calculated_cost_usd": float(item.costs.calculated_cost_usd),
+        "reported_minus_calculated_cost_usd": float(item.costs.reported_calculated_delta_usd),
+        "cost_usd_exact": decimal_string(item.costs.cost_usd),
+        "reported_cost_usd_exact": decimal_string(reported) if reported is not None else None,
+        "calculated_cost_usd_exact": decimal_string(item.costs.calculated_cost_usd),
+        "reported_minus_calculated_cost_usd_exact": decimal_string(
+            item.costs.reported_calculated_delta_usd
+        ),
+        "cache_savings_cost_usd": float(item.cache_savings.cost_usd),
+        "cache_savings_cost_usd_exact": decimal_string(item.cache_savings.cost_usd),
         "models": sorted(item.models),
         "model_vendors": sorted(item.model_vendors),
         "vendors": sorted(item.vendors),
@@ -101,8 +103,6 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "unknown_tier_events": item.unknown_tier_events,
         "pricing_status": pricing_status(item),
         "unpriced_events": item.costs.unpriced_events,
-        "api_unpriced_events": item.costs.api_unpriced_events,
-        "credit_unpriced_events": item.costs.credit_unpriced_events,
         "estimated_events": pricing_estimated_events(item),
         "ambiguous_reasoning_events": item.costs.ambiguous_reasoning_events,
         "local_rate_override_events": item.costs.local_override_events,
@@ -114,7 +114,8 @@ def sorted_model_breakdowns(item: Aggregate) -> list[ModelBreakdown]:
     return sorted(
         item.model_breakdowns.values(),
         key=lambda row: (
-            -row.costs.adjusted_credits,
+            -row.costs.cost_usd,
+            -row.totals.events,
             row.model,
             row.service_tier,
         ),
@@ -122,6 +123,7 @@ def sorted_model_breakdowns(item: Aggregate) -> list[ModelBreakdown]:
 
 
 def model_breakdown_to_dict(item: ModelBreakdown) -> dict:
+    reported = item.costs.reported_cost_usd if item.costs.vendor_reported_events else None
     return {
         "key": item.key,
         "model": item.model,
@@ -137,18 +139,18 @@ def model_breakdown_to_dict(item: ModelBreakdown) -> dict:
         "output_tokens": item.totals.output_tokens,
         "reasoning_output_tokens": item.totals.reasoning_output_tokens,
         "total_tokens": item.totals.total_tokens,
-        "credits": float(item.costs.adjusted_credits),
-        "standard_credits": float(item.costs.standard_credits),
-        "api_dollars": float(item.costs.api_dollars),
-        "credits_exact": decimal_string(item.costs.adjusted_credits),
-        "standard_credits_exact": decimal_string(item.costs.standard_credits),
-        "api_dollars_exact": decimal_string(item.costs.api_dollars),
-        "cache_savings_credits": float(item.cache_savings.adjusted_credits),
-        "cache_savings_standard_credits": float(item.cache_savings.standard_credits),
-        "cache_savings_api_dollars": float(item.cache_savings.api_dollars),
-        "cache_savings_credits_exact": decimal_string(item.cache_savings.adjusted_credits),
-        "cache_savings_standard_credits_exact": decimal_string(item.cache_savings.standard_credits),
-        "cache_savings_api_dollars_exact": decimal_string(item.cache_savings.api_dollars),
+        "cost_usd": float(item.costs.cost_usd),
+        "reported_cost_usd": float(reported) if reported is not None else None,
+        "calculated_cost_usd": float(item.costs.calculated_cost_usd),
+        "reported_minus_calculated_cost_usd": float(item.costs.reported_calculated_delta_usd),
+        "cost_usd_exact": decimal_string(item.costs.cost_usd),
+        "reported_cost_usd_exact": decimal_string(reported) if reported is not None else None,
+        "calculated_cost_usd_exact": decimal_string(item.costs.calculated_cost_usd),
+        "reported_minus_calculated_cost_usd_exact": decimal_string(
+            item.costs.reported_calculated_delta_usd
+        ),
+        "cache_savings_cost_usd": float(item.cache_savings.cost_usd),
+        "cache_savings_cost_usd_exact": decimal_string(item.cache_savings.cost_usd),
         "plan_types": sorted(item.plan_types),
         "usage_sources": sorted(item.usage_sources),
         "model_sources": sorted(item.model_sources),
@@ -158,8 +160,6 @@ def model_breakdown_to_dict(item: ModelBreakdown) -> dict:
         "fallback_model_events": item.fallback_model_events,
         "pricing_status": model_breakdown_pricing_status(item),
         "unpriced_events": item.costs.unpriced_events,
-        "api_unpriced_events": item.costs.api_unpriced_events,
-        "credit_unpriced_events": item.costs.credit_unpriced_events,
         "estimated_events": model_breakdown_estimated_events(item),
         "ambiguous_reasoning_events": item.costs.ambiguous_reasoning_events,
         "local_rate_override_events": item.costs.local_override_events,
@@ -179,7 +179,9 @@ def model_breakdown_estimated_events(item: ModelBreakdown) -> int:
 
 
 def model_breakdown_pricing_status(item: ModelBreakdown) -> str:
-    if item.costs.unpriced_events or item.unknown_model_events:
+    if item.costs.unpriced_events and not item.costs.vendor_reported_events:
+        return "partial"
+    if item.unknown_model_events and not item.costs.vendor_reported_events:
         return "partial"
     if model_breakdown_estimated_events(item):
         return "estimated"
@@ -198,7 +200,9 @@ def pricing_estimated_events(item: Aggregate) -> int:
 
 
 def pricing_status(item: Aggregate) -> str:
-    if item.costs.unpriced_events or item.unknown_model_events:
+    if item.costs.unpriced_events and not item.costs.vendor_reported_events:
+        return "partial"
+    if item.unknown_model_events and not item.costs.vendor_reported_events:
         return "partial"
     if pricing_estimated_events(item):
         return "estimated"
@@ -209,10 +213,14 @@ def pricing_status(item: Aggregate) -> str:
 
 def pricing_warnings(item: Aggregate) -> list[str]:
     warnings: list[str] = []
-    if item.costs.api_unpriced_events:
-        warnings.append(f"{item.costs.api_unpriced_events:,} events have no API-dollar rate.")
-    if item.costs.credit_unpriced_events:
-        warnings.append(f"{item.costs.credit_unpriced_events:,} events have no Codex credit rate.")
+    if item.costs.unpriced_events:
+        if item.costs.vendor_reported_events:
+            warnings.append(
+                f"{item.costs.unpriced_events:,} events could not be independently "
+                "calculated from the local USD rate card."
+            )
+        else:
+            warnings.append(f"{item.costs.unpriced_events:,} events have no USD rate.")
     if item.unknown_model_events:
         warnings.append(
             f"{item.unknown_model_events:,} events used models with no known rate card."
@@ -257,13 +265,9 @@ def report_payload(
         rate_card=card,
     )
     total = total_rows[0] if total_rows else Aggregate(key="total", label="Total")
-    projects = sorted(project_rows, key=lambda item: item.costs.adjusted_credits, reverse=True)
-    model_mode = sorted(
-        model_mode_rows,
-        key=lambda item: item.costs.adjusted_credits,
-        reverse=True,
-    )
-    samples = _report_rate_limit_samples(result.credit_samples, options)
+    projects = sorted(project_rows, key=budget_impact_sort_key)
+    model_mode = sorted(model_mode_rows, key=budget_impact_sort_key)
+    samples = _report_rate_limit_samples(result.rate_limit_samples, options)
     return {
         "caliper": {
             "version": __version__,
@@ -304,15 +308,19 @@ def report_payload(
             "warning_count": len(result.warnings),
             "workspace_coverage": workspace_coverage(result),
             "vendor_event_counts": vendor_event_counts(result),
+            "dedupe": {
+                "duplicates": result.duplicates,
+                "by_strategy": dict(result.dedupe_stats),
+            },
             "evidence": evidence_metadata(result, total),
             "row_count": len(rows),
             "row_limit": options.top_threads,
             "rows_truncated": bool(options.top_threads and len(rows) >= options.top_threads),
-            "rate_limit_sample_count": len(result.credit_samples),
+            "rate_limit_sample_count": len(result.rate_limit_samples),
             "rate_limit_sample_limit": None
             if options.include_all_rate_limit_samples
             else options.rate_limit_sample_limit,
-            "rate_limit_samples_truncated": len(samples) < len(result.credit_samples),
+            "rate_limit_samples_truncated": len(samples) < len(result.rate_limit_samples),
         },
         "rate_limit_samples": [rate_limit_sample_to_dict(sample) for sample in samples],
         "warnings": result.warnings,
@@ -457,8 +465,9 @@ def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOption
     table.add_column("Cached", justify="right")
     table.add_column("Output", justify="right")
     table.add_column("Total", justify="right")
-    table.add_column("Credits", justify="right")
-    table.add_column("API $", justify="right")
+    table.add_column("Cost $", justify="right")
+    table.add_column("Reported $", justify="right")
+    table.add_column("Calc $", justify="right")
     for row in rows:
         table.add_row(
             short_table_label(redact(row.label, options.show_prompts)),
@@ -467,8 +476,9 @@ def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOption
             _table_int(row.totals.cached_input_tokens, options),
             _table_int(row.totals.output_tokens, options),
             _table_int(row.totals.total_tokens, options),
-            _table_float(row.costs.adjusted_credits, options),
-            _table_float(row.costs.api_dollars, options, prefix="$"),
+            _table_float(row.costs.cost_usd, options, prefix="$"),
+            _reported_cost(row.costs, options),
+            _table_float(row.costs.calculated_cost_usd, options, prefix="$"),
         )
     table.add_section()
     table.add_row(
@@ -478,8 +488,9 @@ def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOption
         _table_int(total.totals.cached_input_tokens, options),
         _table_int(total.totals.output_tokens, options),
         _table_int(total.totals.total_tokens, options),
-        _table_float(total.costs.adjusted_credits, options),
-        _table_float(total.costs.api_dollars, options, prefix="$"),
+        _table_float(total.costs.cost_usd, options, prefix="$"),
+        _reported_cost(total.costs, options),
+        _table_float(total.costs.calculated_cost_usd, options, prefix="$"),
     )
     return table
 
@@ -554,7 +565,7 @@ def vendor_chip(row: Aggregate) -> str:
         seen: set[str] = set()
         for breakdown in sorted(
             breakdowns.values(),
-            key=lambda mb: float(mb.costs.api_dollars),
+            key=lambda mb: mb.costs.cost_usd,
             reverse=True,
         ):
             vendor = getattr(breakdown, "model_vendor", "unknown") or "unknown"
@@ -578,7 +589,7 @@ def _rank_models(row: Aggregate) -> list[str]:
         breakdown.model
         for breakdown in sorted(
             breakdowns.values(),
-            key=lambda mb: float(mb.costs.api_dollars),
+            key=lambda mb: mb.costs.cost_usd,
             reverse=True,
         )
     ]
@@ -588,14 +599,15 @@ def _print_report_footer(console: Console, result: LoadResult, total: Aggregate)
     events_text = format_int(total.totals.events)
     duplicates_text = format_int(result.duplicates)
     console.print(f"Events: {events_text} | Duplicates skipped: {duplicates_text}")
-    if total.costs.adjusted_credits != total.costs.standard_credits:
-        console.print(f"Standard-mode baseline: {total.costs.standard_credits:,.2f} credits")
-    if total.cache_savings.adjusted_credits or total.cache_savings.api_dollars:
+    if total.costs.vendor_reported_events:
         console.print(
-            "Cache savings: "
-            f"{total.cache_savings.adjusted_credits:,.2f} credits | "
-            f"${total.cache_savings.api_dollars:,.2f}"
+            "Reported vs calculated: "
+            f"${total.costs.reported_cost_usd:,.2f} reported | "
+            f"${total.costs.calculated_cost_usd:,.2f} calculated | "
+            f"${total.costs.reported_calculated_delta_usd:+,.2f} delta"
         )
+    if total.cache_savings.cost_usd:
+        console.print(f"Cache savings: ${total.cache_savings.cost_usd:,.2f}")
     if result.tier_sources:
         sources = ", ".join(
             f"{key}={format_int(value)}" for key, value in sorted(result.tier_sources.items())
@@ -603,6 +615,18 @@ def _print_report_footer(console: Console, result: LoadResult, total: Aggregate)
         console.print(f"Service-tier sources: {sources}")
     if result.plan_types:
         console.print(f"Plan types: {', '.join(sorted(result.plan_types))}")
+    _print_accuracy_footer(console, result, total)
+
+
+def _print_accuracy_footer(console: Console, result: LoadResult, total: Aggregate) -> None:
+    dimensions = evidence_dimensions(result, total)
+    grade = worst_grade([dimension.grade for dimension in dimensions])
+    if grade == "exact":
+        console.print("Accuracy: exact")
+        return
+    reasons = [reason for dimension in dimensions for reason in dimension.reasons]
+    detail = f" ({reasons[0]})" if reasons else ""
+    console.print(f"[yellow]Accuracy:[/yellow] {grade}{detail}")
 
 
 def _table_int(value: int, options: RuntimeOptions) -> str:
@@ -612,10 +636,15 @@ def _table_int(value: int, options: RuntimeOptions) -> str:
 def _table_float(value: Any, options: RuntimeOptions, prefix: str = "") -> str:
     if options.compact:
         return compact_number(value, prefix=prefix)
-    amount = float(value)
     if prefix:
-        return f"{prefix}{amount:,.2f}"
-    return f"{amount:,.2f}"
+        return f"{prefix}{decimal_value(value):,.2f}"
+    return f"{decimal_value(value):,.2f}"
+
+
+def _reported_cost(costs: CostTotals, options: RuntimeOptions) -> str:
+    if not costs.vendor_reported_events:
+        return "-"
+    return _table_float(costs.reported_cost_usd, options, prefix="$")
 
 
 def render_json(
@@ -648,9 +677,10 @@ def render_csv(rows: list[Aggregate], show_prompts: bool) -> str:
             "output_tokens",
             "reasoning_output_tokens",
             "total_tokens",
-            "credits",
-            "standard_credits",
-            "api_dollars",
+            "cost_usd",
+            "reported_cost_usd",
+            "calculated_cost_usd",
+            "reported_minus_calculated_cost_usd",
             "pricing_status",
             "unpriced_events",
             "estimated_events",
@@ -675,8 +705,9 @@ def render_markdown(rows: list[Aggregate], show_prompts: bool) -> str:
         "Cached",
         "Output",
         "Total",
-        "Credits",
-        "API $",
+        "Cost $",
+        "Reported $",
+        "Calc $",
         "Pricing",
     ]
     lines = [
@@ -704,8 +735,13 @@ def render_markdown(rows: list[Aggregate], show_prompts: bool) -> str:
                     str(row.totals.cached_input_tokens),
                     str(row.totals.output_tokens),
                     str(row.totals.total_tokens),
-                    f"{row.costs.adjusted_credits:.2f}",
-                    f"{row.costs.api_dollars:.2f}",
+                    f"{row.costs.cost_usd:.2f}",
+                    (
+                        f"{row.costs.reported_cost_usd:.2f}"
+                        if row.costs.vendor_reported_events
+                        else ""
+                    ),
+                    f"{row.costs.calculated_cost_usd:.2f}",
                     pricing_status(row),
                 ]
             )
@@ -729,8 +765,9 @@ def render_markdown(rows: list[Aggregate], show_prompts: bool) -> str:
                     str(totals.cached_input_tokens),
                     str(totals.output_tokens),
                     str(totals.total_tokens),
-                    f"{costs.adjusted_credits:.2f}",
-                    f"{costs.api_dollars:.2f}",
+                    f"{costs.cost_usd:.2f}",
+                    f"{costs.reported_cost_usd:.2f}" if costs.vendor_reported_events else "",
+                    f"{costs.calculated_cost_usd:.2f}",
                     total_status,
                 ]
             )
@@ -773,7 +810,6 @@ LIMITS_CSV_FIELDS = (
     "limit_id",
     "limit_name",
     "plan_type",
-    "credits",
     "primary_used_percent",
     "primary_window_minutes",
     "primary_resets_at",
@@ -789,7 +825,7 @@ def render_limits_table(result: LoadResult, options: RuntimeOptions) -> str:
     console = _make_console(buffer, options)
     console.print("[bold]Caliper - Limits[/bold]")
     console.print(f"Window: {window_label(options.start, options.end, options.timezone)}")
-    samples = _recent_samples(result.credit_samples, options.top_threads)
+    samples = _recent_samples(result.rate_limit_samples, options.top_threads)
     if not samples:
         console.print("No rate-limit samples found.")
         return buffer.getvalue()
@@ -804,7 +840,7 @@ def _print_compact_limit_samples(console: Console, samples: list) -> None:
     for sample in samples:
         limit = sample.limit_name or sample.limit_id or "-"
         console.print(
-            f"- {iso_z(sample.timestamp)} | limit={limit} | credits={sample.credits} | "
+            f"- {iso_z(sample.timestamp)} | limit={limit} | "
             f"primary={sample.primary_used_percent}%/"
             f"{sample.primary_window_minutes}m reset={sample.primary_resets_at} | "
             f"secondary={sample.secondary_used_percent}%/"
@@ -817,7 +853,6 @@ def _limits_table(samples: list, options: RuntimeOptions) -> Table:
     table.add_column("Time")
     table.add_column("Limit")
     table.add_column("Plan")
-    table.add_column("Credits", justify="right")
     table.add_column("Primary %", justify="right")
     table.add_column("Reset In", justify="right")
     table.add_column("Secondary %", justify="right")
@@ -827,7 +862,6 @@ def _limits_table(samples: list, options: RuntimeOptions) -> Table:
             iso_z(sample.timestamp),
             sample.limit_name or sample.limit_id or "-",
             str(sample.plan_type or "-"),
-            str(sample.credits if sample.credits is not None else "-"),
             _percent(sample.primary_used_percent),
             _reset_epoch(sample.primary_resets_at),
             _percent(sample.secondary_used_percent),
@@ -874,19 +908,19 @@ def render_limits_csv(result: LoadResult, options: RuntimeOptions) -> str:
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=list(LIMITS_CSV_FIELDS))
     writer.writeheader()
-    for sample in _recent_samples(result.credit_samples, options.top_threads):
+    for sample in _recent_samples(result.rate_limit_samples, options.top_threads):
         row = rate_limit_sample_to_dict(sample)
         writer.writerow({key: row.get(key, "") for key in LIMITS_CSV_FIELDS})
     return out.getvalue()
 
 
 def render_limits_markdown(result: LoadResult, options: RuntimeOptions) -> str:
-    headers = ["Timestamp", "Limit", "Plan", "Credits", "Primary %", "Secondary %"]
+    headers = ["Timestamp", "Limit", "Plan", "Primary %", "Secondary %"]
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
     ]
-    for sample in _recent_samples(result.credit_samples, options.top_threads):
+    for sample in _recent_samples(result.rate_limit_samples, options.top_threads):
         primary = sample.primary_used_percent
         secondary = sample.secondary_used_percent
         lines.append(
@@ -896,7 +930,6 @@ def render_limits_markdown(result: LoadResult, options: RuntimeOptions) -> str:
                     iso_z(sample.timestamp),
                     sample.limit_name or sample.limit_id or "",
                     str(sample.plan_type or ""),
-                    str(sample.credits if sample.credits is not None else ""),
                     str(primary if primary is not None else ""),
                     str(secondary if secondary is not None else ""),
                 ]

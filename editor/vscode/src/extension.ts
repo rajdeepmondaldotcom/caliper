@@ -2,7 +2,7 @@ import * as cp from 'child_process';
 import * as vscode from 'vscode';
 
 type StatusPayload = {
-  today?: { credits?: number; api_dollars?: number };
+  today?: { cost_usd?: number };
   pricing?: { status?: string };
 };
 
@@ -34,9 +34,8 @@ function updateStatus(item: vscode.StatusBarItem) {
       return;
     }
     const payload = JSON.parse(stdout || '{}') as StatusPayload;
-    const credits = payload.today?.credits ?? 0;
-    const dollars = payload.today?.api_dollars ?? 0;
-    item.text = `Caliper ${credits.toFixed(0)} cr / $${dollars.toFixed(2)}`;
+    const dollars = payload.today?.cost_usd ?? 0;
+    item.text = `Caliper $${dollars.toFixed(2)}`;
     item.tooltip = `Pricing: ${payload.pricing?.status ?? 'unknown'}`;
     item.show();
   });

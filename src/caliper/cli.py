@@ -34,6 +34,7 @@ from caliper.aggregation import (
     aggregate_weekly,
 )
 from caliper.arbitrage import explain as explain_arbitrage
+from caliper.arbitrage import recommend as recommend_arbitrage
 from caliper.arbitrage import suggest as suggest_arbitrage
 from caliper.budgets import (
     SEVERITY_BREACH,
@@ -599,7 +600,7 @@ def _render_grouped_per_vendor(
             duplicates=0,
             tier_sources=result.tier_sources,
             plan_types=result.plan_types,
-            credit_samples=result.credit_samples,
+            rate_limit_samples=result.rate_limit_samples,
             warnings=[],
             parser_issues=result.parser_issues,
             vendor_stats=result.vendor_stats,
@@ -631,7 +632,7 @@ def _run_session_id(values: dict, session_id: str) -> None:
         duplicates=0,
         tier_sources=result.tier_sources,
         plan_types=result.plan_types,
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=result.warnings,
         parser_issues=result.parser_issues,
         vendor_stats=result.vendor_stats,
@@ -750,7 +751,7 @@ def _compat_totals(row: Aggregate) -> dict[str, Any]:
         ),
         "cacheReadTokens": row.totals.cache_read_input_tokens,
         "totalTokens": row.totals.total_tokens,
-        "totalCost": float(row.costs.api_dollars),
+        "totalCost": float(row.costs.cost_usd),
     }
 
 
@@ -763,7 +764,7 @@ def _compat_model_breakdown(row) -> dict[str, Any]:
             row.totals.cache_creation_input_tokens + row.totals.cache_creation_input_1h_tokens
         ),
         "cacheReadTokens": row.totals.cache_read_input_tokens,
-        "cost": float(row.costs.api_dollars),
+        "cost": float(row.costs.cost_usd),
     }
 
 
@@ -995,7 +996,7 @@ def _render_overview_per_vendor(
             duplicates=0,
             tier_sources=result.tier_sources,
             plan_types=result.plan_types,
-            credit_samples=result.credit_samples,
+            rate_limit_samples=result.rate_limit_samples,
             warnings=[],
             parser_issues=result.parser_issues,
             vendor_stats=result.vendor_stats,
@@ -1455,8 +1456,7 @@ def evidence(
             "cached_input_tokens": total.totals.cached_input_tokens,
             "output_tokens": total.totals.output_tokens,
             "total_tokens": total.totals.total_tokens,
-            "api_dollars": str(total.costs.api_dollars),
-            "credits": str(total.costs.adjusted_credits),
+            "cost_usd": str(total.costs.cost_usd),
         },
         "evidence": evidence_metadata(result, total),
         "rows": rows,
@@ -1592,12 +1592,21 @@ def _render_insights_table(items) -> str:
         local_console.print("No insights for this window.")
         return buffer.getvalue()
     table = Table(show_lines=False, expand=True)
+    table.add_column("Priority", justify="right")
     table.add_column("Severity")
     table.add_column("Insight")
     table.add_column("Detail")
+    table.add_column("Impact")
     table.add_column("Action")
     for item in items:
-        table.add_row(item.severity, item.title, item.detail, item.action)
+        table.add_row(
+            str(getattr(item, "priority", "")),
+            item.severity,
+            item.title,
+            item.detail,
+            getattr(item, "impact_label", ""),
+            item.action,
+        )
     local_console.print(table)
     return buffer.getvalue()
 
@@ -1876,15 +1885,13 @@ def init(
         "# Severity: ok below warn_at, warn at warn_at (default 80%), breach at 100%.\n"
         "# Exit codes: 0 ok, 1 warn, 2 breach.\n"
         "[budgets]\n"
-        "# daily_credits = 25000\n"
-        "# weekly_credits = 100000\n"
-        "# monthly_credits = 400000\n"
-        "# weekly_api_dollars = 50.0\n"
-        "# monthly_api_dollars = 500.0\n"
+        "# daily_cost_usd = 25.0\n"
+        "# weekly_cost_usd = 50.0\n"
+        "# monthly_cost_usd = 500.0\n"
         "\n"
         "# Nested form when you want a custom warn threshold per period:\n"
         "# [budgets.monthly]\n"
-        "# credits = 500000\n"
+        "# cost_usd = 500.0\n"
         "# warn_at = 0.7\n"
     )
     path.write_text(template)
@@ -2102,10 +2109,8 @@ def rates_show(
 
     table = Table(title="Models")
     table.add_column("Model")
-    table.add_column("Fast×", justify="right")
     table.add_column("Long context")
-    table.add_column("API ($/M)")
-    table.add_column("Credits (/M)")
+    table.add_column("USD ($/M)")
     for card in MODEL_CARDS:
         long_ctx = (
             f">{format_int(card.long_context.threshold)} → "
@@ -2115,10 +2120,8 @@ def rates_show(
         )
         table.add_row(
             card.name,
-            f"{card.fast_multiplier:g}",
             long_ctx,
             _format_rates_label(card.api_rates),
-            _format_rates_label(card.credit_rates),
         )
     console.print(table)
 
@@ -2251,31 +2254,18 @@ def rates_catalog(
         console.print(f"[dim]Showing 100 of {len(rows):,} models; use --query to narrow.[/dim]")
 
 
-def _daily_credit_series(events, options: RuntimeOptions, rate_card: RateCard) -> list[float]:
-    """Sum adjusted credits per local-tz day across the given events."""
+def _daily_cost_usd_series(events, options: RuntimeOptions, rate_card: RateCard) -> list[float]:
+    """Sum effective USD per local-tz day across the given events."""
     result = LoadResult(
         events=list(events),
         duplicates=0,
         tier_sources={},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
     rows = aggregate_daily(result, options, rate_card=rate_card)
-    return [float(row.costs.adjusted_credits) for row in rows]
-
-
-def _daily_api_dollar_series(events, options: RuntimeOptions, rate_card: RateCard) -> list[float]:
-    result = LoadResult(
-        events=list(events),
-        duplicates=0,
-        tier_sources={},
-        plan_types=set(),
-        credit_samples=[],
-        warnings=[],
-    )
-    rows = aggregate_daily(result, options, rate_card=rate_card)
-    return [float(row.costs.api_dollars) for row in rows]
+    return [float(row.costs.cost_usd) for row in rows]
 
 
 def _sparkline(values: list[float]) -> str:
@@ -2309,9 +2299,9 @@ def forecast(
     cap: Annotated[
         float | None,
         typer.Option(
-            "--monthly-credit-cap",
+            "--monthly-cost-cap",
             "--cap",
-            help="Plan credit cap. Compute days-to-depletion.",
+            help="Monthly USD cap. Compute days-to-depletion.",
         ),
     ] = None,
     output_format: FormatOpt = "table",
@@ -2325,7 +2315,7 @@ def forecast(
     pricing_mode: PricingModeOpt = "model",
     vendors: VendorOpt = None,
 ) -> None:
-    """Project month-end credits with a ±1σ band. Pass --cap for days-to-depletion."""
+    """Project month-end cost with a ±1σ band. Pass --cap for days-to-depletion."""
     _validate_format(output_format)
     try:
         options = build_options(
@@ -2348,12 +2338,10 @@ def forecast(
     total = aggregate_total(result, options, rate_card=rate_card)
     status = pricing_status(total)
     warnings = pricing_warnings(total)
-    daily = _daily_credit_series(result.events, options, rate_card)
-    daily_dollars = _daily_api_dollar_series(result.events, options, rate_card)
+    daily = _daily_cost_usd_series(result.events, options, rate_card)
     now = dt.datetime.now(tz=local_timezone())
     days_remaining = _days_remaining_in_month(now)
-    projection = project_forecast(daily, days_remaining, unit="credits", cap=cap)
-    dollar_projection = project_forecast(daily_dollars, days_remaining, unit="API $")
+    projection = project_forecast(daily, days_remaining, unit="cost_usd", cap=cap)
     sparkline = _sparkline(daily)
 
     forecast_payload = {
@@ -2370,15 +2358,10 @@ def forecast(
         "days_to_cap": projection.days_to_cap,
         "sparkline": sparkline,
         "projections": {
-            "credits": {
+            "cost_usd": {
                 "linear_total": projection.linear_total,
                 "ewma_total": projection.ewma_total,
                 "daily_mean": projection.daily_mean,
-            },
-            "api_dollars": {
-                "linear_total": dollar_projection.linear_total,
-                "ewma_total": dollar_projection.ewma_total,
-                "daily_mean": dollar_projection.daily_mean,
             },
         },
         "pricing_status": status,
@@ -2386,18 +2369,10 @@ def forecast(
     }
     forecast_records = [
         {
-            "unit": "credits",
+            "unit": "cost_usd",
             "daily_mean": f"{projection.daily_mean:.2f}",
             "linear_total": f"{projection.linear_total:.2f}",
             "ewma_total": f"{projection.ewma_total:.2f}",
-            "sparkline": sparkline,
-            "pricing_status": status,
-        },
-        {
-            "unit": "api_dollars",
-            "daily_mean": f"{dollar_projection.daily_mean:.2f}",
-            "linear_total": f"{dollar_projection.linear_total:.2f}",
-            "ewma_total": f"{dollar_projection.ewma_total:.2f}",
             "sparkline": sparkline,
             "pricing_status": status,
         },
@@ -2425,18 +2400,17 @@ def forecast(
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column(style="dim", justify="right")
     table.add_column()
-    table.add_row("Daily mean", f"{projection.daily_mean:,.2f} {projection.unit}")
-    table.add_row("Daily σ", f"{projection.daily_stdev:,.2f} {projection.unit}")
-    table.add_row("Linear projection", f"{projection.linear_total:,.2f} {projection.unit}")
-    table.add_row("API $ projection", f"${dollar_projection.linear_total:,.2f}")
+    table.add_row("Daily mean", f"${projection.daily_mean:,.2f}")
+    table.add_row("Daily σ", f"${projection.daily_stdev:,.2f}")
+    table.add_row("Linear projection", f"${projection.linear_total:,.2f}")
     table.add_row(
         "  ±1σ band",
-        f"{projection.linear_low:,.2f} – {projection.linear_high:,.2f}",
+        f"${projection.linear_low:,.2f} - ${projection.linear_high:,.2f}",
     )
-    table.add_row("EWMA projection", f"{projection.ewma_total:,.2f} {projection.unit}")
+    table.add_row("EWMA projection", f"${projection.ewma_total:,.2f}")
     table.add_row("Trend", sparkline or "no usage")
     if projection.cap is not None and projection.days_to_cap is not None:
-        table.add_row("Plan cap", f"{projection.cap:,.2f} {projection.unit}")
+        table.add_row("Plan cap", f"${projection.cap:,.2f}")
         table.add_row("Days to depletion at mean rate", f"{projection.days_to_cap:,.1f}")
     console.print(table)
 
@@ -2507,7 +2481,7 @@ def compare(
         ),
     ] = "total",
 ) -> None:
-    """Compare two windows side-by-side. Reports credit and dollar deltas."""
+    """Compare two windows side-by-side. Reports cost and token deltas."""
     _validate_format(output_format)
     if by not in {"total", "vendor"}:
         raise _exit_error("--by must be one of: total, vendor")
@@ -2556,10 +2530,7 @@ def compare(
         )
         return
 
-    credits_delta, credits_pct = amount_delta(
-        agg_a.costs.adjusted_credits, agg_b.costs.adjusted_credits
-    )
-    dollars_delta, dollars_pct = amount_delta(agg_a.costs.api_dollars, agg_b.costs.api_dollars)
+    cost_delta, cost_pct = amount_delta(agg_a.costs.cost_usd, agg_b.costs.cost_usd)
     tokens_delta, tokens_pct = amount_delta(agg_a.totals.total_tokens, agg_b.totals.total_tokens)
     sparse_warning = sparse_comparison_warning(agg_a, agg_b)
 
@@ -2570,10 +2541,8 @@ def compare(
                     "a": interval_summary(interval_a, agg_a),
                     "b": interval_summary(interval_b, agg_b),
                     "delta": {
-                        **amount_fields("credits", credits_delta),
-                        "credits_pct": credits_pct,
-                        **amount_fields("api_dollars", dollars_delta),
-                        "api_dollars_pct": dollars_pct,
+                        **amount_fields("cost_usd", cost_delta),
+                        "cost_usd_pct": cost_pct,
                         "tokens": tokens_delta,
                         "tokens_pct": tokens_pct,
                     },
@@ -2585,18 +2554,11 @@ def compare(
 
     compare_records = [
         {
-            "metric": "credits",
-            "a": agg_a.costs.adjusted_credits,
-            "b": agg_b.costs.adjusted_credits,
-            "delta": credits_delta,
-            "pct": credits_pct,
-        },
-        {
-            "metric": "api_dollars",
-            "a": agg_a.costs.api_dollars,
-            "b": agg_b.costs.api_dollars,
-            "delta": dollars_delta,
-            "pct": dollars_pct,
+            "metric": "cost_usd",
+            "a": agg_a.costs.cost_usd,
+            "b": agg_b.costs.cost_usd,
+            "delta": cost_delta,
+            "pct": cost_pct,
         },
         {
             "metric": "tokens",
@@ -2632,18 +2594,11 @@ def compare(
     table.add_column("Δ", justify="right")
     table.add_column("%", justify="right")
     table.add_row(
-        "Credits",
-        f"{agg_a.costs.adjusted_credits:,.2f}",
-        f"{agg_b.costs.adjusted_credits:,.2f}",
-        f"{credits_delta:+,.2f}",
-        f"{credits_pct:+.1f}%",
-    )
-    table.add_row(
-        "API $",
-        f"${agg_a.costs.api_dollars:,.2f}",
-        f"${agg_b.costs.api_dollars:,.2f}",
-        f"{dollars_delta:+,.2f}",
-        f"{dollars_pct:+.1f}%",
+        "Cost $",
+        f"${agg_a.costs.cost_usd:,.2f}",
+        f"${agg_b.costs.cost_usd:,.2f}",
+        f"{cost_delta:+,.2f}",
+        f"{cost_pct:+.1f}%",
     )
     table.add_row(
         "Tokens",
@@ -2681,30 +2636,23 @@ def _vendor_compare_rows(
     for vendor_id in vendors:
         agg_a = a_by_vendor.get(vendor_id)
         agg_b = b_by_vendor.get(vendor_id)
-        credits_a = agg_a.costs.adjusted_credits if agg_a else zero
-        credits_b = agg_b.costs.adjusted_credits if agg_b else zero
-        dollars_a = agg_a.costs.api_dollars if agg_a else zero
-        dollars_b = agg_b.costs.api_dollars if agg_b else zero
+        cost_a = agg_a.costs.cost_usd if agg_a else zero
+        cost_b = agg_b.costs.cost_usd if agg_b else zero
         tokens_a = agg_a.totals.total_tokens if agg_a else 0
         tokens_b = agg_b.totals.total_tokens if agg_b else 0
         events_a = agg_a.totals.events if agg_a else 0
         events_b = agg_b.totals.events if agg_b else 0
-        credits_delta, credits_pct = amount_delta(credits_a, credits_b)
-        dollars_delta, dollars_pct = amount_delta(dollars_a, dollars_b)
+        cost_delta, cost_pct = amount_delta(cost_a, cost_b)
         tokens_delta, tokens_pct = amount_delta(tokens_a, tokens_b)
         rows.append(
             {
                 "vendor": vendor_id,
                 "events_a": events_a,
                 "events_b": events_b,
-                "credits_a": credits_a,
-                "credits_b": credits_b,
-                "credits_delta": credits_delta,
-                "credits_pct": credits_pct,
-                "api_dollars_a": dollars_a,
-                "api_dollars_b": dollars_b,
-                "api_dollars_delta": dollars_delta,
-                "api_dollars_pct": dollars_pct,
+                "cost_usd_a": cost_a,
+                "cost_usd_b": cost_b,
+                "cost_usd_delta": cost_delta,
+                "cost_usd_pct": cost_pct,
                 "tokens_a": tokens_a,
                 "tokens_b": tokens_b,
                 "tokens_delta": tokens_delta,
@@ -2742,14 +2690,10 @@ def _render_compare_by_vendor(
                 {
                     "vendor": row["vendor"],
                     "events": {"a": row["events_a"], "b": row["events_b"]},
-                    **amount_fields("credits_a", row["credits_a"]),
-                    **amount_fields("credits_b", row["credits_b"]),
-                    **amount_fields("credits_delta", row["credits_delta"]),
-                    "credits_pct": row["credits_pct"],
-                    **amount_fields("api_dollars_a", row["api_dollars_a"]),
-                    **amount_fields("api_dollars_b", row["api_dollars_b"]),
-                    **amount_fields("api_dollars_delta", row["api_dollars_delta"]),
-                    "api_dollars_pct": row["api_dollars_pct"],
+                    **amount_fields("cost_usd_a", row["cost_usd_a"]),
+                    **amount_fields("cost_usd_b", row["cost_usd_b"]),
+                    **amount_fields("cost_usd_delta", row["cost_usd_delta"]),
+                    "cost_usd_pct": row["cost_usd_pct"],
                     "tokens": {
                         "a": row["tokens_a"],
                         "b": row["tokens_b"],
@@ -2781,23 +2725,17 @@ def _render_compare_by_vendor(
     )
     table = Table()
     table.add_column("Vendor")
-    table.add_column("Credits A", justify="right")
-    table.add_column("Credits B", justify="right")
-    table.add_column("Δ Credits", justify="right")
-    table.add_column("API $ A", justify="right")
-    table.add_column("API $ B", justify="right")
-    table.add_column("Δ API $", justify="right")
+    table.add_column("Cost $ A", justify="right")
+    table.add_column("Cost $ B", justify="right")
+    table.add_column("Δ Cost $", justify="right")
     table.add_column("Tokens A", justify="right")
     table.add_column("Tokens B", justify="right")
     for row in rows:
         table.add_row(
             row["vendor"],
-            f"{row['credits_a']:,.2f}",
-            f"{row['credits_b']:,.2f}",
-            f"{row['credits_delta']:+,.2f}",
-            f"${row['api_dollars_a']:,.2f}",
-            f"${row['api_dollars_b']:,.2f}",
-            f"{row['api_dollars_delta']:+,.2f}",
+            f"${row['cost_usd_a']:,.2f}",
+            f"${row['cost_usd_b']:,.2f}",
+            f"{row['cost_usd_delta']:+,.2f}",
             format_int(row["tokens_a"]),
             format_int(row["tokens_b"]),
         )
@@ -2929,7 +2867,7 @@ def _render_commit_scope(
         duplicates=0,
         tier_sources=result.tier_sources,
         plan_types=result.plan_types,
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=result.warnings,
     )
     rate_card = load_rate_card(options)
@@ -2940,8 +2878,7 @@ def _render_commit_scope(
         "commits": sorted(shas),
         "totals": {
             "events": total.totals.events,
-            "api_dollars": str(total.costs.api_dollars),
-            "credits": str(total.costs.adjusted_credits),
+            "cost_usd": str(total.costs.cost_usd),
             "tokens": total.totals.total_tokens,
             "vendors": sorted(total.vendors),
             "models": sorted(total.models),
@@ -2954,8 +2891,7 @@ def _render_commit_scope(
                 "output_tokens": row["output_tokens"],
                 "cached_input_tokens": row["cached_input_tokens"],
                 "cached_pct": row["cached_pct"],
-                "api_dollars": str(row["api_dollars"]),
-                "credits": str(row["credits"]),
+                "cost_usd": str(row["cost_usd"]),
                 "models": row["models"],
             }
             for row in vendor_rows
@@ -2975,7 +2911,7 @@ def _render_commit_scope(
     local_console.print(
         f"{format_int(total.totals.events)} events  "
         f"{format_int(total.totals.total_tokens)} tokens  "
-        f"${total.costs.api_dollars:,.2f}  ·  "
+        f"${total.costs.cost_usd:,.2f}  ·  "
         f"{len(shas)} commits"
     )
     if vendor_rows:
@@ -2985,7 +2921,7 @@ def _render_commit_scope(
         table.add_column("Events", justify="right")
         table.add_column("Tokens (in/out)", justify="right")
         table.add_column("Cached", justify="right")
-        table.add_column("API $", justify="right")
+        table.add_column("Cost $", justify="right")
         for row in vendor_rows:
             table.add_row(
                 row["vendor"],
@@ -2993,7 +2929,7 @@ def _render_commit_scope(
                 format_int(row["events"]),
                 f"{format_int(row['input_tokens'])} / {format_int(row['output_tokens'])}",
                 f"{row['cached_pct']:.0f}%",
-                f"${row['api_dollars']:,.2f}",
+                f"${row['cost_usd']:,.2f}",
             )
         local_console.print(table)
     else:
@@ -3017,7 +2953,7 @@ def _commit_scope_vendor_rows(
             duplicates=0,
             tier_sources={},
             plan_types=set(),
-            credit_samples=[],
+            rate_limit_samples=[],
             warnings=[],
         )
         agg = aggregate_total(result, options, rate_card=rate_card)
@@ -3032,8 +2968,7 @@ def _commit_scope_vendor_rows(
                 "output_tokens": agg.totals.output_tokens,
                 "cached_input_tokens": cached,
                 "cached_pct": cached_pct,
-                "api_dollars": agg.costs.api_dollars,
-                "credits": agg.costs.adjusted_credits,
+                "cost_usd": agg.costs.cost_usd,
                 "models": sorted(agg.models),
             }
         )
@@ -3087,18 +3022,11 @@ def _render_whatif_table(report) -> None:
     table.add_column("Δ", justify="right")
     table.add_column("%", justify="right")
     table.add_row(
-        "Credits",
-        f"{totals.actual_credits:,.2f}",
-        f"{totals.hypothetical_credits:,.2f}",
-        f"{totals.credit_delta:+,.2f}",
-        f"{totals.credit_pct:+.1f}%",
-    )
-    table.add_row(
-        "API $",
-        f"${totals.actual_dollars:,.2f}",
-        f"${totals.hypothetical_dollars:,.2f}",
-        f"{totals.dollar_delta:+,.2f}",
-        f"{totals.dollar_pct:+.1f}%",
+        "Cost $",
+        f"${totals.actual_cost_usd:,.2f}",
+        f"${totals.hypothetical_cost_usd:,.2f}",
+        f"{totals.cost_usd_delta:+,.2f}",
+        f"{totals.cost_usd_pct:+.1f}%",
     )
     console.print(table)
 
@@ -3239,8 +3167,56 @@ def advise(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
     result = load_usage(options)
-    rows = [item.to_record() for item in suggest_arbitrage(result.events, 0.8 if strict else 0.6)]
-    _emit_records(rows, output_format, "Caliper - Advisor")
+    rate_card = load_rate_card(options)
+    threshold = 0.8 if strict else 0.6
+    rows = [item.to_record() for item in suggest_arbitrage(result.events, threshold)]
+    recommendations = [
+        item.to_record() for item in recommend_arbitrage(result.events, rate_card, threshold)
+    ]
+    _emit_advisor(rows, recommendations, output_format)
+
+
+def _emit_advisor(
+    records: list[dict],
+    recommendations: list[dict],
+    output_format: str,
+) -> None:
+    if output_format == "json":
+        typer.echo(
+            json_dumps_enveloped(
+                {
+                    "recommendations": recommendations,
+                    "records": records,
+                    "record_count": len(records),
+                }
+            )
+        )
+        return
+    display_rows = recommendations or records
+    if output_format == "csv":
+        typer.echo(records_to_csv(display_rows), nl=False)
+        return
+    if output_format == "markdown":
+        typer.echo(records_to_markdown(display_rows), nl=False)
+        return
+    console.print("[bold]Caliper - Advisor[/bold]")
+    if not display_rows:
+        console.print("No suggestions for this window.")
+        return
+    table = Table(show_lines=False)
+    columns = (
+        "rule_id",
+        "events",
+        "sessions",
+        "confidence",
+        "estimated_savings_usd_exact",
+        "action",
+    )
+    for key in columns:
+        table.add_column(key)
+    for record in display_rows:
+        table.add_row(*(str(record.get(key, "")) for key in columns))
+    console.print(table)
 
 
 def _emit_records(records: list[dict], output_format: str, title: str) -> None:
@@ -3413,7 +3389,7 @@ def export_receipt(
         duplicates=0,
         tier_sources={},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
 
@@ -3425,6 +3401,10 @@ def export_receipt(
     )
 
     totals = aggregate_total(scoped, options, label="Month", rate_card=rate_card)
+    evidence = evidence_metadata(scoped, totals)
+    accuracy_reasons = [
+        reason for dimension in evidence["dimensions"] for reason in dimension.get("reasons", [])
+    ]
     by_model = aggregate_model_mode(scoped, options, rate_card=rate_card)
     top_sessions = _safe_receipt_rows(
         aggregate_sessions(scoped, options, rate_card=rate_card)[:top],
@@ -3449,6 +3429,8 @@ def export_receipt(
         warning_count=len(result.warnings),
         pricing_status=pricing_status(totals),
         pricing_warnings=pricing_warnings(totals),
+        accuracy_status=str(evidence["overall"]),
+        accuracy_reasons=[str(reason) for reason in accuracy_reasons[:3]],
     )
     text = (
         render_receipt_html(payload)
@@ -3561,7 +3543,7 @@ def budgets_check(
     if not budget_list:
         console.print(
             "No budgets defined. Add a [budgets] table to .caliper.toml. "
-            "Example: daily_credits = 25000.",
+            "Example: daily_cost_usd = 25.0.",
             markup=False,
         )
         raise typer.Exit(0)

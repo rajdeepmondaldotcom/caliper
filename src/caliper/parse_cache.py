@@ -580,8 +580,8 @@ def _event_from_dict(raw: dict) -> UsageEvent:
     item["path"] = Path(str(item["path"]))
     item["usage"] = _usage_from_dict(item["usage"])
     item["thread"] = _thread_from_dict(item["thread"])
-    if item.get("vendor_reported_api_dollars") is not None:
-        item["vendor_reported_api_dollars"] = Decimal(str(item["vendor_reported_api_dollars"]))
+    if item.get("vendor_reported_cost_usd") is not None:
+        item["vendor_reported_cost_usd"] = Decimal(str(item["vendor_reported_cost_usd"]))
     return UsageEvent(**{key: value for key, value in item.items() if key in USAGE_EVENT_FIELDS})
 
 
@@ -596,7 +596,8 @@ def _sample_from_dict(raw: dict) -> RateLimitSample:
     item = dict(raw)
     item["timestamp"] = _decode_datetime(str(item["timestamp"]))
     item["path"] = Path(str(item["path"]))
-    return RateLimitSample(**item)
+    sample_fields = {field.name for field in fields(RateLimitSample)}
+    return RateLimitSample(**{key: value for key, value in item.items() if key in sample_fields})
 
 
 def _encode_payload(parsed) -> bytes:

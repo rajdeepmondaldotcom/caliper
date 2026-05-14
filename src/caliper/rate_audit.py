@@ -139,9 +139,7 @@ def rate_card_records(payload: dict) -> list[dict]:
     return [
         {
             "model": card["name"],
-            "fast_multiplier": card["fast_multiplier"],
             "api_input": (card["api"] or {}).get("input", ""),
-            "credits_input": (card["credits"] or {}).get("input", ""),
         }
         for card in payload["models"]
     ]
@@ -152,8 +150,6 @@ def embedded_rate_snapshot() -> list[dict]:
         {
             "name": card.name,
             "api": rates_payload(card.api_rates),
-            "credits": rates_payload(card.credit_rates),
-            "fast_multiplier": card.fast_multiplier,
             "long_context": (
                 {
                     "threshold": card.long_context.threshold,
@@ -182,9 +178,7 @@ def billing_calculation_checks() -> list[dict[str, object]]:
                 reasoning_output_tokens=25_000,
                 total_tokens=1_100_000,
             ),
-            "expected_api_dollars": "10",
-            "expected_standard_credits": "250",
-            "expected_adjusted_credits": "625",
+            "expected_cost_usd": "10",
             "expected_long_context": True,
         },
         {
@@ -192,9 +186,7 @@ def billing_calculation_checks() -> list[dict[str, object]]:
             "model": "gpt-5.4",
             "tier": "standard",
             "usage": Usage(input_tokens=272_000, output_tokens=1_000, total_tokens=273_000),
-            "expected_api_dollars": "0.695",
-            "expected_standard_credits": "17.375",
-            "expected_adjusted_credits": "17.375",
+            "expected_cost_usd": "0.695",
             "expected_long_context": False,
         },
         {
@@ -202,9 +194,7 @@ def billing_calculation_checks() -> list[dict[str, object]]:
             "model": "gpt-5.4",
             "tier": "standard",
             "usage": Usage(input_tokens=272_001, output_tokens=1_000, total_tokens=273_001),
-            "expected_api_dollars": "1.382505",
-            "expected_standard_credits": "34.562625",
-            "expected_adjusted_credits": "34.562625",
+            "expected_cost_usd": "1.382505",
             "expected_long_context": True,
         },
         {
@@ -217,9 +207,7 @@ def billing_calculation_checks() -> list[dict[str, object]]:
                 output_tokens=1_000,
                 total_tokens=11_000,
             ),
-            "expected_api_dollars": "0.0252",
-            "expected_standard_credits": "0.63",
-            "expected_adjusted_credits": "0.63",
+            "expected_cost_usd": "0.0252",
             "expected_long_context": False,
         },
     ]
@@ -234,16 +222,12 @@ def _billing_calculation_check(card: RateCard, scenario: dict[str, object]) -> d
     tier = str(scenario["tier"])
     cost, long_context, unknown_model = card.cost_for(usage, model, tier)
     actual = {
-        "api_dollars": decimal_string(cost.api_dollars),
-        "standard_credits": decimal_string(cost.standard_credits),
-        "adjusted_credits": decimal_string(cost.adjusted_credits),
+        "cost_usd": decimal_string(cost.cost_usd),
         "long_context": long_context,
         "unknown_model": unknown_model,
     }
     expected = {
-        "api_dollars": scenario["expected_api_dollars"],
-        "standard_credits": scenario["expected_standard_credits"],
-        "adjusted_credits": scenario["expected_adjusted_credits"],
+        "cost_usd": scenario["expected_cost_usd"],
         "long_context": scenario["expected_long_context"],
         "unknown_model": False,
     }
@@ -269,8 +253,6 @@ def rate_discrepancies(observed_models: list[dict]) -> list[dict]:
 def _model_rate_discrepancies(card, observed: dict) -> list[dict]:
     return [
         *_section_rate_discrepancies(card, observed, "api", card.api_rates),
-        *_section_rate_discrepancies(card, observed, "credits", card.credit_rates),
-        *_fast_multiplier_discrepancy(card, observed),
         *_long_context_discrepancies(card, observed),
     ]
 
@@ -294,21 +276,6 @@ def _section_rate_discrepancies(card, observed: dict, section: str, rates) -> li
                 }
             )
     return discrepancies
-
-
-def _fast_multiplier_discrepancy(card, observed: dict) -> list[dict]:
-    actual = observed.get("fast_multiplier")
-    if actual is None or not _different_number(actual, card.fast_multiplier):
-        return []
-    return [
-        {
-            "model": card.name,
-            "section": "fast_multiplier",
-            "field": "multiplier",
-            "embedded": card.fast_multiplier,
-            "observed": float(actual),
-        }
-    ]
 
 
 def _long_context_discrepancies(card, observed: dict) -> list[dict]:
@@ -353,16 +320,10 @@ def _extract_models_from_html(text: str) -> list[dict]:
         if not window:
             continue
         api_rates = _extract_api_rates(window)
-        credit_rates = _extract_credit_rates(window, card.name)
-        fast_multiplier = _extract_fast_multiplier(window, card.name)
         long_context = _extract_long_context_rule(window)
         item: dict = {"name": card.name}
         if api_rates:
             item["api"] = api_rates
-        if credit_rates:
-            item["credits"] = credit_rates
-        if fast_multiplier is not None:
-            item["fast_multiplier"] = fast_multiplier
         if long_context is not None:
             item["long_context"] = long_context
         if len(item) > 1:
@@ -385,7 +346,7 @@ def _window_for_model(text: str, model: str) -> str:
     ]
     for candidate in candidates:
         lowered = candidate.lower()
-        if "per 1m tokens" in lowered or "credits" in lowered:
+        if "per 1m tokens" in lowered:
             return candidate
     return candidates[0] if candidates else ""
 
@@ -403,35 +364,6 @@ def _extract_api_rates(window: str) -> dict | None:
         "cached_input": float(match.group(2)),
         "output": float(match.group(3)),
     }
-
-
-def _extract_credit_rates(window: str, model: str) -> dict | None:
-    display = re.escape(model.replace("gpt", "GPT"))
-    match = re.search(
-        rf"{display}\s+([0-9.]+)\s+credits\s+([0-9.]+)\s+credits\s+([0-9.]+)\s+credits",
-        window,
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return None
-    return {
-        "input": float(match.group(1)),
-        "cached_input": float(match.group(2)),
-        "output": float(match.group(3)),
-    }
-
-
-def _extract_fast_multiplier(window: str, model: str) -> float | None:
-    display = re.escape(model.replace("gpt", "GPT"))
-    patterns = [
-        rf"([0-9.]+)x\s+the\s+Standard\s+rate\s+for\s+{display}",
-        rf"{display}[^.]*?([0-9.]+)x\s+the\s+Standard\s+rate",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, window, flags=re.IGNORECASE)
-        if match:
-            return float(match.group(1))
-    return None
 
 
 def _extract_long_context_rule(window: str) -> dict | None:

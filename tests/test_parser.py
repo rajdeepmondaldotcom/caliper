@@ -229,9 +229,9 @@ def test_rate_limit_only_event_is_kept_for_limits_not_totals(tmp_path) -> None:
     result = load_usage(options)
 
     assert result.events == []
-    assert len(result.credit_samples) == 1
-    assert result.credit_samples[0].primary_window_minutes == 300
-    assert result.credit_samples[0].limit_id == "codex"
+    assert len(result.rate_limit_samples) == 1
+    assert result.rate_limit_samples[0].primary_window_minutes == 300
+    assert result.rate_limit_samples[0].limit_id == "codex"
     assert result.plan_types == {"pro"}
 
 
@@ -259,8 +259,8 @@ def test_rate_limit_samples_preserve_model_specific_limit_bucket(tmp_path) -> No
     )
     result = load_usage(options)
 
-    assert result.credit_samples[0].limit_id == "codex_bengalfox"
-    assert result.credit_samples[0].limit_name == "GPT-5.3-Codex-Spark"
+    assert result.rate_limit_samples[0].limit_id == "codex_bengalfox"
+    assert result.rate_limit_samples[0].limit_name == "GPT-5.3-Codex-Spark"
 
 
 def test_dedupe_keeps_identical_usage_from_different_sessions(tmp_path) -> None:

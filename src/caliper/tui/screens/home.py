@@ -7,6 +7,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
+from caliper.tui.formatting import format_cost_usd_cell
 from caliper.tui.state import AppSnapshot
 from caliper.tui.widgets.cost_card import CostCard
 from caliper.tui.widgets.window_panel import WindowPanel
@@ -65,8 +66,7 @@ class HomeScreen(Screen):
                 cards.mount(
                     CostCard(
                         label=window.label,
-                        api_dollars=float(window.costs.api_dollars),
-                        credits=float(window.costs.adjusted_credits),
+                        cost_usd=float(window.costs.cost_usd),
                         series=series,
                         vendors=vendor_chip(window),
                     )
@@ -108,7 +108,7 @@ class HomeScreen(Screen):
             window = snapshot.daily[-30:]
         else:
             window = snapshot.daily[-90:]
-        return [float(item.costs.api_dollars) for item in window]
+        return [float(item.costs.cost_usd) for item in window]
 
     @staticmethod
     def _render_insights(snapshot: AppSnapshot) -> str:
@@ -132,8 +132,6 @@ class HomeScreen(Screen):
             chip = vendor_chip(session)
             chip_part = f"  [dim]{chip}[/dim]" if chip else ""
             lines.append(
-                f"  {session.label or session.key}   "
-                f"${float(session.costs.api_dollars):.2f}"
-                f"{chip_part}"
+                f"  {session.label or session.key}   {format_cost_usd_cell(session)}{chip_part}"
             )
         return "\n".join(lines)

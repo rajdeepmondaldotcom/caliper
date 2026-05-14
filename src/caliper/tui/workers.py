@@ -11,19 +11,15 @@ from __future__ import annotations
 import datetime as dt
 
 from caliper.aggregation import (
-    aggregate_daily,
-    aggregate_model_mode,
-    aggregate_monthly,
+    aggregate_many,
     aggregate_overview_windows,
-    aggregate_projects,
-    aggregate_sessions,
-    aggregate_weekly,
+    budget_impact_sort_key,
 )
 from caliper.insights import build_insights_from
-from caliper.models import LoadResult, RuntimeOptions
+from caliper.models import UNKNOWN_PROJECT, LoadResult, RuntimeOptions, UsageEvent
 from caliper.parser import load_usage
 from caliper.pricing import RateCard, load_rate_card
-from caliper.timeutil import local_timezone
+from caliper.timeutil import day_key, load_timezone, local_timezone, month_key, week_key
 from caliper.tui.messages import WorkerCancelled
 from caliper.tui.progress import TextualParseProgress
 from caliper.windows import compute_window_state
@@ -48,11 +44,7 @@ def build_overview(
     *,
     now: dt.datetime | None = None,
 ) -> dict:
-    """Produce every aggregate the Home screen needs in one batch.
-
-    Returned dict carries plain lists of frozen / mutable dataclasses;
-    callers may convert to tuples when stashing on ``AppSnapshot``.
-    """
+    """Produce all TUI aggregates while pricing each event as few times as possible."""
     when = now or dt.datetime.now(tz=local_timezone())
     windows, total = aggregate_overview_windows(
         result,
@@ -65,12 +57,15 @@ def build_overview(
         rate_card=rate_card,
         detailed=False,
     )
-    daily = aggregate_daily(result, options, rate_card=rate_card)
-    weekly = aggregate_weekly(result, options, rate_card=rate_card)
-    monthly = aggregate_monthly(result, options, rate_card=rate_card)
-    sessions = aggregate_sessions(result, options, rate_card=rate_card)
-    projects = aggregate_projects(result, options, rate_card=rate_card)
-    models = aggregate_model_mode(result, options, rate_card=rate_card)
+    daily, weekly, monthly, sessions, projects, models = aggregate_many(
+        result.events,
+        _tui_key_functions(options),
+        options,
+        rate_card=rate_card,
+    )
+    sessions = sorted(sessions, key=budget_impact_sort_key)
+    projects = sorted(projects, key=budget_impact_sort_key)
+    models = sorted(models, key=budget_impact_sort_key)
     insights = build_insights_from(
         result=result,
         rate_card=rate_card,
@@ -78,8 +73,8 @@ def build_overview(
         projects=projects,
         daily=daily,
     )
-    primary = compute_window_state(result.credit_samples, when, "primary")
-    secondary = compute_window_state(result.credit_samples, when, "secondary")
+    primary = compute_window_state(result.rate_limit_samples, when, "primary")
+    secondary = compute_window_state(result.rate_limit_samples, when, "secondary")
     return {
         "overview_windows": tuple(windows),
         "overview_total": total,
@@ -93,3 +88,39 @@ def build_overview(
         "primary_window": primary,
         "secondary_window": secondary,
     }
+
+
+def _tui_key_functions(options: RuntimeOptions):
+    tz = load_timezone(options.timezone)
+
+    def daily_key(event: UsageEvent) -> tuple[str, str]:
+        day = day_key(event.timestamp, tz)
+        return day, day
+
+    def weekly_key(event: UsageEvent) -> tuple[str, str]:
+        week = week_key(event.timestamp, tz, options.start_of_week)
+        return week, week
+
+    def monthly_key(event: UsageEvent) -> tuple[str, str]:
+        month = month_key(event.timestamp, tz)
+        return month, month
+
+    def session_key(event: UsageEvent) -> tuple[str, str]:
+        local_time = event.timestamp.astimezone(tz).strftime("%Y-%m-%d %H:%M")
+        if options.show_prompts:
+            title = event.thread.title or event.thread.first_user_message or event.session_id
+        else:
+            title = event.session_id
+        return event.session_id, f"{local_time} | {title}"
+
+    def project_key(event: UsageEvent) -> tuple[str, str]:
+        project = event.thread.cwd or UNKNOWN_PROJECT
+        return project, project
+
+    def model_key(event: UsageEvent) -> tuple[str, str]:
+        return (
+            f"{event.model}\0{event.service_tier}",
+            f"{event.model or 'unknown model'} / {event.service_tier or 'unknown tier'}",
+        )
+
+    return [daily_key, weekly_key, monthly_key, session_key, project_key, model_key]

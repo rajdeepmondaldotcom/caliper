@@ -24,15 +24,15 @@ def build_prometheus_snapshot(options: RuntimeOptions):
         duplicates=0,
         tier_sources={},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
     totals = aggregate_total(today_result, options, label="today", rate_card=rate_card)
-    primary = compute_window_state(result.credit_samples, now, "primary")
-    secondary = compute_window_state(result.credit_samples, now, "secondary")
+    primary = compute_window_state(result.rate_limit_samples, now, "primary")
+    secondary = compute_window_state(result.rate_limit_samples, now, "secondary")
 
     return MetricsSnapshot(
-        credits_used=float(totals.costs.adjusted_credits),
+        cost_usd=float(totals.costs.cost_usd),
         burn_per_hour=primary.burn_rate_per_hour if primary.burn_rate_per_hour else 0.0,
         primary_window_percent=primary.used_percent if primary.used_percent is not None else 0.0,
         secondary_window_percent=(

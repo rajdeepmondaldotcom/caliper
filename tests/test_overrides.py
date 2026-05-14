@@ -39,14 +39,14 @@ def _fixture(tmp_path) -> tuple:
     return session_root, state_db, until, tmp_path / "missing.toml", now
 
 
-def test_rates_file_overrides_credit_cost(tmp_path) -> None:
-    """Local rates file overrides credit pricing."""
+def test_rates_file_overrides_usd_cost(tmp_path) -> None:
+    """Local rates file overrides USD pricing."""
     session_root, state_db, until, missing_cfg, _now = _fixture(tmp_path)
     rates_file = tmp_path / "rates.json"
     rates_file.write_text(
         json.dumps(
             {
-                "credits": {
+                "usd": {
                     "gpt-5.5": {"input": 1.0, "cached_input": 0.1, "output": 1.0},
                 },
             }
@@ -74,8 +74,8 @@ def test_rates_file_overrides_credit_cost(tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    # 1000 input × 1.0 + 100 output × 1.0 = 1100 micro-credits → 0.0011 credits.
-    assert round(payload["totals"]["standard_credits"], 6) == round(1100 / 1_000_000, 6)
+    # 1000 input x 1.0 + 100 output x 1.0 = 1100 micro-dollars -> $0.0011.
+    assert round(payload["totals"]["calculated_cost_usd"], 6) == round(1100 / 1_000_000, 6)
 
 
 def test_cli_service_tier_overrides_logged_value(tmp_path) -> None:

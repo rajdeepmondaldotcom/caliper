@@ -60,7 +60,8 @@ def test_forecast_table_runs_and_reports_zero_for_empty_dataset(tmp_path) -> Non
     )
     assert result.exit_code == 0, result.output
     assert "Caliper - Forecast" in result.output
-    assert "API $" in result.output
+    assert "Daily mean" in result.output
+    assert "$0.00" in result.output
     assert "Trend" in result.output
 
 
@@ -101,7 +102,7 @@ def test_forecast_json_reports_required_fields(tmp_path) -> None:
     }
     assert expected_keys <= set(payload.keys())
     assert payload["cap"] == 10000.0
-    assert "api_dollars" in payload["projections"]
+    assert "cost_usd" in payload["projections"]
     assert "sparkline" in payload
 
 
@@ -149,7 +150,7 @@ def test_whatif_requires_at_least_one_change(tmp_path) -> None:
     assert "tier" in result.output.lower() or "model" in result.output.lower()
 
 
-def test_whatif_tier_swap_reduces_credits_when_going_from_fast_to_standard(tmp_path) -> None:
+def test_whatif_tier_swap_reduces_cost_usd_when_going_from_fast_to_standard(tmp_path) -> None:
     session_root, state_db, missing_cfg = _build_fixture(tmp_path, tier="fast")
     result = runner.invoke(
         app,
@@ -171,11 +172,11 @@ def test_whatif_tier_swap_reduces_credits_when_going_from_fast_to_standard(tmp_p
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["actual"]["credits"] > payload["projected"]["credits"]
-    assert "credits_exact" in payload["actual"]
-    assert "api_dollars_exact" in payload["projected"]
-    assert payload["delta"]["credits"] < 0
-    assert "credits_exact" in payload["delta"]
+    assert payload["actual"]["cost_usd"] == payload["projected"]["cost_usd"]
+    assert "cost_usd_exact" in payload["actual"]
+    assert "cost_usd_exact" in payload["projected"]
+    assert payload["delta"]["cost_usd"] == 0
+    assert "cost_usd_exact" in payload["delta"]
 
 
 def test_whatif_rejects_unknown_model(tmp_path) -> None:
@@ -223,10 +224,10 @@ def test_compare_returns_balanced_delta(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert {"a", "b", "delta"} <= set(payload.keys())
-    assert payload["a"]["credits"] >= 0
-    assert "credits_exact" in payload["a"]
-    assert payload["b"]["credits"] >= 0
-    assert "api_dollars_exact" in payload["delta"]
+    assert payload["a"]["cost_usd"] >= 0
+    assert "cost_usd_exact" in payload["a"]
+    assert payload["b"]["cost_usd"] >= 0
+    assert "cost_usd_exact" in payload["delta"]
 
 
 def test_compare_by_vendor_breaks_out_each_vendor(tmp_path) -> None:

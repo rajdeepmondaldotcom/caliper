@@ -23,7 +23,7 @@ PROM_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 @dataclass(frozen=True)
 class MetricsSnapshot:
-    credits_used: float
+    cost_usd: float
     burn_per_hour: float
     primary_window_percent: float
     secondary_window_percent: float
@@ -35,16 +35,16 @@ class MetricsSnapshot:
 def build_metrics_text(snapshot: MetricsSnapshot) -> bytes:
     """Render a Prometheus text-format payload from a snapshot."""
     registry = CollectorRegistry()
-    credits = Gauge(
-        "caliper_credits_used",
-        "Adjusted credits in the current rolling window.",
+    cost = Gauge(
+        "caliper_cost_usd",
+        "Effective USD cost in the current rolling window.",
         registry=registry,
     )
-    credits.set(snapshot.credits_used)
+    cost.set(snapshot.cost_usd)
 
     burn = Gauge(
         "caliper_burn_per_hour",
-        "Burn rate (credits per hour) for the active window.",
+        "Rate-limit burn rate in percent-points per hour for the active window.",
         registry=registry,
     )
     burn.set(snapshot.burn_per_hour)

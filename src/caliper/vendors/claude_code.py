@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from caliper.dedupe import dedupe_usage_events
 from caliper.models import (
     VENDOR_CLAUDE_CODE,
     LoadResult,
@@ -89,14 +90,14 @@ class ClaudeCodeParser:
         finally:
             if cache is not None:
                 cache.close()
-        events, duplicates = _dedupe_events(events, options)
+        events, dedupe_stats = dedupe_usage_events(events, enabled=options.dedupe)
         events.sort(key=lambda event: event.timestamp)
         return LoadResult(
             events=events,
-            duplicates=duplicates,
+            duplicates=dedupe_stats.duplicates,
             tier_sources={"vendor-default": len(events)} if events else {},
             plan_types=set(),
-            credit_samples=[],
+            rate_limit_samples=[],
             warnings=warnings,
             vendor_stats={
                 VENDOR_CLAUDE_CODE: VendorParseStats(
@@ -108,6 +109,7 @@ class ClaudeCodeParser:
                     warning_count=len(warnings),
                 )
             },
+            dedupe_stats=dedupe_stats.by_strategy,
         )
 
 
@@ -239,7 +241,7 @@ def _usage_event(
         model_source="message",
         usage_source="message.usage",
         vendor=VENDOR_CLAUDE_CODE,
-        vendor_reported_api_dollars=vendor_cost,
+        vendor_reported_cost_usd=vendor_cost,
         source_line=line_number,
         event_id=str(raw.get("uuid") or message_id or ""),
         message_id=message_id,
@@ -281,26 +283,6 @@ def _vendor_cost(raw: dict[str, Any], cost_mode: str) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return Decimal("0") if cost_mode == "display" else None
-
-
-def _dedupe_events(
-    events: list[UsageEvent], options: RuntimeOptions
-) -> tuple[list[UsageEvent], int]:
-    if not options.dedupe:
-        return events, 0
-    seen: set[str] = set()
-    unique: list[UsageEvent] = []
-    duplicates = 0
-    for event in events:
-        if not event.dedupe_key:
-            unique.append(event)
-            continue
-        if event.dedupe_key in seen:
-            duplicates += 1
-            continue
-        seen.add(event.dedupe_key)
-        unique.append(event)
-    return unique, duplicates
 
 
 def _safe_int(value: Any) -> int:

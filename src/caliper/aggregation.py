@@ -5,7 +5,6 @@ from collections.abc import Callable
 
 from caliper.models import (
     UNKNOWN_PROJECT,
-    VENDOR_OPENAI_CODEX,
     Aggregate,
     CostTotals,
     LoadResult,
@@ -14,6 +13,15 @@ from caliper.models import (
 )
 from caliper.pricing import RateCard, load_rate_card
 from caliper.timeutil import day_key, load_timezone, month_key, week_key
+
+
+def budget_impact_sort_key(item: Aggregate) -> tuple:
+    """Sort budget rows by effective USD spend."""
+    return (
+        -item.costs.cost_usd,
+        -item.totals.events,
+        item.label,
+    )
 
 
 def aggregate_events(
@@ -49,20 +57,34 @@ def event_cost(card: RateCard, event: UsageEvent):
     cached = card._event_cost_cache.get(cache_key)
     if cached is not None:
         return cached
-    if event.vendor_reported_api_dollars is not None:
+    calculated, long_context, unknown_model = _event_scoped_cost(
+        card.cost_for(event.usage, event.model, event.service_tier),
+        event,
+    )
+    if event.vendor_reported_cost_usd is not None:
+        reported = CostTotals(cost_usd=event.vendor_reported_cost_usd).cost_usd
+        delta = (
+            reported - calculated.calculated_cost_usd
+            if not calculated.unpriced_events
+            else CostTotals().cost_usd
+        )
         result = (
             CostTotals(
-                api_dollars=event.vendor_reported_api_dollars,
+                cost_usd=reported,
+                reported_cost_usd=reported,
+                calculated_cost_usd=calculated.calculated_cost_usd,
+                reported_calculated_delta_usd=delta,
+                unpriced_events=calculated.unpriced_events,
+                estimated_events=calculated.estimated_events,
+                ambiguous_reasoning_events=calculated.ambiguous_reasoning_events,
+                local_override_events=calculated.local_override_events,
                 vendor_reported_events=1,
             ),
-            False,
-            False,
+            long_context,
+            unknown_model,
         )
     else:
-        result = _event_scoped_cost(
-            card.cost_for(event.usage, event.model, event.service_tier),
-            event,
-        )
+        result = calculated, long_context, unknown_model
     card._event_cost_cache[cache_key] = result
     return result
 
@@ -88,25 +110,8 @@ def _event_scoped_cost(
 
 
 def _event_scoped_cost_totals(costs: CostTotals, event: UsageEvent) -> CostTotals:
-    if event.vendor == VENDOR_OPENAI_CODEX:
-        return costs
-    if (
-        costs.standard_credits == 0
-        and costs.adjusted_credits == 0
-        and costs.credit_unpriced_events == 0
-    ):
-        return costs
-    return CostTotals(
-        api_dollars=costs.api_dollars,
-        standard_credits=0,
-        adjusted_credits=0,
-        api_unpriced_events=costs.api_unpriced_events,
-        credit_unpriced_events=0,
-        estimated_events=costs.estimated_events,
-        ambiguous_reasoning_events=costs.ambiguous_reasoning_events,
-        local_override_events=costs.local_override_events,
-        vendor_reported_events=costs.vendor_reported_events,
-    )
+    del event
+    return costs
 
 
 def _event_cache_key(event: UsageEvent) -> tuple:
@@ -124,7 +129,7 @@ def _event_cache_key(event: UsageEvent) -> tuple:
         event.model,
         event.service_tier,
         event.vendor,
-        event.vendor_reported_api_dollars,
+        event.vendor_reported_cost_usd,
     )
 
 
@@ -287,8 +292,7 @@ def aggregate_sessions(
 
     return sorted(
         aggregate_events(result.events, key, options, rate_card=rate_card),
-        key=lambda item: item.costs.adjusted_credits,
-        reverse=True,
+        key=budget_impact_sort_key,
     )
 
 
@@ -301,8 +305,7 @@ def aggregate_projects(
 
     return sorted(
         aggregate_events(result.events, key, options, rate_card=rate_card),
-        key=lambda item: item.costs.adjusted_credits,
-        reverse=True,
+        key=budget_impact_sort_key,
     )
 
 
@@ -319,8 +322,7 @@ def aggregate_model_mode(
             options,
             rate_card=rate_card,
         ),
-        key=lambda item: item.costs.adjusted_credits,
-        reverse=True,
+        key=budget_impact_sort_key,
     )
 
 
@@ -334,6 +336,6 @@ def aggregate_vendors(
             options,
             rate_card=rate_card,
         ),
-        key=lambda item: item.costs.api_dollars,
+        key=lambda item: item.costs.cost_usd,
         reverse=True,
     )

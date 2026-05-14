@@ -26,10 +26,10 @@ def test_severity_classification() -> None:
 
 def test_evaluate_pairs_budgets_with_usage() -> None:
     budgets = [
-        Budget(period="daily", metric="credits", limit=1000.0),
-        Budget(period="weekly", metric="credits", limit=5000.0, warn_at=0.9),
+        Budget(period="daily", metric="cost_usd", limit=1000.0),
+        Budget(period="weekly", metric="cost_usd", limit=5000.0, warn_at=0.9),
     ]
-    usage = {"daily.credits": 850.0, "weekly.credits": 5200.0}
+    usage = {"daily.cost_usd": 850.0, "weekly.cost_usd": 5200.0}
     alerts = evaluate(budgets, usage)
     assert alerts[0].severity == SEVERITY_WARN
     assert pytest.approx(alerts[0].used_percent, rel=1e-6) == 85.0
@@ -37,57 +37,57 @@ def test_evaluate_pairs_budgets_with_usage() -> None:
 
 
 def test_evaluate_missing_usage_treats_as_zero() -> None:
-    budgets = [Budget(period="daily", metric="credits", limit=100.0)]
+    budgets = [Budget(period="daily", metric="cost_usd", limit=100.0)]
     alerts = evaluate(budgets, {})
     assert alerts[0].used == 0.0
     assert alerts[0].severity == SEVERITY_OK
 
 
 def test_zero_limit_produces_zero_percent() -> None:
-    budgets = [Budget(period="daily", metric="credits", limit=0.0)]
-    alerts = evaluate(budgets, {"daily.credits": 999.0})
+    budgets = [Budget(period="daily", metric="cost_usd", limit=0.0)]
+    alerts = evaluate(budgets, {"daily.cost_usd": 999.0})
     assert alerts[0].used_percent == 0.0
     assert alerts[0].severity == SEVERITY_OK
 
 
 def test_max_severity_picks_worst() -> None:
     budgets = [
-        Budget(period="daily", metric="credits", limit=100.0),
-        Budget(period="weekly", metric="credits", limit=200.0),
+        Budget(period="daily", metric="cost_usd", limit=100.0),
+        Budget(period="weekly", metric="cost_usd", limit=200.0),
     ]
-    usage_ok = {"daily.credits": 10, "weekly.credits": 20}
-    usage_warn = {"daily.credits": 90, "weekly.credits": 20}
-    usage_breach = {"daily.credits": 90, "weekly.credits": 250}
+    usage_ok = {"daily.cost_usd": 10, "weekly.cost_usd": 20}
+    usage_warn = {"daily.cost_usd": 90, "weekly.cost_usd": 20}
+    usage_breach = {"daily.cost_usd": 90, "weekly.cost_usd": 250}
     assert max_severity(evaluate(budgets, usage_ok)) == SEVERITY_OK
     assert max_severity(evaluate(budgets, usage_warn)) == SEVERITY_WARN
     assert max_severity(evaluate(budgets, usage_breach)) == SEVERITY_BREACH
 
 
 def test_parse_flat_keys() -> None:
-    table = {"daily_credits": 25000, "weekly_api_dollars": 50.0}
+    table = {"daily_cost_usd": 25000, "weekly_cost_usd": 50.0}
     parsed = parse_budgets_table(table)
     by_key = {budget.key(): budget for budget in parsed}
-    assert by_key["daily.credits"].limit == 25000.0
-    assert by_key["weekly.api_dollars"].limit == 50.0
+    assert by_key["daily.cost_usd"].limit == 25000.0
+    assert by_key["weekly.cost_usd"].limit == 50.0
 
 
 def test_parse_nested_period_dict_with_warn_at() -> None:
-    table = {"monthly": {"credits": 500000, "api_dollars": 100.0, "warn_at": 0.7}}
+    table = {"monthly": {"cost_usd": 100.0, "tokens": 500000, "warn_at": 0.7}}
     parsed = parse_budgets_table(table)
     by_key = {budget.key(): budget for budget in parsed}
-    assert by_key["monthly.credits"].warn_at == 0.7
-    assert by_key["monthly.api_dollars"].warn_at == 0.7
+    assert by_key["monthly.cost_usd"].warn_at == 0.7
+    assert by_key["monthly.tokens"].warn_at == 0.7
 
 
 def test_parse_items_list_form() -> None:
     table = {
         "items": [
-            {"period": "daily", "metric": "credits", "limit": 25000},
+            {"period": "daily", "metric": "cost_usd", "limit": 25000},
             {"period": "weekly", "metric": "tokens", "limit": 1_000_000, "warn_at": 0.95},
         ]
     }
     parsed = parse_budgets_table(table)
-    assert {budget.key() for budget in parsed} == {"daily.credits", "weekly.tokens"}
+    assert {budget.key() for budget in parsed} == {"daily.cost_usd", "weekly.tokens"}
 
 
 def test_parse_items_rejects_unknown_metric() -> None:
@@ -97,17 +97,17 @@ def test_parse_items_rejects_unknown_metric() -> None:
 
 
 def test_parse_silently_skips_unknown_flat_keys() -> None:
-    table = {"nonsense_key": 5, "daily_credits": 10}
+    table = {"nonsense_key": 5, "daily_cost_usd": 10}
     parsed = parse_budgets_table(table)
-    assert [budget.key() for budget in parsed] == ["daily.credits"]
+    assert [budget.key() for budget in parsed] == ["daily.cost_usd"]
 
 
 def test_serialize_budgets_round_trips_through_parse_budgets_table():
     from caliper.budgets import Budget, parse_budgets_table, serialize_budgets
 
     budgets = [
-        Budget(period="daily", metric="credits", limit=25_000.0, warn_at=0.9),
-        Budget(period="weekly", metric="api_dollars", limit=12.5, warn_at=0.8),
+        Budget(period="daily", metric="cost_usd", limit=25_000.0, warn_at=0.9),
+        Budget(period="weekly", metric="cost_usd", limit=12.5, warn_at=0.8),
         Budget(period="monthly", metric="tokens", limit=1_000_000.0, warn_at=0.7),
     ]
     table = serialize_budgets(budgets)

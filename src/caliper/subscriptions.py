@@ -115,6 +115,6 @@ def subscription_warnings(plan_types: set[str]) -> list[str]:
     if any(item["enterprise_family"] for item in payload):
         warnings.append(
             "Enterprise-family workspaces are usually token-priced, but a small subset can "
-            "remain on a legacy rate card; confirm workspace migration if exact credits matter."
+            "remain on a legacy rate card; confirm workspace migration if exact cost matters."
         )
     return warnings

@@ -28,7 +28,6 @@ def _record(name: str = "vendor/model-one") -> dict[str, Any]:
             "cache_creation_input": "2.5",
             "cache_creation_input_1h": "4",
         },
-        "credits": {"input": "20", "cached_input": "2", "output": "80"},
         "long_context": {"threshold": 128000, "input_mult": 2, "output_mult": 1.5},
         "context_window": 128000,
         "max_output_tokens": 8192,
@@ -77,7 +76,6 @@ def test_cache_round_trip_and_catalog_records(tmp_path) -> None:
     assert model.api_rates is not None
     assert model.api_rates.input == Decimal("2")
     assert model.api_rates.cache_creation_input_1h == Decimal("4")
-    assert model.credit_rates is not None
     assert model.long_context is not None
     assert model.long_context.threshold == 128000
     assert model.context_window == 128000
@@ -91,7 +89,6 @@ def test_cache_round_trip_and_catalog_records(tmp_path) -> None:
             "api_input": "2",
             "api_cached_input": "0.2",
             "api_output": "8",
-            "credits_input": "20",
             "context_window": 128000,
             "max_output_tokens": 8192,
             "source": "unit",
@@ -186,11 +183,6 @@ def test_fetch_pricing_catalog_composes_selected_sources(monkeypatch) -> None:
     monkeypatch.setattr(pc, "_fetch_portkey_records", lambda: ([_record("gpt-5-5")], [{"p": 1}]))
     monkeypatch.setattr(
         pc,
-        "_fetch_codex_credit_records",
-        lambda: ([_record("gpt-5-5") | {"credits": {"input": "125", "output": "750"}}], {"c": 1}),
-    )
-    monkeypatch.setattr(
-        pc,
         "_fetch_litellm_records",
         lambda: (
             [_record("litellm-model") | {"source": "litellm", "provider": "litellm"}],
@@ -201,7 +193,7 @@ def test_fetch_pricing_catalog_composes_selected_sources(monkeypatch) -> None:
     auto = pc.fetch_pricing_catalog("auto")
     assert auto["source"] == "auto"
     assert auto["model_count"] == 2
-    assert len(auto["sources"]) == 3
+    assert len(auto["sources"]) == 2
 
     calls.append(pc.fetch_pricing_catalog("portkey")["source"])
     calls.append(pc.fetch_pricing_catalog("litellm")["source"])
@@ -276,15 +268,6 @@ def test_fetch_helpers_and_network_validation(monkeypatch) -> None:
 
     monkeypatch.setattr(pc, "_fetch_json", lambda _url: (_ for _ in ()).throw(OSError("down")))
     assert pc._fetch_litellm_records()[1]["status"] == "error"
-
-    monkeypatch.setattr(
-        pc,
-        "_fetch_text",
-        lambda _url: "GPT-5.5 125 credits 12.5 credits 750 credits",
-    )
-    assert pc._fetch_codex_credit_records()[1]["status"] == "ok"
-    monkeypatch.setattr(pc, "_fetch_text", lambda _url: (_ for _ in ()).throw(OSError("down")))
-    assert pc._fetch_codex_credit_records()[1]["status"] == "error"
 
     monkeypatch.setattr(pc, "_fetch_json", real_fetch_json)
     monkeypatch.setattr(pc, "_fetch_text", lambda _url: '{"ok": true}')
@@ -412,15 +395,7 @@ def test_record_normalizers_cover_provider_shapes() -> None:
     assert pc._long_context_from_litellm({}) is None
 
 
-def test_codex_html_generic_records_and_merge_helpers() -> None:
-    html = """
-    <table><tr><td>GPT-5.5&nbsp;125 credits 12.5 credits 750 credits</td></tr></table>
-    GPT-5-4 62.5 credits 6.25 credits 375 credits
-    """
-    records = pc._records_from_codex_rate_card(html, "https://example.test/rate-card")
-    assert [record["name"] for record in records] == ["gpt-5.5", "gpt-5-4"]
-    assert records[0]["credits"]["input"] == "125"
-
+def test_generic_records_and_merge_helpers() -> None:
     generic = pc._generic_model_records(
         "provider",
         [
@@ -583,7 +558,7 @@ def test_rate_card_uses_catalog_models(monkeypatch) -> None:
 
     assert unknown is False
     assert long_context is False
-    assert cost.api_dollars == Decimal("0.0028")
+    assert cost.cost_usd == Decimal("0.0028")
     assert pricing_catalog_status(card)["models"] == 1
     assert pricing_catalog_status(RateCard.load(None))["source"] == "embedded"
 
@@ -631,7 +606,6 @@ def test_live_catalog_rates_override_embedded_known_models() -> None:
                 "provider": "openai",
                 "source": "unit",
                 "api": {"input": "9", "cached_input": "0.9", "output": "90"},
-                "credits": {"input": "90", "cached_input": "9", "output": "900"},
             }
         ],
     }
@@ -641,6 +615,5 @@ def test_live_catalog_rates_override_embedded_known_models() -> None:
     cost, _long_context, unknown = card.cost_for(usage, "gpt-5.5", "fast")
 
     assert unknown is False
-    assert cost.api_dollars == Decimal("0.9")
-    assert cost.standard_credits == Decimal("9")
-    assert cost.adjusted_credits == Decimal("22.5")
+    assert cost.cost_usd == Decimal("0.9")
+    assert cost.calculated_cost_usd == Decimal("0.9")

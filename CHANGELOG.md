@@ -2,6 +2,29 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.17 - 2026-05-14
+
+Actionable accuracy and insight release.
+
+### Added
+
+- `caliper insights` now ranks findings with priority, confidence,
+  impact, evidence metrics, and next commands so each row points to
+  an immediate action instead of only describing usage.
+- `caliper advise` now emits grouped recommendations with supporting
+  examples and estimated savings when the rate card can compute a
+  reliable delta.
+- Reports and receipts now surface evidence/accuracy status when
+  totals are estimated, partial, or unsupported.
+- TUI actions now do real work for refresh, prompt redaction,
+  interval stepping, receipt copy, what-if projections, and budgets.
+
+### Changed
+
+- README and CLI wording now describe USD cost, evidence grades, and
+  actionable advisor workflows consistently.
+- Placeholder TUI copy was removed from the shipped screen modules.
+
 ## 0.0.16 - 2026-05-14
 
 ### Fixed

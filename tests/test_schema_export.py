@@ -21,7 +21,7 @@ runner = CliRunner()
 def test_schema_export_contains_caliper_envelope() -> None:
     schema = export_schema("usage_event")
 
-    assert schema["caliper"]["schema_version"] == 1
+    assert schema["caliper"]["schema_version"] == 2
     assert "timestamp" in schema["properties"]
     assert schema["properties"]["usage"]["properties"]["input_tokens"]["type"] == "integer"
 

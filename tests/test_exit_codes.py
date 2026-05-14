@@ -49,7 +49,7 @@ def test_doctor_exit_code_matrix_warn_or_ok(tmp_path) -> None:
 def test_budgets_check_exit_code_warn(tmp_path) -> None:
     session_root, state_db, _now = _fixture(tmp_path)
     config = tmp_path / ".caliper.toml"
-    config.write_text("[budgets]\ndaily_credits = 0.0001\n")
+    config.write_text("[budgets]\ndaily_cost_usd = 0.0001\n")
 
     result = runner.invoke(
         app,

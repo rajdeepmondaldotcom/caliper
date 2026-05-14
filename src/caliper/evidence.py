@@ -118,19 +118,28 @@ def tier_evidence(total: Aggregate) -> EvidenceDimension:
 
 def pricing_evidence(total: Aggregate) -> EvidenceDimension:
     reasons: list[str] = []
-    if total.costs.api_unpriced_events:
-        reasons.append(f"{total.costs.api_unpriced_events:,} events have no API-dollar rate")
-    if total.costs.credit_unpriced_events:
-        reasons.append(f"{total.costs.credit_unpriced_events:,} events have no Codex credit rate")
+    if total.costs.unpriced_events:
+        reasons.append(f"{total.costs.unpriced_events:,} events have no local USD rate")
+    if total.costs.vendor_reported_events:
+        reasons.append(f"{total.costs.vendor_reported_events:,} events used vendor-reported USD")
+    if total.costs.reported_calculated_delta_usd:
+        reasons.append(
+            "vendor-reported USD differs from local calculation by "
+            f"${total.costs.reported_calculated_delta_usd:,.2f}"
+        )
     if total.costs.estimated_events:
         reasons.append(f"{total.costs.estimated_events:,} events used estimated rate logic")
     if total.costs.ambiguous_reasoning_events:
         reasons.append(
             f"{total.costs.ambiguous_reasoning_events:,} events had ambiguous reasoning tokens"
         )
-    if total.costs.unpriced_events:
+    if total.costs.unpriced_events and not total.costs.vendor_reported_events:
         grade = GRADE_PARTIAL
-    elif total.costs.estimated_events or total.costs.ambiguous_reasoning_events:
+    elif (
+        total.costs.estimated_events
+        or total.costs.ambiguous_reasoning_events
+        or total.costs.vendor_reported_events
+    ):
         grade = GRADE_ESTIMATED
     else:
         grade = GRADE_EXACT

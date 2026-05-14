@@ -28,8 +28,8 @@ def test_claude_cache_creation_and_read_rates_are_distinct() -> None:
     )
 
     assert unknown is False
-    assert cost.api_dollars == Decimal("0.0009225")
-    assert cost.credit_unpriced_events == 1
+    assert cost.cost_usd == Decimal("0.0009225")
+    assert cost.unpriced_events == 0
 
 
 def test_cache_write_without_specific_rate_is_marked_estimated() -> None:
@@ -44,7 +44,7 @@ def test_cache_write_without_specific_rate_is_marked_estimated() -> None:
 
     assert unknown is False
     assert cost.estimated_events == 1
-    assert cost.api_dollars > 0
+    assert cost.cost_usd > 0
 
 
 def test_rates_accept_optional_cache_creation_slots() -> None:

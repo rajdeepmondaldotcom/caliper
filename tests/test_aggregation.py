@@ -15,7 +15,14 @@ from caliper.aggregation import (
     aggregate_weekly,
 )
 from caliper.config import build_options
-from caliper.models import LoadResult, ThreadMeta, Usage, UsageEvent
+from caliper.models import (
+    VENDOR_CLAUDE_CODE,
+    VENDOR_OPENAI_CODEX,
+    LoadResult,
+    ThreadMeta,
+    Usage,
+    UsageEvent,
+)
 
 
 def _event(
@@ -34,6 +41,7 @@ def _event(
     git_origin_url: str = "https://github.com/example/repo-a",
     git_branch: str = "main",
     git_sha: str = "abc123",
+    vendor: str = VENDOR_OPENAI_CODEX,
 ) -> UsageEvent:
     return UsageEvent(
         timestamp=timestamp,
@@ -61,6 +69,7 @@ def _event(
             agent_role="worker",
         ),
         plan_type="pro",
+        vendor=vendor,
     )
 
 
@@ -80,7 +89,7 @@ def _result(events: list) -> LoadResult:
         duplicates=0,
         tier_sources={"logged": len(events)},
         plan_types={"pro"},
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
 
@@ -128,7 +137,7 @@ def test_aggregate_monthly_groups_by_month(tmp_path) -> None:
     assert rows[1].totals.events == 2
 
 
-def test_aggregate_sessions_sorted_by_credits_desc(tmp_path) -> None:
+def test_aggregate_sessions_sorted_by_cost_usd_desc(tmp_path) -> None:
     now = dt.datetime.now(tz=dt.UTC)
     events = [
         _event(now, session_id="sess-small", input_tokens=100, output_tokens=10),
@@ -223,3 +232,24 @@ def test_aggregate_model_mode_keys_combine_model_and_tier(tmp_path) -> None:
     assert "gpt-5.5 / standard" in labels
     assert "gpt-5.5 / fast" in labels
     assert "gpt-5.4 / standard" in labels
+
+
+def test_aggregate_model_mode_orders_by_api_dollar_budget(tmp_path) -> None:
+    now = dt.datetime.now(tz=dt.UTC)
+    events = [
+        _event(now, model="gpt-5.5", vendor=VENDOR_OPENAI_CODEX),
+        _event(
+            now,
+            model="claude-opus-4.7",
+            vendor=VENDOR_CLAUDE_CODE,
+            input_tokens=1_000_000,
+            cached_input_tokens=0,
+            output_tokens=0,
+            total_tokens=1_000_000,
+        ),
+    ]
+
+    rows = aggregate_model_mode(_result(events), _options(tmp_path))
+
+    assert rows[0].label == "claude-opus-4.7 / standard"
+    assert rows[0].costs.cost_usd > rows[1].costs.cost_usd

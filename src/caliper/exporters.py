@@ -49,7 +49,7 @@ def session_compat_json(
         json.dumps(
             {
                 "sessionId": session_id,
-                "totalCost": float(total.costs.api_dollars),
+                "totalCost": float(total.costs.cost_usd),
                 "totalTokens": total.totals.total_tokens,
                 "entries": entries,
             },
@@ -72,6 +72,8 @@ class ReceiptInputs:
     warning_count: int = 0
     pricing_status: str = "exact"
     pricing_warnings: list[str] | None = None
+    accuracy_status: str = "exact"
+    accuracy_reasons: list[str] | None = None
 
 
 def month_bounds(month: str, tz: dt.tzinfo) -> tuple[dt.datetime, dt.datetime]:
@@ -96,10 +98,6 @@ def _format_money(value: Any) -> str:
     return f"${float(value):,.2f}"
 
 
-def _format_credits(value: Any) -> str:
-    return f"{float(value):,.2f}"
-
-
 def _format_int(value: int) -> str:
     return f"{value:,}"
 
@@ -114,13 +112,8 @@ def render_receipt_markdown(payload: ReceiptInputs) -> str:
     lines.append("")
     lines.append("| Metric | Value |")
     lines.append("| --- | ---: |")
-    lines.append(f"| Credits | {_format_credits(payload.totals.costs.adjusted_credits)} |")
-    lines.append(f"| API $ | {_format_money(payload.totals.costs.api_dollars)} |")
-    cache_savings = _format_credits(payload.totals.cache_savings.adjusted_credits)
-    lines.append(
-        f"| Cache savings | {cache_savings} credits / "
-        f"{_format_money(payload.totals.cache_savings.api_dollars)} |"
-    )
+    lines.append(f"| Cost $ | {_format_money(payload.totals.costs.cost_usd)} |")
+    lines.append(f"| Cache savings $ | {_format_money(payload.totals.cache_savings.cost_usd)} |")
     lines.append(f"| Events | {_format_int(payload.totals.totals.events)} |")
     lines.append(f"| Tokens | {_format_int(payload.totals.totals.total_tokens)} |")
     lines.append(
@@ -141,6 +134,9 @@ def render_receipt_markdown(payload: ReceiptInputs) -> str:
     if payload.pricing_status != "exact" or payload.pricing_warnings:
         warnings = "; ".join(payload.pricing_warnings or []) or payload.pricing_status
         lines.append(f"| Pricing status | {payload.pricing_status}: {warnings} |")
+    if payload.accuracy_status != "exact" or payload.accuracy_reasons:
+        reasons = "; ".join(payload.accuracy_reasons or []) or payload.accuracy_status
+        lines.append(f"| Accuracy | {payload.accuracy_status}: {reasons} |")
     lines.append("")
     if payload.insights:
         lines.append("## Insights")
@@ -159,16 +155,15 @@ def _section_table(title: str, rows: Iterable[Aggregate]) -> list[str]:
     if not rendered:
         return [f"## {title}", "", "_No data for this month._", ""]
     lines: list[str] = [f"## {title}", ""]
-    lines.append("| Label | Credits | API $ | Events | Tokens |")
-    lines.append("| --- | ---: | ---: | ---: | ---: |")
+    lines.append("| Label | Cost $ | Events | Tokens |")
+    lines.append("| --- | ---: | ---: | ---: |")
     for row in rendered:
         lines.append(
             "| "
             + " | ".join(
                 [
                     row.label.replace("|", "\\|"),
-                    _format_credits(row.costs.adjusted_credits),
-                    _format_money(row.costs.api_dollars),
+                    _format_money(row.costs.cost_usd),
                     _format_int(row.totals.events),
                     _format_int(row.totals.total_tokens),
                 ]
@@ -189,12 +184,10 @@ def render_receipt_html(payload: ReceiptInputs) -> str:
         + "".join(
             f"<tr><td>{name}</td><td>{value}</td></tr>"
             for name, value in (
-                ("Credits", _format_credits(payload.totals.costs.adjusted_credits)),
-                ("API $", _format_money(payload.totals.costs.api_dollars)),
+                ("Cost $", _format_money(payload.totals.costs.cost_usd)),
                 (
-                    "Cache savings",
-                    f"{_format_credits(payload.totals.cache_savings.adjusted_credits)} credits / "
-                    f"{_format_money(payload.totals.cache_savings.api_dollars)}",
+                    "Cache savings $",
+                    _format_money(payload.totals.cache_savings.cost_usd),
                 ),
                 ("Events", _format_int(payload.totals.totals.events)),
                 ("Tokens", _format_int(payload.totals.totals.total_tokens)),
@@ -215,6 +208,12 @@ def render_receipt_html(payload: ReceiptInputs) -> str:
                     "Pricing status",
                     (f"{payload.pricing_status}: {'; '.join(payload.pricing_warnings or [])}")
                     if payload.pricing_status != "exact" or payload.pricing_warnings
+                    else "exact",
+                ),
+                (
+                    "Accuracy",
+                    (f"{payload.accuracy_status}: {'; '.join(payload.accuracy_reasons or [])}")
+                    if payload.accuracy_status != "exact" or payload.accuracy_reasons
                     else "exact",
                 ),
             )
@@ -253,8 +252,7 @@ def _html_section(title: str, rows: Iterable[Aggregate]) -> str:
     body = "".join(
         "<tr>"
         f"<td>{html.escape(row.label)}</td>"
-        f"<td>{_format_credits(row.costs.adjusted_credits)}</td>"
-        f"<td>{_format_money(row.costs.api_dollars)}</td>"
+        f"<td>{_format_money(row.costs.cost_usd)}</td>"
         f"<td>{_format_int(row.totals.events)}</td>"
         f"<td>{_format_int(row.totals.total_tokens)}</td>"
         "</tr>"
@@ -263,7 +261,7 @@ def _html_section(title: str, rows: Iterable[Aggregate]) -> str:
     return (
         f"<h2>{html.escape(title)}</h2>"
         "<table><thead><tr>"
-        "<th>Label</th><th>Credits</th><th>API $</th><th>Events</th><th>Tokens</th>"
+        "<th>Label</th><th>Cost $</th><th>Events</th><th>Tokens</th>"
         "</tr></thead><tbody>"
         f"{body}"
         "</tbody></table>"
@@ -284,15 +282,15 @@ def grafana_dashboard(title: str = DEFAULT_DASHBOARD_TITLE, datasource: str = "P
         "panels": [
             _stat_panel(
                 id_=1,
-                title="Credits used (current 5h)",
-                expr="caliper_credits_used",
+                title="Cost $ used (current 5h)",
+                expr="caliper_cost_usd",
                 unit="none",
                 datasource=datasource,
                 grid={"h": 5, "w": 6, "x": 0, "y": 0},
             ),
             _stat_panel(
                 id_=2,
-                title="Burn rate (credits/hour)",
+                title="Burn rate (% points/hour)",
                 expr="caliper_burn_per_hour",
                 unit="none",
                 datasource=datasource,

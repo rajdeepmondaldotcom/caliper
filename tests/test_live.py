@@ -38,9 +38,8 @@ def _make_state(
 def _frame(**overrides) -> LiveFrame:
     base = dict(
         now=dt.datetime(2026, 5, 12, 15, 30, tzinfo=dt.UTC),
-        today_credits=1234.5,
-        today_api_dollars=12.34,
-        week_credits=10_000.0,
+        today_cost_usd=12.34,
+        week_cost_usd=10_000.0,
         primary=_make_state("primary"),
         secondary=_make_state("secondary", used=12.0, seconds=86400),
         plan_types=("pro",),
@@ -74,8 +73,8 @@ def test_render_frame_shows_usage_and_windows() -> None:
     assert "q quit" in text
     assert "? help" in text
     assert "Today" in text
-    assert "1,234.50" in text
-    assert "credits" in text
+    assert "$12.34" in text
+    assert "$10,000.00" in text
     assert "$12.34" in text
     assert "Last 7d" in text
     assert "Primary 5h" in text
@@ -229,12 +228,12 @@ def test_live_helpers_cover_keyboard_and_stop_paths(monkeypatch) -> None:
     assert live._handle_live_key(state, object()) is False
     assert state.paused is True
 
-    refreshed = _frame(today_credits=999)
+    refreshed = _frame(today_cost_usd=999)
     state.paused = False
     monkeypatch.setattr(live, "_read_key", lambda: "r")
     monkeypatch.setattr(live, "collect_frame", lambda _options: refreshed)
     assert live._handle_live_key(state, object()) is False
-    assert state.frame.today_credits == 999
+    assert state.frame.today_cost_usd == 999
 
     assert live._should_stop(state, {"flag": False}, max_ticks=None) is False
     assert live._should_stop(state, {"flag": True}, max_ticks=None) is True
@@ -257,12 +256,12 @@ def test_live_loop_updates_until_max_ticks(monkeypatch) -> None:
     fake_live = SimpleNamespace(update=updates.append)
     monkeypatch.setattr(live, "_read_key", lambda: "")
     monkeypatch.setattr(live.time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(live, "collect_frame", lambda _options: _frame(today_credits=321))
+    monkeypatch.setattr(live, "collect_frame", lambda _options: _frame(today_cost_usd=321))
 
     live._run_live_loop(fake_live, state, object(), 0.01, 2, {"flag": False}, 140)
 
     assert state.ticks == 2
-    assert state.frame.today_credits == 321
+    assert state.frame.today_cost_usd == 321
     assert len(updates) == 1
 
 

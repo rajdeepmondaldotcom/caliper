@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from textual.widgets import DataTable, Static, TabbedContent, TabPane
 
+from caliper.tui.formatting import format_cost_usd_cell
 from caliper.tui.screens._base import CaliperScreen
 from caliper.tui.state import AppSnapshot
 
-_COLUMNS = ("Date", "Top model", "Vendor", "Credits", "API $", "Events")
+_COLUMNS = ("Date", "Top model", "Vendor", "Cost $", "Events")
 
 
 class IntervalsScreen(CaliperScreen):
@@ -64,7 +65,7 @@ def _render_row(item) -> tuple[str, ...]:
     if breakdowns:
         ranked = sorted(
             breakdowns.values(),
-            key=lambda mb: float(mb.costs.api_dollars),
+            key=lambda mb: mb.costs.cost_usd,
             reverse=True,
         )
         top_model = ranked[0].model if ranked else "-"
@@ -77,7 +78,6 @@ def _render_row(item) -> tuple[str, ...]:
         item.label or item.key,
         top_model,
         vendor.title(),
-        f"{float(item.costs.adjusted_credits):,.0f}",
-        f"${float(item.costs.api_dollars):,.2f}",
+        format_cost_usd_cell(item),
         f"{item.totals.events:,}",
     )

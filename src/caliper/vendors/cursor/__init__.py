@@ -100,7 +100,7 @@ class CursorParser:
             duplicates=0,
             tier_sources={"vendor-default": len(events)} if events else {},
             plan_types=set(),
-            credit_samples=[],
+            rate_limit_samples=[],
             warnings=warnings,
             parser_issues=issues,
             vendor_stats={

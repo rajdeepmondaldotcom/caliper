@@ -27,14 +27,10 @@ def days_for_interval(interval: Interval) -> int:
 
 @dataclass(frozen=True)
 class WhatIfTotals:
-    actual_credits: Decimal
-    actual_dollars: Decimal
-    hypothetical_credits: Decimal
-    hypothetical_dollars: Decimal
-    credit_delta: Decimal
-    dollar_delta: Decimal
-    credit_pct: float
-    dollar_pct: float
+    actual_cost_usd: Decimal
+    hypothetical_cost_usd: Decimal
+    cost_usd_delta: Decimal
+    cost_usd_pct: float
 
 
 @dataclass(frozen=True)
@@ -82,18 +78,14 @@ class WhatIfReport:
         payload.update(
             {
                 "actual": {
-                    **amount_fields("credits", totals.actual_credits),
-                    **amount_fields("api_dollars", totals.actual_dollars),
+                    **amount_fields("cost_usd", totals.actual_cost_usd),
                 },
                 "projected": {
-                    **amount_fields("credits", totals.hypothetical_credits),
-                    **amount_fields("api_dollars", totals.hypothetical_dollars),
+                    **amount_fields("cost_usd", totals.hypothetical_cost_usd),
                 },
                 "delta": {
-                    **amount_fields("credits", totals.credit_delta),
-                    "credits_pct": totals.credit_pct,
-                    **amount_fields("api_dollars", totals.dollar_delta),
-                    "api_dollars_pct": totals.dollar_pct,
+                    **amount_fields("cost_usd", totals.cost_usd_delta),
+                    "cost_usd_pct": totals.cost_usd_pct,
                 },
                 "events_evaluated": self.events_evaluated,
                 "pricing_status": self.pricing_status,
@@ -118,19 +110,11 @@ class WhatIfReport:
         totals = self._require_totals()
         return [
             {
-                "metric": "credits",
-                "actual": totals.actual_credits,
-                "projected": totals.hypothetical_credits,
-                "delta": totals.credit_delta,
-                "pct": totals.credit_pct,
-                "pricing_status": self.pricing_status,
-            },
-            {
-                "metric": "api_dollars",
-                "actual": totals.actual_dollars,
-                "projected": totals.hypothetical_dollars,
-                "delta": totals.dollar_delta,
-                "pct": totals.dollar_pct,
+                "metric": "cost_usd",
+                "actual": totals.actual_cost_usd,
+                "projected": totals.hypothetical_cost_usd,
+                "delta": totals.cost_usd_delta,
+                "pct": totals.cost_usd_pct,
                 "pricing_status": self.pricing_status,
             },
         ]
@@ -158,7 +142,7 @@ def aggregate_interval(
         duplicates=0,
         tier_sources={},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
     return aggregate_total(result, options, label=label, rate_card=rate_card)
@@ -183,7 +167,7 @@ def aggregate_interval_by_vendor(
             duplicates=0,
             tier_sources={},
             plan_types=set(),
-            credit_samples=[],
+            rate_limit_samples=[],
             warnings=[],
         )
         out[vendor_id] = aggregate_total(
@@ -215,9 +199,8 @@ def interval_summary(interval: Interval, agg: Aggregate) -> dict:
         "label": interval.label,
         "start": iso_z(interval.start),
         "end": iso_z(interval.end),
-        **amount_fields("credits", agg.costs.adjusted_credits),
-        **amount_fields("standard_credits", agg.costs.standard_credits),
-        **amount_fields("api_dollars", agg.costs.api_dollars),
+        **amount_fields("calculated_cost_usd", agg.costs.calculated_cost_usd),
+        **amount_fields("cost_usd", agg.costs.cost_usd),
         "events": agg.totals.events,
         "tokens": agg.totals.total_tokens,
         "models": sorted(agg.models),
@@ -240,35 +223,28 @@ def calculate_whatif_totals(
     tier: str | None,
     model: str | None,
 ) -> WhatIfTotals:
-    actual_credits = Decimal("0")
-    actual_dollars = Decimal("0")
-    hypothetical_credits = Decimal("0")
-    hypothetical_dollars = Decimal("0")
+    actual_cost_usd = Decimal("0")
+    hypothetical_cost_usd = Decimal("0")
     for event in events:
         actual, _, _ = event_cost(rate_card, event)
-        actual_credits += actual.adjusted_credits
-        actual_dollars += actual.api_dollars
+        actual_cost_usd += actual.cost_usd
         hypothetical_event = replace(
             event,
             model=model or event.model,
             service_tier=tier or event.service_tier,
-            vendor_reported_api_dollars=None,
+            vendor_reported_cost_usd=None,
         )
         hypothetical, _, _ = event_cost(rate_card, hypothetical_event)
-        hypothetical_credits += hypothetical.adjusted_credits
-        hypothetical_dollars += hypothetical.api_dollars
+        hypothetical_cost_usd += hypothetical.cost_usd
 
-    credit_delta = hypothetical_credits - actual_credits
-    dollar_delta = hypothetical_dollars - actual_dollars
+    cost_usd_delta = hypothetical_cost_usd - actual_cost_usd
     return WhatIfTotals(
-        actual_credits=actual_credits,
-        actual_dollars=actual_dollars,
-        hypothetical_credits=hypothetical_credits,
-        hypothetical_dollars=hypothetical_dollars,
-        credit_delta=credit_delta,
-        dollar_delta=dollar_delta,
-        credit_pct=float(credit_delta / actual_credits * Decimal("100")) if actual_credits else 0.0,
-        dollar_pct=float(dollar_delta / actual_dollars * Decimal("100")) if actual_dollars else 0.0,
+        actual_cost_usd=actual_cost_usd,
+        hypothetical_cost_usd=hypothetical_cost_usd,
+        cost_usd_delta=cost_usd_delta,
+        cost_usd_pct=(
+            float(cost_usd_delta / actual_cost_usd * Decimal("100")) if actual_cost_usd else 0.0
+        ),
     )
 
 

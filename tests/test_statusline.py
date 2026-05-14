@@ -74,7 +74,7 @@ def test_statusline_json_exposes_latest_usage_and_limit_windows(tmp_path) -> Non
     assert payload["latest"]["project"] == "/tmp/project-alpha"
     assert payload["top_project"]["label"] == "/tmp/project-alpha"
     assert payload["today"]["cache_ratio"] == 0.5
-    assert payload["today"]["credits_exact"]
+    assert payload["today"]["cost_usd_exact"]
     assert payload["rate_limits"]["primary"]["limit_id"] == "codex"
     assert payload["subscription"]["plans"][0]["slug"] == "pro"
 

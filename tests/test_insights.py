@@ -74,7 +74,14 @@ def test_insights_json_reports_cache_tier_and_project_concentration(tmp_path) ->
     titles = {item["title"] for item in payload["insights"]}
     assert "High cache reuse" in titles
     assert "Service tier inferred" in titles
-    assert any("is 100% of credits" in title for title in titles)  # project concentration
+    assert any("is 100% of cost" in title for title in titles)  # project concentration
+    cache = next(item for item in payload["insights"] if item["title"] == "High cache reuse")
+    assert cache["category"] == "cache"
+    assert cache["priority"] > 0
+    assert cache["confidence"] == "high"
+    assert cache["impact_usd_exact"]
+    assert cache["evidence_metrics"]["cache_hit_ratio"] > 0
+    assert isinstance(cache["commands"], list)
 
 
 def test_insights_markdown_renders_actions(tmp_path) -> None:
@@ -111,7 +118,7 @@ def test_build_insights_returns_empty_for_empty_usage(tmp_path) -> None:
         duplicates=0,
         tier_sources={},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
 

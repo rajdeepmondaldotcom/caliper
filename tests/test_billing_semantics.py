@@ -48,7 +48,7 @@ def _result(*events: UsageEvent) -> LoadResult:
         duplicates=0,
         tier_sources={"logged": len(events)},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
 
@@ -63,7 +63,7 @@ def _options(tmp_path: Path):
     )
 
 
-def test_non_codex_vendor_prices_api_dollars_without_codex_credits(tmp_path: Path) -> None:
+def test_non_codex_vendor_prices_cost_usd(tmp_path: Path) -> None:
     usage = Usage(
         input_tokens=1000,
         cache_creation_input_tokens=200,
@@ -75,18 +75,15 @@ def test_non_codex_vendor_prices_api_dollars_without_codex_credits(tmp_path: Pat
 
     total = aggregate_total(result, _options(tmp_path), rate_card=RateCard.load(None, "model"))
 
-    assert total.costs.api_dollars == Decimal("0.0033")
-    assert total.costs.standard_credits == Decimal("0")
-    assert total.costs.adjusted_credits == Decimal("0")
-    assert total.costs.api_unpriced_events == 0
-    assert total.costs.credit_unpriced_events == 0
+    assert total.costs.cost_usd == Decimal("0.0033")
+    assert total.costs.calculated_cost_usd == Decimal("0.0033")
+    assert total.costs.unpriced_events == 0
     assert pricing_status(total) == "exact"
-    assert all("Codex credit" not in warning for warning in pricing_warnings(total))
     pricing_dimension = {item.name: item for item in evidence_dimensions(result, total)}["pricing"]
     assert pricing_dimension.grade == "exact"
 
 
-def test_non_codex_openai_model_does_not_invent_codex_credits() -> None:
+def test_same_openai_model_costs_same_across_tools() -> None:
     card = RateCard.load(None, "model")
     codex_event = _event(vendor=VENDOR_OPENAI_CODEX, model="gpt-5.5")
     cursor_event = _event(vendor=VENDOR_CURSOR, model="gpt-5.5")
@@ -94,45 +91,41 @@ def test_non_codex_openai_model_does_not_invent_codex_credits() -> None:
     codex_cost, _, _ = event_cost(card, codex_event)
     cursor_cost, _, _ = event_cost(card, cursor_event)
 
-    assert codex_cost.adjusted_credits > 0
-    assert cursor_cost.api_dollars == codex_cost.api_dollars
-    assert cursor_cost.standard_credits == Decimal("0")
-    assert cursor_cost.adjusted_credits == Decimal("0")
-    assert cursor_cost.credit_unpriced_events == 0
+    assert codex_cost.cost_usd > 0
+    assert cursor_cost.cost_usd == codex_cost.cost_usd
+    assert cursor_cost.calculated_cost_usd == codex_cost.calculated_cost_usd
+    assert cursor_cost.unpriced_events == 0
 
 
-def test_cursor_unknown_model_is_partial_due_api_rate_not_codex_credit(
+def test_cursor_unknown_model_is_partial_due_missing_usd_rate(
     tmp_path: Path,
 ) -> None:
     result = _result(_event(vendor=VENDOR_CURSOR, model="cursor-auto"))
 
     total = aggregate_total(result, _options(tmp_path), rate_card=RateCard.load(None, "model"))
 
-    assert total.costs.api_unpriced_events == 1
-    assert total.costs.credit_unpriced_events == 0
+    assert total.costs.unpriced_events == 1
     assert total.unknown_model_events == 1
     assert pricing_status(total) == "partial"
     warnings = pricing_warnings(total)
-    assert any("API-dollar" in warning for warning in warnings)
-    assert all("Codex credit" not in warning for warning in warnings)
+    assert any("USD rate" in warning for warning in warnings)
 
 
-def test_codex_missing_credit_rate_remains_partial_for_codex_event(tmp_path: Path) -> None:
+def test_codex_max_usd_rate_is_exact(tmp_path: Path) -> None:
     result = _result(_event(vendor=VENDOR_OPENAI_CODEX, model="gpt-5.1-codex-max"))
 
     total = aggregate_total(result, _options(tmp_path), rate_card=RateCard.load(None, "model"))
 
-    assert total.costs.api_dollars == Decimal("0.00225")
-    assert total.costs.credit_unpriced_events == 1
-    assert pricing_status(total) == "partial"
-    assert any("Codex credit" in warning for warning in pricing_warnings(total))
+    assert total.costs.cost_usd == Decimal("0.00225")
+    assert total.costs.unpriced_events == 0
+    assert pricing_status(total) == "exact"
+    assert pricing_warnings(total) == []
 
 
-def test_fast_mode_changes_codex_credits_not_api_dollars() -> None:
+def test_fast_mode_does_not_change_usd_cost() -> None:
     card = RateCard.load(None, "model")
     standard_cost, _, _ = event_cost(card, _event(model="gpt-5.5", tier="standard"))
     fast_cost, _, _ = event_cost(card, _event(model="gpt-5.5", tier="fast"))
 
-    assert fast_cost.api_dollars == standard_cost.api_dollars
-    assert fast_cost.standard_credits == standard_cost.standard_credits
-    assert fast_cost.adjusted_credits == standard_cost.standard_credits * Decimal("2.5")
+    assert fast_cost.cost_usd == standard_cost.cost_usd
+    assert fast_cost.calculated_cost_usd == standard_cost.calculated_cost_usd

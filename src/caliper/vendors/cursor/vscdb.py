@@ -7,6 +7,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from caliper.dedupe import dedupe_usage_events
 from caliper.models import VENDOR_CURSOR, ThreadMeta, Usage, UsageEvent
 from caliper.normalize import normalize_model
 from caliper.timeutil import parse_event_timestamp
@@ -241,19 +242,5 @@ def _safe_int(value: Any) -> int:
 
 
 def _dedupe_events(events: list[UsageEvent]) -> list[UsageEvent]:
-    seen = set()
-    unique: list[UsageEvent] = []
-    for event in events:
-        key = (
-            event.timestamp,
-            event.session_id,
-            event.usage.input_tokens,
-            event.usage.cached_input_tokens,
-            event.usage.output_tokens,
-            event.usage.total_tokens,
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(event)
+    unique, _stats = dedupe_usage_events(events)
     return unique

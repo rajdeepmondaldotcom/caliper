@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from textual.widgets import Static
 
+from caliper.tui.formatting import format_cost_usd
 from caliper.tui.screens._base import CaliperScreen
 from caliper.tui.widgets.sparkline import Sparkline
 
@@ -32,16 +33,17 @@ class ForecastScreen(CaliperScreen):
         if snap is None or not snap.daily:
             yield Static("[dim]Not enough daily data yet.[/dim]")
             return
-        series = [float(item.costs.api_dollars) for item in snap.daily[-30:]]
-        yield Static("[dim]Last 30 days · API $[/dim]")
+        values = [item.costs.cost_usd for item in snap.daily[-30:]]
+        series = [float(value) for value in values]
+        yield Static("[dim]Last 30 days · Cost $[/dim]")
         yield Sparkline(series)
-        total = sum(series)
+        total = sum(values, start=0)
         avg = total / max(len(series), 1)
         projected = avg * 30
         yield Static(
-            f"\n[bold]Last 30 days total:[/bold] ${total:,.2f}\n"
-            f"[bold]Daily average:[/bold] ${avg:,.2f}\n"
-            f"[bold]Next-30 projection (linear):[/bold] ${projected:,.2f}"
+            f"\n[bold]Last 30 days total:[/bold] {format_cost_usd(total)}\n"
+            f"[bold]Daily average:[/bold] {format_cost_usd(avg)}\n"
+            f"[bold]Next-30 projection (linear):[/bold] {format_cost_usd(projected)}"
         )
 
     def footer_pills(self) -> str:

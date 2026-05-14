@@ -277,7 +277,6 @@ class UsageEvent:
     plan_type: str = ""
     limit_id: str = ""
     limit_name: str = ""
-    credits: object = None
     primary_used_percent: object = None
     primary_window_minutes: object = None
     primary_resets_at: object = None
@@ -286,7 +285,7 @@ class UsageEvent:
     secondary_resets_at: object = None
     rate_limit_reached_type: str = ""
     vendor: str = VENDOR_OPENAI_CODEX
-    vendor_reported_api_dollars: object = None
+    vendor_reported_cost_usd: object = None
     source_line: int = 0
     event_id: str = ""
     message_id: str = ""
@@ -303,7 +302,6 @@ class RateLimitSample:
     plan_type: str = ""
     limit_id: str = ""
     limit_name: str = ""
-    credits: object = None
     primary_used_percent: object = None
     primary_window_minutes: object = None
     primary_resets_at: object = None
@@ -363,11 +361,11 @@ class VendorParseStats:
 
 @dataclass(init=False)
 class CostTotals:
-    api_dollars: Decimal
-    standard_credits: Decimal
-    adjusted_credits: Decimal
-    api_unpriced_events: int
-    credit_unpriced_events: int
+    cost_usd: Decimal
+    reported_cost_usd: Decimal
+    calculated_cost_usd: Decimal
+    reported_calculated_delta_usd: Decimal
+    unpriced_events: int
     estimated_events: int
     ambiguous_reasoning_events: int
     local_override_events: int
@@ -375,36 +373,34 @@ class CostTotals:
 
     def __init__(
         self,
-        api_dollars: object = Decimal("0"),
-        standard_credits: object = Decimal("0"),
-        adjusted_credits: object = Decimal("0"),
-        api_unpriced_events: int = 0,
-        credit_unpriced_events: int = 0,
+        cost_usd: object = Decimal("0"),
+        reported_cost_usd: object = Decimal("0"),
+        calculated_cost_usd: object | None = None,
+        reported_calculated_delta_usd: object = Decimal("0"),
+        unpriced_events: int = 0,
         estimated_events: int = 0,
         ambiguous_reasoning_events: int = 0,
         local_override_events: int = 0,
         vendor_reported_events: int = 0,
     ) -> None:
-        self.api_dollars = decimal_value(api_dollars)
-        self.standard_credits = decimal_value(standard_credits)
-        self.adjusted_credits = decimal_value(adjusted_credits)
-        self.api_unpriced_events = api_unpriced_events
-        self.credit_unpriced_events = credit_unpriced_events
+        self.cost_usd = decimal_value(cost_usd)
+        self.reported_cost_usd = decimal_value(reported_cost_usd)
+        self.calculated_cost_usd = (
+            self.cost_usd if calculated_cost_usd is None else decimal_value(calculated_cost_usd)
+        )
+        self.reported_calculated_delta_usd = decimal_value(reported_calculated_delta_usd)
+        self.unpriced_events = unpriced_events
         self.estimated_events = estimated_events
         self.ambiguous_reasoning_events = ambiguous_reasoning_events
         self.local_override_events = local_override_events
         self.vendor_reported_events = vendor_reported_events
 
-    @property
-    def unpriced_events(self) -> int:
-        return max(self.api_unpriced_events, self.credit_unpriced_events)
-
     def add(self, other: CostTotals) -> None:
-        self.api_dollars += other.api_dollars
-        self.standard_credits += other.standard_credits
-        self.adjusted_credits += other.adjusted_credits
-        self.api_unpriced_events += other.api_unpriced_events
-        self.credit_unpriced_events += other.credit_unpriced_events
+        self.cost_usd += other.cost_usd
+        self.reported_cost_usd += other.reported_cost_usd
+        self.calculated_cost_usd += other.calculated_cost_usd
+        self.reported_calculated_delta_usd += other.reported_calculated_delta_usd
+        self.unpriced_events += other.unpriced_events
         self.estimated_events += other.estimated_events
         self.ambiguous_reasoning_events += other.ambiguous_reasoning_events
         self.local_override_events += other.local_override_events
@@ -640,7 +636,8 @@ class LoadResult:
     duplicates: int
     tier_sources: dict[str, int]
     plan_types: set[str]
-    credit_samples: list[RateLimitSample]
+    rate_limit_samples: list[RateLimitSample]
     warnings: list[str]
     parser_issues: list[ParserIssue] = field(default_factory=list)
     vendor_stats: dict[str, VendorParseStats] = field(default_factory=dict)
+    dedupe_stats: dict[str, int] = field(default_factory=dict)

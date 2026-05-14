@@ -35,4 +35,4 @@ class LimitsScreen(CaliperScreen):
         yield WindowPanel("Secondary weekly", secondary)
 
     def footer_pills(self) -> str:
-        return "[ r refresh ]  [ d doctor ]  [ esc back ]"
+        return "[ r refresh ]  [ esc back ]"

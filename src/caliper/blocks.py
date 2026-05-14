@@ -27,7 +27,7 @@ class UsageBlock:
     cache_creation_tokens: int
     cache_read_tokens: int
     total_tokens: int
-    api_dollars: Decimal
+    cost_usd: Decimal
     models: tuple[str, ...]
 
 
@@ -92,7 +92,7 @@ def block_payload(block: UsageBlock, token_limit: int | None = None) -> dict:
             "cacheReadInputTokens": block.cache_read_tokens,
         },
         "totalTokens": block.total_tokens,
-        "costUSD": float(block.api_dollars),
+        "costUSD": float(block.cost_usd),
         "models": list(block.models),
         "burnRate": burn_rate,
         "projection": projection,
@@ -125,7 +125,7 @@ def calculate_burn_rate(block: UsageBlock) -> dict | None:
     return {
         "tokensPerMinute": block.total_tokens / minutes,
         "tokensPerMinuteForIndicator": (block.input_tokens + block.output_tokens) / minutes,
-        "costPerHour": float(block.api_dollars) / minutes * 60,
+        "costPerHour": float(block.cost_usd) / minutes * 60,
     }
 
 
@@ -138,7 +138,7 @@ def project_block_usage(block: UsageBlock, burn_rate: dict | None = None) -> dic
     now = dt.datetime.now(tz=dt.UTC)
     remaining_minutes = max(0, (block.end_time - now).total_seconds() / 60)
     projected_tokens = block.total_tokens + burn_rate["tokensPerMinute"] * remaining_minutes
-    projected_cost = float(block.api_dollars) + burn_rate["costPerHour"] / 60 * remaining_minutes
+    projected_cost = float(block.cost_usd) + burn_rate["costPerHour"] / 60 * remaining_minutes
     return {
         "totalTokens": round(projected_tokens),
         "totalCost": round(projected_cost, 2),
@@ -161,7 +161,7 @@ def _create_block(
         duplicates=0,
         tier_sources={},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
     total = aggregate_total(scoped, options, rate_card=rate_card)
@@ -180,7 +180,7 @@ def _create_block(
         ),
         cache_read_tokens=total.totals.cache_read_input_tokens,
         total_tokens=total.totals.total_tokens,
-        api_dollars=total.costs.api_dollars,
+        cost_usd=total.costs.cost_usd,
         models=tuple(sorted(total.models)),
     )
 
@@ -204,7 +204,7 @@ def _create_gap(
         cache_creation_tokens=0,
         cache_read_tokens=0,
         total_tokens=0,
-        api_dollars=Decimal("0"),
+        cost_usd=Decimal("0"),
         models=(),
     )
 

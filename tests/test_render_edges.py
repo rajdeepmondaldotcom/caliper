@@ -67,7 +67,7 @@ def _load_result(*events: UsageEvent, samples: list[RateLimitSample] | None = No
         duplicates=2,
         tier_sources={"logged": len(events)},
         plan_types={event.plan_type for event in events if event.plan_type},
-        credit_samples=samples or [],
+        rate_limit_samples=samples or [],
         warnings=["parser warning"],
     )
 
@@ -76,8 +76,8 @@ def _aggregate(label: str = "row") -> Aggregate:
     agg = Aggregate(key=label, label=label)
     agg.add_event(
         _event(),
-        CostTotals(api_dollars="1.23", standard_credits="10", adjusted_credits="25"),
-        CostTotals(api_dollars="0.50", standard_credits="1", adjusted_credits="2"),
+        CostTotals(cost_usd="1.23"),
+        CostTotals(cost_usd="0.50"),
         long_context=False,
         unknown_model=False,
         unknown_tier=False,
@@ -102,7 +102,6 @@ def test_render_table_footer_and_warning_paths(tmp_path: Path) -> None:
     assert "Vendors: openai-codex" in text
     assert "parser warning" in text
     assert "Subscription:" in text
-    assert "Standard-mode baseline" in text
     assert "Cache savings:" in text
     assert "Service-tier sources: logged=1" in text
     assert "Plan types: free" in text
@@ -111,11 +110,9 @@ def test_render_table_footer_and_warning_paths(tmp_path: Path) -> None:
 def test_pricing_status_and_warning_branches() -> None:
     agg = Aggregate(key="warn", label="warn")
     agg.costs = CostTotals(
-        api_unpriced_events=1,
-        credit_unpriced_events=2,
+        unpriced_events=2,
         estimated_events=3,
         ambiguous_reasoning_events=4,
-        vendor_reported_events=5,
     )
     agg.unknown_model_events = 6
     agg.unknown_tier_events = 7
@@ -124,8 +121,7 @@ def test_pricing_status_and_warning_branches() -> None:
     warnings = render_module.pricing_warnings(agg)
 
     assert render_module.pricing_status(agg) == "partial"
-    assert any("API-dollar" in warning for warning in warnings)
-    assert any("Codex credit" in warning for warning in warnings)
+    assert any("USD rate" in warning for warning in warnings)
     assert any("no known rate card" in warning for warning in warnings)
     assert any("inferred service tiers" in warning for warning in warnings)
     assert any("estimate pricing" in warning for warning in warnings)
@@ -141,7 +137,7 @@ def test_pricing_status_and_warning_branches() -> None:
     assert render_module.pricing_status(vendor) == "vendor-reported"
 
     breakdown = ModelBreakdown(key="m", model="m", service_tier="standard")
-    breakdown.costs = CostTotals(api_unpriced_events=1)
+    breakdown.costs = CostTotals(unpriced_events=1)
     assert render_module.model_breakdown_pricing_status(breakdown) == "partial"
     breakdown.costs = CostTotals(vendor_reported_events=1)
     assert render_module.model_breakdown_pricing_status(breakdown) == "vendor-reported"
@@ -162,7 +158,7 @@ def test_render_dispatch_and_markdown_totals(tmp_path: Path, capsys) -> None:
         assert output.read_text()
 
     payload = json.loads((tmp_path / "report.json").read_text())
-    assert payload["caliper"]["schema_version"] == 1
+    assert payload["caliper"]["schema_version"] == 2
 
     render_module.write_output("stdout text", None)
     assert "stdout text" in capsys.readouterr().out
@@ -176,7 +172,6 @@ def test_limits_rendering_and_reset_epoch_edges(tmp_path: Path) -> None:
         session_id="session",
         plan_type="pro",
         limit_id="codex",
-        credits=123,
         primary_used_percent=None,
         primary_window_minutes=300,
         primary_resets_at="not-an-epoch",
@@ -227,7 +222,7 @@ def test_compact_models_ranks_by_spend_when_breakdowns_present():
 
     def _breakdown(model: str, dollars: float) -> ModelBreakdown:
         mb = ModelBreakdown(key=f"{model}|standard", model=model, service_tier="standard")
-        mb.costs.api_dollars = Decimal(str(dollars))
+        mb.costs.cost_usd = Decimal(str(dollars))
         mb.totals = TokenTotals()
         return mb
 
@@ -276,7 +271,7 @@ def test_compact_models_includes_vendor_chip_when_breakdowns_present():
             service_tier="standard",
             model_vendor=vendor,
         )
-        mb.costs.api_dollars = Decimal(str(dollars))
+        mb.costs.cost_usd = Decimal(str(dollars))
         mb.totals = TokenTotals()
         return mb
 
@@ -310,7 +305,7 @@ def test_compact_models_oneline_drops_chip():
         service_tier="standard",
         model_vendor="anthropic",
     )
-    mb.costs.api_dollars = Decimal("10")
+    mb.costs.cost_usd = Decimal("10")
     mb.totals = TokenTotals()
     item = Aggregate(key="x", label="x", models={"claude-opus-4.7"})
     item.model_breakdowns = {"claude-opus-4.7": mb}

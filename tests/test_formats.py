@@ -137,7 +137,7 @@ def test_daily_json_pins_schema(tmp_path) -> None:
         "rate_limit_samples",
         "warnings",
     }
-    assert payload["caliper"]["schema_version"] == 1
+    assert payload["caliper"]["schema_version"] == 2
     assert isinstance(payload["rate_limit_samples"], list)
     assert payload["command"] == "daily"
     assert payload["totals"]["input_tokens"] == 1000
@@ -145,8 +145,8 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["totals"]["output_tokens"] == 100
     assert payload["totals"]["reasoning_output_tokens"] == 25
     assert payload["totals"]["total_tokens"] == 1100
-    assert payload["totals"]["cache_savings_credits"] > 0
-    assert payload["totals"]["cache_savings_api_dollars"] > 0
+    assert payload["totals"]["cache_savings_cost_usd"] > 0
+    assert payload["totals"]["cache_savings_cost_usd"] > 0
     assert payload["totals"]["events"] == 1
     assert payload["totals"]["models"] == ["gpt-5.5"]
     assert payload["totals"]["service_tiers"] == ["standard"]
@@ -156,7 +156,7 @@ def test_daily_json_pins_schema(tmp_path) -> None:
     assert payload["totals"]["model_breakdowns"][0]["service_tier"] == "standard"
     assert payload["totals"]["model_breakdowns"][0]["events"] == 1
     assert payload["totals"]["model_breakdowns"][0]["model_sources"] == ["turn_context"]
-    assert payload["totals"]["model_breakdowns"][0]["credits_exact"]
+    assert payload["totals"]["model_breakdowns"][0]["cost_usd_exact"]
     assert payload["totals"]["subscription_plans"][0]["slug"] == "pro"
     assert payload["pricing"]["mode"] == "model"
     assert payload["subscription"]["plans"][0]["slug"] == "pro"
@@ -245,7 +245,7 @@ def test_grouped_json_bounds_rate_limit_samples_by_default(tmp_path) -> None:
 
 
 def test_table_warns_when_model_has_unpriced_costs(tmp_path) -> None:
-    session_root, state_db, until, missing_cfg = _fixture(tmp_path, model="gpt-5.3-codex-spark")
+    session_root, state_db, until, missing_cfg = _fixture(tmp_path, model="future-model")
     result = _invoke(
         [
             "daily",
@@ -262,7 +262,7 @@ def test_table_warns_when_model_has_unpriced_costs(tmp_path) -> None:
         ]
     )
     assert result.exit_code == 0, result.output
-    assert "no API-dollar rate" in result.output
+    assert "no USD rate" in result.output
     assert "partial" in result.output
 
 
@@ -306,9 +306,10 @@ def test_daily_csv_has_header_and_data(tmp_path) -> None:
         "output_tokens",
         "reasoning_output_tokens",
         "total_tokens",
-        "credits",
-        "standard_credits",
-        "api_dollars",
+        "cost_usd",
+        "reported_cost_usd",
+        "calculated_cost_usd",
+        "reported_minus_calculated_cost_usd",
         "pricing_status",
         "unpriced_events",
         "estimated_events",
@@ -344,7 +345,7 @@ def test_daily_markdown_has_header_row(tmp_path) -> None:
     assert "Input" in lines[0]
     assert "Cached" in lines[0]
     assert "Output" in lines[0]
-    assert "Credits" in lines[0]
+    assert "Cost $" in lines[0]
     assert lines[1].startswith("| --- |")
     assert any("1100" in line for line in lines[2:])
     # Totals row appears at the end with **Total** marker.
@@ -570,10 +571,10 @@ def test_daily_json_long_context_pricing(tmp_path) -> None:
     #   300_000 * 5 * 2 / 1e6 = 3.00
     #   10_000 * 30 * 1.5 / 1e6 = 0.45
     # Total: $3.45
-    assert round(payload["totals"]["api_dollars"], 2) == 3.45
+    assert round(payload["totals"]["cost_usd"], 2) == 3.45
 
 
-def test_daily_json_fast_tier_credit_multiplier(tmp_path) -> None:
+def test_daily_json_fast_tier_has_same_usd_cost(tmp_path) -> None:
     session_root, state_db, until, missing_cfg = _fixture(tmp_path, tier="fast")
     result = _invoke(
         [
@@ -594,6 +595,6 @@ def test_daily_json_fast_tier_credit_multiplier(tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    standard = payload["totals"]["standard_credits"]
-    adjusted = payload["totals"]["credits"]
-    assert round(adjusted / standard, 4) == 2.5
+    standard = payload["totals"]["calculated_cost_usd"]
+    adjusted = payload["totals"]["cost_usd"]
+    assert adjusted == standard

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from textual.widgets import Static
 
+from caliper.tui.formatting import format_cost_usd_cell
 from caliper.tui.screens._base import CaliperScreen
 from caliper.tui.widgets.sparkline import Sparkline
 
@@ -32,13 +33,13 @@ class LiveScreen(CaliperScreen):
         if snap is None or not snap.daily:
             yield Static("[dim]Waiting for the first load.[/dim]")
             return
-        recent = [float(item.costs.api_dollars) for item in snap.daily[-7:]]
-        yield Static("[dim]Last 7 days · API $[/dim]")
+        recent = [float(item.costs.cost_usd) for item in snap.daily[-7:]]
+        yield Static("[dim]Last 7 days · Cost $[/dim]")
         yield Sparkline(recent)
         if snap.overview_total is not None:
             yield Static(
                 f"\n[bold]Window cost:[/bold] "
-                f"${float(snap.overview_total.costs.api_dollars):,.2f}\n"
+                f"{format_cost_usd_cell(snap.overview_total)}\n"
                 f"[bold]Events:[/bold] {snap.overview_total.totals.events:,}"
             )
 

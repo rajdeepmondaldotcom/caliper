@@ -6,10 +6,11 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from caliper.arbitrage import explain, suggest
+from caliper.arbitrage import explain, recommend, suggest
 from caliper.arbitrage_rules import HEURISTICS_VERSION
 from caliper.cli import app
 from caliper.models import ThreadMeta, Usage, UsageEvent
+from caliper.pricing import RateCard
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 
@@ -51,6 +52,18 @@ def test_explain_rule() -> None:
     assert payload["rule_id"] == "premium-short-context"
 
 
+def test_recommendations_group_repeated_events_and_estimate_savings() -> None:
+    rows = recommend([_event(), _event()], RateCard.load(None, "model"))
+
+    assert rows
+    top = rows[0]
+    assert top.events == 2
+    assert top.sessions == 1
+    assert top.next_command.startswith("caliper whatif")
+    assert top.examples
+    assert "heuristics_version" in top.to_record()
+
+
 def test_advise_cli_json(tmp_path) -> None:
     session_root = tmp_path / "sessions"
     now = dt.datetime.now(tz=dt.UTC)
@@ -88,3 +101,5 @@ def test_advise_cli_json(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["records"]
+    assert payload["recommendations"]
+    assert payload["record_count"] == len(payload["records"])

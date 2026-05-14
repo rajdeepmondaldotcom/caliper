@@ -30,7 +30,6 @@ def test_rates_show_json_schema() -> None:
     assert payload["billing_checks"]
     assert all(check["passed"] for check in payload["billing_checks"])
     gpt55 = next(model for model in payload["models"] if model["name"] == "gpt-5.5")
-    assert gpt55["fast_multiplier"] == 2.5
     assert gpt55["long_context"]["threshold"] == 272_000
     assert gpt55["api"]["reasoning_output"] == gpt55["api"]["output"]
     gpt54 = next(model for model in payload["models"] if model["name"] == "gpt-5.4")
@@ -39,13 +38,12 @@ def test_rates_show_json_schema() -> None:
     assert max_card["api"]["input"] == 1.25
     assert max_card["api"]["cached_input"] == 0.125
     assert max_card["api"]["output"] == 10.0
-    assert max_card["credits"] is None
 
 
 def test_rates_show_markdown() -> None:
     result = runner.invoke(app, ["rates", "show", "--format", "markdown"])
     assert result.exit_code == 0, result.output
-    assert "| model | fast_multiplier | api_input | credits_input |" in result.output
+    assert "| model | api_input |" in result.output
 
 
 def test_rates_show_bad_format_reports_choices() -> None:
@@ -92,7 +90,7 @@ def test_rates_file_override_with_reasoning_field(tmp_path) -> None:
     rates_path.write_text(
         json.dumps(
             {
-                "api": {
+                "usd": {
                     "gpt-5.5": {
                         "input": 1.0,
                         "cached_input": 0.0,
@@ -111,7 +109,7 @@ def test_rates_file_override_with_reasoning_field(tmp_path) -> None:
     )
     cost, _, _ = estimate_event_cost(usage, "gpt-5.5", "standard", "model", rates_path)
     # input 1000 × 1 + output 1000 × 10 + reasoning 1000 × 100 = 111,000 → /1M = 0.111
-    assert cost.api_dollars == Decimal("0.111")
+    assert cost.cost_usd == Decimal("0.111")
 
 
 def test_long_context_threshold_uses_model_card_value() -> None:

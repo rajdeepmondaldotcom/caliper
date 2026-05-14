@@ -21,7 +21,7 @@ def test_empty_string_has_no_violations():
 
 
 def test_clean_sentence_passes():
-    assert voice_lint("Last 7 days. 48,727 credits. $3,383.") == []
+    assert voice_lint("Last 7 days. 48,727 cost_usd. $3,383.") == []
 
 
 def test_em_dash_is_blocked():

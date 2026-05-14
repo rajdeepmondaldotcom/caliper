@@ -62,14 +62,14 @@ def _event(
 
 def _result(
     *events: UsageEvent,
-    credit_samples: list[RateLimitSample] | None = None,
+    rate_limit_samples: list[RateLimitSample] | None = None,
 ) -> LoadResult:
     return LoadResult(
         events=list(events),
         duplicates=0,
         tier_sources={"logged": len(events)},
         plan_types=set(),
-        credit_samples=credit_samples or [],
+        rate_limit_samples=rate_limit_samples or [],
         warnings=[],
     )
 
@@ -120,8 +120,6 @@ def test_fetch_rate_sources_success_and_discrepancies(monkeypatch) -> None:
                 {
                     "name": "gpt-5.5",
                     "api": {"input": 999, "cached_input": 0.5, "output": 30},
-                    "credits": {"input": 125, "cached_input": 12.5, "output": 700},
-                    "fast_multiplier": 3,
                     "long_context": {
                         "threshold": 128000,
                         "input_mult": 2,
@@ -151,7 +149,7 @@ def test_fetch_rate_sources_success_and_discrepancies(monkeypatch) -> None:
     assert payload["sources"][0]["status"] == "ok"
     assert payload["observed_models"][0]["source"] == "unit source"
     sections = {item["section"] for item in payload["discrepancies"]}
-    assert {"api", "credits", "fast_multiplier", "long_context"} <= sections
+    assert {"api", "long_context"} <= sections
 
 
 def test_network_imports_stay_in_single_chokepoint() -> None:
@@ -198,32 +196,6 @@ def test_extract_and_dedupe_models() -> None:
             {"name": "gpt-5.5", "source": "b", "y": 2},
         ]
     ) == [{"name": "gpt-5.5", "source": "a; b", "x": 1, "y": 2}]
-    credit_html = """
-    <h1>GPT-5.5</h1>
-    <p>Per 1M tokens Input $5 Cached input $0.5 Output $30</p>
-    <p>GPT-5.5 125 credits 12.5 credits 750 credits</p>
-    """
-    credit_models = extract_models_from_text(credit_html)
-    assert credit_models == [
-        {
-            "name": "gpt-5.5",
-            "api": {"input": 5.0, "cached_input": 0.5, "output": 30.0},
-            "credits": {"input": 125.0, "cached_input": 12.5, "output": 750.0},
-        }
-    ]
-    speed_html = """
-    <p>Fast mode consumes credits at 2.5x the Standard rate for GPT-5.5 and
-    2x the Standard rate for GPT-5.4.</p>
-    """
-    speed_models = extract_models_from_text(speed_html)
-    assert (
-        next(model for model in speed_models if model["name"] == "gpt-5.5")["fast_multiplier"]
-        == 2.5
-    )
-    assert (
-        next(model for model in speed_models if model["name"] == "gpt-5.4")["fast_multiplier"]
-        == 2.0
-    )
     long_context_html = """
     <h1>GPT-5.4</h1>
     <p>For GPT-5.4, prompts with &gt;272K input tokens are priced at 2x input and
@@ -313,7 +285,7 @@ def test_build_health_report_surfaces_inferred_tiers_and_parser_warnings(tmp_pat
         duplicates=0,
         tier_sources={"current-config": 1},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=["fixture warning"],
     )
 
@@ -360,7 +332,7 @@ def test_forecast_csv_and_markdown_paths(monkeypatch, tmp_path) -> None:
 
     csv_result = runner.invoke(cli.app, [*base_args, "--format", "csv"])
     assert csv_result.exit_code == 0, csv_result.output
-    assert "api_dollars" in csv_result.output
+    assert "cost_usd" in csv_result.output
 
     markdown_result = runner.invoke(cli.app, [*base_args, "--format", "markdown"])
     assert markdown_result.exit_code == 0, markdown_result.output
@@ -383,7 +355,7 @@ def test_whatif_non_noop_csv_markdown_and_table(monkeypatch, tmp_path) -> None:
 
     csv_result = runner.invoke(cli.app, [*base_args, "--format", "csv"])
     assert csv_result.exit_code == 0, csv_result.output
-    assert "api_dollars" in csv_result.output
+    assert "cost_usd" in csv_result.output
 
     markdown_result = runner.invoke(cli.app, [*base_args, "--format", "markdown"])
     assert markdown_result.exit_code == 0, markdown_result.output
@@ -440,7 +412,7 @@ def test_prometheus_snapshot_aggregates_today(monkeypatch, tmp_path) -> None:
         primary_used_percent=12.5,
         secondary_used_percent=3.5,
     )
-    load_result = _result(_event(now), credit_samples=[sample])
+    load_result = _result(_event(now), rate_limit_samples=[sample])
     monkeypatch.setattr(prom_snapshot, "load_usage", lambda _options: load_result)
 
     options = build_options(

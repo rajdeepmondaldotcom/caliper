@@ -58,7 +58,7 @@ def test_build_blocks_inserts_gap_and_payload(tmp_path) -> None:
         duplicates=0,
         tier_sources={},
         plan_types=set(),
-        credit_samples=[],
+        rate_limit_samples=[],
         warnings=[],
     )
 
@@ -86,7 +86,7 @@ def test_burn_rate_projection_and_recent_filter() -> None:
         cache_creation_tokens=0,
         cache_read_tokens=500,
         total_tokens=1100,
-        api_dollars=Decimal("1.00"),
+        cost_usd=Decimal("1.00"),
         models=("gpt-5.5",),
     )
     old = UsageBlock(

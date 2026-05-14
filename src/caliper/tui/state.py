@@ -22,7 +22,6 @@ class Scope:
 
     interval: Interval
     show_dollars: bool = True
-    show_credits: bool = True
 
 
 def default_scope(now: dt.datetime) -> Scope:

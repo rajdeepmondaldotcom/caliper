@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from textual.widgets import DataTable, Static
 
+from caliper.tui.formatting import format_cost_usd_cell
 from caliper.tui.screens._base import CaliperScreen
 from caliper.tui.state import AppSnapshot
 
@@ -37,12 +38,12 @@ class ModelsScreen(CaliperScreen):
         if snap is not None:
             yield Static(
                 f"[dim]Window:[/dim] {snap.scope.interval.label}   "
-                f"[dim]Models:[/dim] {len(snap.models)}"
+                f"[dim]Model tiers:[/dim] {len(snap.models)}"
             )
 
     def middle(self):
         table = DataTable(id="models-table", cursor_type="row", zebra_stripes=True)
-        table.add_columns("V", "Model", "Tier", "Events", "Credits", "API $")
+        table.add_columns("V", "Model", "Tier", "Events", "Cost $")
         yield table
 
     def footer_pills(self) -> str:
@@ -57,12 +58,12 @@ class ModelsScreen(CaliperScreen):
         except NoMatches:
             return
         if snap is None or not snap.models:
-            table.add_row("?", "(no models yet)", "-", "-", "-", "-")
+            table.add_row("?", "(no models yet)", "-", "-", "-")
             return
         for row in list(snap.models)[:50]:
             breakdowns = list((getattr(row, "model_breakdowns", None) or {}).values())
             if breakdowns:
-                breakdown = max(breakdowns, key=lambda mb: float(mb.costs.api_dollars))
+                breakdown = max(breakdowns, key=lambda mb: mb.costs.cost_usd)
                 glyph = _VENDOR_GLYPH.get(getattr(breakdown, "model_vendor", "unknown"), "?")
                 model = breakdown.model
                 tier = breakdown.service_tier
@@ -75,6 +76,5 @@ class ModelsScreen(CaliperScreen):
                 model,
                 tier,
                 f"{row.totals.events:,}",
-                f"{float(row.costs.adjusted_credits):,.0f}",
-                f"${float(row.costs.api_dollars):,.2f}",
+                format_cost_usd_cell(row),
             )

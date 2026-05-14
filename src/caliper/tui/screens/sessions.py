@@ -6,6 +6,7 @@ from collections.abc import Iterable
 
 from textual.widgets import DataTable, Static, Tab, Tabs
 
+from caliper.tui.formatting import format_cost_usd_cell
 from caliper.tui.screens._base import CaliperScreen
 from caliper.tui.state import AppSnapshot
 
@@ -23,7 +24,7 @@ class SessionsScreen(CaliperScreen):
 
     Top band: scope chip + total event count.
     Middle band: vendor Tabs row + DataTable.
-    Footer: r refresh, / filter, e export, esc home.
+    Footer: r refresh, esc home.
     """
 
     SCREEN_TITLE = "Caliper - Sessions"
@@ -44,8 +45,6 @@ class SessionsScreen(CaliperScreen):
 
     BINDINGS = [
         ("r", "refresh", "refresh"),
-        ("slash", "focus_filter", "filter"),
-        ("e", "export", "export"),
         ("escape", "app.pop_screen", "back"),
     ]
 
@@ -71,11 +70,11 @@ class SessionsScreen(CaliperScreen):
         )
         yield tabs
         table = DataTable(id="sessions-table", cursor_type="row", zebra_stripes=True)
-        table.add_columns("When", "Vendor", "Model", "Tier", "Tokens", "API $")
+        table.add_columns("When", "Vendor", "Model", "Tier", "Tokens", "Cost $")
         yield table
 
     def footer_pills(self) -> str:
-        return "[ r refresh ]  [ / filter ]  [ e export ]  [ esc home ]"
+        return "[ r refresh ]  [ esc home ]"
 
     # ------------------------------------------------------------------ hooks
     def on_mount(self) -> None:
@@ -91,12 +90,6 @@ class SessionsScreen(CaliperScreen):
     def action_refresh(self) -> None:
         if hasattr(self.app, "action_refresh"):
             self.app.action_refresh()
-
-    def action_export(self) -> None:
-        self.app.notify("Receipt export lands in B-11.", timeout=3)
-
-    def action_focus_filter(self) -> None:
-        self.app.notify("Filter input lands in the next sessions revision.", timeout=3)
 
     # ------------------------------------------------------------------ helpers
     def _populate_table(self, snap: AppSnapshot | None, *, vendor: str) -> None:
@@ -123,9 +116,8 @@ class SessionsScreen(CaliperScreen):
             model = self._dominant_model(session)
             tier = ", ".join(sorted(getattr(session, "service_tiers", set()) or {"-"}))[:14]
             tokens = getattr(session.totals, "total_tokens", 0)
-            api = float(session.costs.api_dollars)
             v = ", ".join(sorted(session_vendors)) or "-"
-            yield label, v, model, tier, f"{tokens:,}", f"${api:,.2f}"
+            yield label, v, model, tier, f"{tokens:,}", format_cost_usd_cell(session)
 
     @staticmethod
     def _dominant_model(session) -> str:
@@ -133,7 +125,7 @@ class SessionsScreen(CaliperScreen):
         if breakdowns:
             ranked = sorted(
                 breakdowns.values(),
-                key=lambda mb: float(mb.costs.api_dollars),
+                key=lambda mb: mb.costs.cost_usd,
                 reverse=True,
             )
             return ranked[0].model if ranked else "-"

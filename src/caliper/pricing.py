@@ -30,8 +30,6 @@ LONG_CONTEXT_INPUT_THRESHOLD = 272_000
 ZERO = Decimal("0")
 
 DEFAULT_API_RATES = Rates(input=5.0, cached_input=0.5, output=30.0)
-DEFAULT_CREDIT_RATES = Rates(input=125.0, cached_input=12.5, output=750.0)
-
 LONG_CONTEXT_1050K = LongContextRule(
     threshold=LONG_CONTEXT_INPUT_THRESHOLD, input_mult=2.0, output_mult=1.5
 )
@@ -39,12 +37,10 @@ LONG_CONTEXT_1050K = LongContextRule(
 
 @dataclass(frozen=True)
 class ModelCard:
-    """One Codex model's pricing. Missing rates are intentionally unpriced."""
+    """One model's USD pricing. Missing rates are intentionally unpriced."""
 
     name: str
     api_rates: Rates | None
-    credit_rates: Rates | None
-    fast_multiplier: float = 1.0
     long_context: LongContextRule | None = None
 
 
@@ -52,36 +48,28 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
     ModelCard(
         name="gpt-5.5",
         api_rates=Rates(5.0, 0.5, 30.0),
-        credit_rates=Rates(125.0, 12.5, 750.0),
-        fast_multiplier=2.5,
         long_context=LONG_CONTEXT_1050K,
     ),
     ModelCard(
         name="gpt-5.4",
         api_rates=Rates(2.5, 0.25, 15.0),
-        credit_rates=Rates(62.5, 6.25, 375.0),
-        fast_multiplier=2.0,
         long_context=LONG_CONTEXT_1050K,
     ),
     ModelCard(
         name="gpt-5.4-mini",
         api_rates=Rates(0.75, 0.075, 4.5),
-        credit_rates=Rates(18.75, 1.875, 113.0),
     ),
     ModelCard(
         name="gpt-5.3-codex",
         api_rates=Rates(1.75, 0.175, 14.0),
-        credit_rates=Rates(43.75, 4.375, 350.0),
     ),
     ModelCard(
         name="gpt-5.2",
         api_rates=Rates(1.75, 0.175, 14.0),
-        credit_rates=Rates(43.75, 4.375, 350.0),
     ),
     ModelCard(
         name="gpt-5.1-codex-max",
         api_rates=Rates(1.25, 0.125, 10.0),
-        credit_rates=None,
     ),
     ModelCard(
         name="claude-haiku-4.5",
@@ -92,7 +80,6 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
             cache_creation_input=1.25,
             cache_creation_input_1h=2.0,
         ),
-        credit_rates=None,
     ),
     ModelCard(
         name="claude-sonnet-4.6",
@@ -103,7 +90,6 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
             cache_creation_input=3.75,
             cache_creation_input_1h=6.0,
         ),
-        credit_rates=None,
     ),
     ModelCard(
         name="claude-opus-4.7",
@@ -114,7 +100,6 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
             cache_creation_input=6.25,
             cache_creation_input_1h=10.0,
         ),
-        credit_rates=None,
     ),
 )
 
@@ -367,7 +352,6 @@ class RateCard:
     """Per-run rate resolver. Loads any local overrides exactly once."""
 
     api_overrides: dict[str, Rates]
-    credit_overrides: dict[str, Rates]
     pricing_mode: str
     catalog_cards: dict[str, ModelCard] = field(default_factory=dict)
     pricing_catalog: PricingCatalog | None = None
@@ -402,7 +386,6 @@ class RateCard:
         if path is None:
             return cls(
                 api_overrides={},
-                credit_overrides={},
                 pricing_mode=pricing_mode,
                 catalog_cards=_catalog_cards(catalog),
                 pricing_catalog=catalog,
@@ -412,8 +395,7 @@ class RateCard:
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"Could not read rates file {path}: {exc}") from exc
         return cls(
-            api_overrides=_parse_overrides(raw, "api"),
-            credit_overrides=_parse_overrides(raw, "credits"),
+            api_overrides=_parse_overrides(raw, "usd"),
             pricing_mode=pricing_mode,
             catalog_cards=_catalog_cards(catalog),
             pricing_catalog=catalog,
@@ -440,30 +422,20 @@ class RateCard:
         card = self._card_for(normalized)
         long_context, input_mult, output_mult = self._long_context_multipliers(usage, card, flat)
         billable_usage, ambiguous_reasoning = _billable_usage(usage)
-        api_rates, api_unpriced, api_local = self._resolve_api_rates(normalized, card, flat)
-        credit_rates, credit_unpriced, credit_local = self._resolve_credit_rates(
-            normalized, card, flat
-        )
-        cache_rate_estimated = _cache_rate_estimated(
-            billable_usage, api_rates
-        ) or _cache_rate_estimated(billable_usage, credit_rates)
-        standard_credits = _estimate(billable_usage, credit_rates, input_mult, output_mult)
-        adjusted_credits, tier_estimated = self._adjusted_credits(
-            standard_credits, service_tier, card, credit_rates
-        )
+        rates, rate_unpriced, local_override = self._resolve_usd_rates(normalized, card, flat)
+        cache_rate_estimated = _cache_rate_estimated(billable_usage, rates)
+        calculated = _estimate(billable_usage, rates, input_mult, output_mult)
         result = (
             CostTotals(
-                api_dollars=_estimate(billable_usage, api_rates, input_mult, output_mult),
-                standard_credits=standard_credits,
-                adjusted_credits=adjusted_credits,
-                api_unpriced_events=int(api_unpriced),
-                credit_unpriced_events=int(credit_unpriced),
-                estimated_events=int(flat or tier_estimated or cache_rate_estimated),
+                cost_usd=calculated,
+                calculated_cost_usd=calculated,
+                unpriced_events=int(rate_unpriced),
+                estimated_events=int(flat or cache_rate_estimated),
                 ambiguous_reasoning_events=int(ambiguous_reasoning),
-                local_override_events=int(api_local or credit_local),
+                local_override_events=int(local_override),
             ),
             long_context,
-            card is None and api_unpriced and credit_unpriced,
+            card is None and rate_unpriced,
         )
         self._cost_cache[cache_key] = result
         return result
@@ -479,19 +451,6 @@ class RateCard:
         if not long_context or rule is None:
             return False, Decimal("1"), Decimal("1")
         return True, decimal_value(rule.input_mult), decimal_value(rule.output_mult)
-
-    def _adjusted_credits(
-        self,
-        standard_credits: Decimal,
-        service_tier: str,
-        card: ModelCard | None,
-        credit_rates: Rates | None,
-    ) -> tuple[Decimal, bool]:
-        if service_tier != "fast" or credit_rates is None:
-            return standard_credits, False
-        if card is None:
-            return standard_credits, True
-        return standard_credits * decimal_value(card.fast_multiplier), False
 
     def cache_savings_for(self, usage: Usage, model: str, service_tier: str) -> CostTotals:
         if not usage.cached_input_tokens:
@@ -515,19 +474,11 @@ class RateCard:
         uncached_cost, _, _ = self.cost_for(uncached_usage, model, service_tier)
         actual_cost, _, _ = self.cost_for(usage, model, service_tier)
         result = CostTotals(
-            api_dollars=max(ZERO, uncached_cost.api_dollars - actual_cost.api_dollars),
-            standard_credits=max(
-                ZERO, uncached_cost.standard_credits - actual_cost.standard_credits
+            cost_usd=max(ZERO, uncached_cost.cost_usd - actual_cost.cost_usd),
+            calculated_cost_usd=max(
+                ZERO, uncached_cost.calculated_cost_usd - actual_cost.calculated_cost_usd
             ),
-            adjusted_credits=max(
-                ZERO, uncached_cost.adjusted_credits - actual_cost.adjusted_credits
-            ),
-            api_unpriced_events=max(
-                uncached_cost.api_unpriced_events, actual_cost.api_unpriced_events
-            ),
-            credit_unpriced_events=max(
-                uncached_cost.credit_unpriced_events, actual_cost.credit_unpriced_events
-            ),
+            unpriced_events=max(uncached_cost.unpriced_events, actual_cost.unpriced_events),
             estimated_events=max(uncached_cost.estimated_events, actual_cost.estimated_events),
             ambiguous_reasoning_events=max(
                 uncached_cost.ambiguous_reasoning_events,
@@ -540,7 +491,7 @@ class RateCard:
         self._cache_savings_cache[cache_key] = result
         return result
 
-    def _resolve_api_rates(
+    def _resolve_usd_rates(
         self, normalized: str, card: ModelCard | None, flat: bool
     ) -> tuple[Rates | None, bool, bool]:
         if flat:
@@ -549,17 +500,6 @@ class RateCard:
             return self.api_overrides[normalized], False, True
         if card and card.api_rates is not None:
             return card.api_rates, False, False
-        return None, True, False
-
-    def _resolve_credit_rates(
-        self, normalized: str, card: ModelCard | None, flat: bool
-    ) -> tuple[Rates | None, bool, bool]:
-        if flat:
-            return DEFAULT_CREDIT_RATES, False, False
-        if normalized in self.credit_overrides:
-            return self.credit_overrides[normalized], False, True
-        if card and card.credit_rates is not None:
-            return card.credit_rates, False, False
         return None, True, False
 
 
@@ -658,8 +598,6 @@ def _catalog_cards(catalog: PricingCatalog | None) -> dict[str, ModelCard]:
             ModelCard(
                 name=normalized,
                 api_rates=model.api_rates or (embedded.api_rates if embedded else None),
-                credit_rates=model.credit_rates or (embedded.credit_rates if embedded else None),
-                fast_multiplier=embedded.fast_multiplier if embedded else 1.0,
                 long_context=model.long_context or (embedded.long_context if embedded else None),
             ),
         )
