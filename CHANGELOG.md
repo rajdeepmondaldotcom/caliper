@@ -2,6 +2,12 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.12 - 2026-05-14
+
+Lint fix on the screens smoke test. 0.0.11 release failed CI's
+`ruff check` because line 52 exceeded the 100-column rule (local
+ruff did not catch). Same payload otherwise.
+
 ## 0.0.11 - 2026-05-14
 
 Same payload as 0.0.10. The 0.0.10 release tag tripped the 90%

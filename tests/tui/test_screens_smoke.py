@@ -49,7 +49,12 @@ def test_every_screen_declares_title_and_question():
     for name in SCREEN_MODULES:
         mod = importlib.import_module(name)
         for obj in vars(mod).values():
-            if isinstance(obj, type) and issubclass(obj, CaliperScreen) and obj is not CaliperScreen:
+            is_screen = (
+                isinstance(obj, type)
+                and issubclass(obj, CaliperScreen)
+                and obj is not CaliperScreen
+            )
+            if is_screen:
                 assert obj.SCREEN_TITLE, f"{obj.__name__} missing SCREEN_TITLE"
                 assert obj.SCREEN_QUESTION, f"{obj.__name__} missing SCREEN_QUESTION"
 
