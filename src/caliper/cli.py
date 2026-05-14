@@ -525,10 +525,16 @@ def _options(values: dict) -> RuntimeOptions:
 
 
 def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
+    from caliper.cli_progress import cli_parse_progress
+
     values = _with_parent_options(values)
     _validate_format(values["output_format"])
     options = _options(values)
-    result = load_usage(options)
+    with cli_parse_progress(
+        output_format=values["output_format"],
+        output=values["output"],
+    ) as progress:
+        result = load_usage(options, progress=progress)
     if name == "daily" and options.instances:
         rows_fn = aggregate_daily_instances
     rows = rows_fn(result, options)
@@ -817,8 +823,13 @@ def _run_overview(values: dict) -> None:
     ):
         _launch_tui_scoped(longest_options)
         return
-    with _interactive_status("Loading 90 days of usage...", output_format, values["output"]):
-        longest_result = load_usage(longest_options)
+    from caliper.cli_progress import cli_parse_progress
+
+    with cli_parse_progress(
+        output_format=output_format,
+        output=values["output"],
+    ) as progress:
+        longest_result = load_usage(longest_options, progress=progress)
     rate_card = load_rate_card(longest_options)
     with _interactive_status("Aggregating overview windows...", output_format, values["output"]):
         rows, total = aggregate_overview_windows(
