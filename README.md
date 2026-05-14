@@ -155,17 +155,36 @@ network calls.
 
 ## Install
 
-Requires Python 3.11+. Pick one.
+Requires Python 3.11+. Pick the line that fits your setup.
 
 ```bash
-uvx --from caliper-ai caliper             # zero-install, recommended
-uv tool install caliper-ai                # persistent install
+# Zero-install. Always pulls the latest version. Recommended.
+uvx --from caliper-ai caliper
+
+# Persistent global tool (uv). Good for daily use.
+uv tool install caliper-ai
+uv tool upgrade caliper-ai     # later, to update
+
+# Persistent global tool (pipx). Works the same way.
 pipx install caliper-ai
+pipx upgrade caliper-ai
+
+# Plain pip inside a virtualenv. Standard.
+python -m venv .venv && source .venv/bin/activate
 python -m pip install caliper-ai
 ```
 
-The PyPI distribution is `caliper-ai`. The command and Python package are
-both `caliper`.
+PyPI distribution name is `caliper-ai`. Command and Python import are
+both `caliper`. `uvx caliper` (without `--from`) hits a different,
+unrelated package; always use `--from caliper-ai caliper`.
+
+If you see `error: No virtual environment found` from `uv pip
+install`, that command only installs into an active venv. Use one of
+the four paths above instead.
+
+If you see `error: externally-managed-environment` from system `pip3`
+on macOS or recent Debian, the same fix applies: pick a venv-based
+or tool-based path. PEP 668 blocks system installs on purpose.
 
 ## First sixty seconds
 

@@ -2,6 +2,20 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.14 - 2026-05-14
+
+Install docs in plain language.
+
+### Changed
+
+- `README.md` Install section now lists four paths in order: `uvx
+  --from caliper-ai caliper`, `uv tool install caliper-ai`, `pipx
+  install caliper-ai`, plain `python -m pip install caliper-ai`
+  inside a venv. Each line says how to upgrade. The PEP 668 and
+  "No virtual environment" errors are called out by name with
+  one-line resolutions. The "always use `--from caliper-ai`" hint
+  is now in the install block, not buried further down.
+
 ## 0.0.13 - 2026-05-14
 
 Routing fix. Stub screens were still rendered on 1..9.
