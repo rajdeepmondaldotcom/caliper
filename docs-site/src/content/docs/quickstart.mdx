@@ -60,6 +60,10 @@ caliper commit abc1234
 
 Add a `[budgets]` table to `.caliper.toml`:
 
+Budget periods are current local calendar periods: daily means local
+midnight to now, weekly means the current local week to now, and monthly
+means the current local month to now.
+
 ```toml
 [budgets]
 daily_cost_usd = 25

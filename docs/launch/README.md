@@ -19,7 +19,7 @@ Before launch:
       match.
 - [ ] Confirm the GitHub repo description and PyPI description match
       the pitch line in `docs/messaging/PITCH.md`.
-- [ ] Confirm `uvx --from caliper-ai caliper` works on a fresh machine.
+- [ ] Confirm `uvx --isolated --from caliper-ai caliper` works on a fresh machine.
 
 On launch day:
 

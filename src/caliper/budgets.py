@@ -14,6 +14,7 @@ from typing import Any
 from caliper.aggregation import aggregate_total
 from caliper.models import LoadResult, RuntimeOptions, decimal_string
 from caliper.pricing import RateCard
+from caliper.timeutil import iso_z
 
 VALID_PERIODS = ("daily", "weekly", "monthly")
 VALID_METRICS = ("cost_usd", "tokens")
@@ -80,10 +81,14 @@ def current_period_intervals(now: dt.datetime) -> dict[str, tuple[dt.datetime, d
 
 
 def usage_for_periods(
-    events, options: RuntimeOptions, rate_card: RateCard, now: dt.datetime
+    events,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    now: dt.datetime,
+    windows: dict[str, tuple[dt.datetime, dt.datetime]] | None = None,
 ) -> dict[str, Any]:
     usage: dict[str, Any] = {}
-    for period, (start, end) in current_period_intervals(now).items():
+    for period, (start, end) in (windows or current_period_intervals(now)).items():
         scoped = [event for event in events if start <= event.timestamp < end]
         result = LoadResult(
             events=scoped,
@@ -103,9 +108,11 @@ def alert_records(
     alerts: list[BudgetAlert],
     usage: dict[str, Any],
     pricing_status: str,
+    windows: dict[str, tuple[dt.datetime, dt.datetime]] | None = None,
 ) -> list[dict]:
-    return [
-        {
+    records = []
+    for alert in alerts:
+        record = {
             "period": alert.budget.period,
             "metric": alert.budget.metric,
             "limit": alert.budget.limit,
@@ -116,8 +123,17 @@ def alert_records(
             "severity": alert.severity,
             "pricing_status": pricing_status,
         }
-        for alert in alerts
-    ]
+        if windows and alert.budget.period in windows:
+            start, end = windows[alert.budget.period]
+            record.update(
+                {
+                    "window_start": iso_z(start),
+                    "window_end": iso_z(end),
+                    "window_label": f"{alert.budget.period} to date",
+                }
+            )
+        records.append(record)
+    return records
 
 
 def max_severity(alerts: list[BudgetAlert]) -> str:

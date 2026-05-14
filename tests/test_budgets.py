@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
+
 import pytest
 
 from caliper.budgets import (
@@ -7,6 +9,8 @@ from caliper.budgets import (
     SEVERITY_OK,
     SEVERITY_WARN,
     Budget,
+    alert_records,
+    current_period_intervals,
     evaluate,
     max_severity,
     parse_budgets_table,
@@ -118,3 +122,15 @@ def test_serialize_budgets_empty_returns_items_list():
     from caliper.budgets import serialize_budgets
 
     assert serialize_budgets([]) == {"items": []}
+
+
+def test_alert_records_include_current_period_windows() -> None:
+    now = dt.datetime(2026, 5, 15, 10, 30, tzinfo=dt.UTC)
+    budgets = [Budget(period="daily", metric="cost_usd", limit=100.0)]
+    usage = {"daily.cost_usd": 25.0}
+    alerts = evaluate(budgets, usage)
+    records = alert_records(alerts, usage, "exact", windows=current_period_intervals(now))
+
+    assert records[0]["window_start"] == "2026-05-15T00:00:00Z"
+    assert records[0]["window_end"] == "2026-05-15T10:30:00Z"
+    assert records[0]["window_label"] == "daily to date"

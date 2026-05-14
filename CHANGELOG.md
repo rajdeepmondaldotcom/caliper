@@ -2,6 +2,29 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.23 - 2026-05-15
+
+Release-readiness cleanup after the 0.0.22 live QA pass.
+
+### Fixed
+
+- Launch drafts now use the isolated `uvx` install command and current
+  dollars-only overview language instead of stale credits-era copy.
+- Human overview output redacts the Codex session root by default. Pass
+  `--show-paths` to reveal local paths intentionally.
+- `caliper overview` now accepts `--days`, `--since`, `--until`, and
+  `--timezone` for scoped overview windows instead of always forcing
+  7/30/90-day output.
+- Narrow and compact Rich tables use a scan-friendly column set and mark
+  unsupported pricing as `n/a` instead of implying real zero-dollar spend.
+- `caliper rates catalog` supports `--model`, `--limit`, and `--all`, caps
+  default table output, and reports whether output was truncated.
+- Markdown compare and what-if output now formats money, counts, and
+  percentages for humans instead of leaking raw numeric representations.
+- Budget checks document current-period semantics and include
+  `window_start`, `window_end`, and `window_label` metadata in structured
+  alert records.
+
 ## 0.0.22 - 2026-05-15
 
 Live-release QA remediation after the brutal 0.0.21 pass.

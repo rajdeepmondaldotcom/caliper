@@ -279,6 +279,9 @@ caliper daily --rate-card-file ./rates.json
 ## Budgets in CI
 
 Caliper exits with stable codes so CI can gate on cost.
+Budget periods are current local calendar periods: daily means local
+midnight to now, weekly means the current local week to now, and monthly
+means the current local month to now.
 
 ```toml
 # .caliper.toml

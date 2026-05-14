@@ -14,7 +14,7 @@ the others later in the week.
 >
 > One command:
 >
-> uvx --from caliper-ai caliper
+> uvx --isolated --from caliper-ai caliper
 >
 > github.com/rajdeepmondaldotcom/caliper
 
@@ -31,7 +31,7 @@ the others later in the week.
 >
 > Caliper:
 >
-> uvx --from caliper-ai caliper
+> uvx --isolated --from caliper-ai caliper
 >
 > github.com/rajdeepmondaldotcom/caliper
 
@@ -45,7 +45,7 @@ the others later in the week.
 > Caliper joins Codex, Claude Code, Cursor, and Aider logs locally and
 > tells you which pull request cost what. Offline by default.
 >
-> uvx --from caliper-ai caliper
+> uvx --isolated --from caliper-ai caliper
 >
 > github.com/rajdeepmondaldotcom/caliper
 

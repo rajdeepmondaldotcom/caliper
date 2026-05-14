@@ -26,9 +26,9 @@ On my own machine, the first run produced a real number in eleven seconds:
 Caliper - Overview
 Vendors: claude-code (74,590 events) · openai-codex (20,500 events)
 
-Last 7 days     48,727 credits     $3,383
-Last 30 days    52,691 credits    $10,516
-Last 90 days    52,691 credits    $10,897
+Last 7 days       $3,383
+Last 30 days     $10,516
+Last 90 days     $10,897
 
 Events: 95,090
 Cache savings: $65,871 at 99.3% cache hit
@@ -57,7 +57,7 @@ What it is not:
 Install:
 
 ```
-uvx --from caliper-ai caliper
+uvx --isolated --from caliper-ai caliper
 ```
 
 The source is short on purpose. If you do not trust the offline claim,

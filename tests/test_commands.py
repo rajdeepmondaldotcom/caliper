@@ -592,6 +592,38 @@ def test_rates_catalog_empty_cache_surfaces_warning(monkeypatch, tmp_path) -> No
     assert payload["next_commands"] == ["caliper rates refresh --allow-network"]
 
 
+def test_rates_catalog_defaults_to_scan_friendly_table_limit(monkeypatch) -> None:
+    catalog = PricingCatalog(
+        fetched_at=dt.datetime.now(tz=dt.UTC),
+        source="unit",
+        models={
+            f"gpt-unit-{index}": CatalogModel(
+                name=f"gpt-unit-{index}",
+                provider="openai",
+                api_rates=Rates("1", "0.1", "2"),
+                source="unit",
+            )
+            for index in range(30)
+        },
+    )
+    monkeypatch.setattr("caliper.cli.load_cached_catalog", lambda: catalog)
+
+    table = runner.invoke(app, ["rates", "catalog"])
+    assert table.exit_code == 0, table.output
+    assert "Matches: 30" in table.output
+    assert "Showing 25 of 30 models" in table.output
+
+    limited_json = runner.invoke(
+        app,
+        ["rates", "catalog", "--model", "gpt-unit", "--limit", "3", "--format", "json"],
+    )
+    assert limited_json.exit_code == 0, limited_json.output
+    payload = json.loads(limited_json.output)
+    assert payload["returned_count"] == 3
+    assert payload["model_count"] == 30
+    assert payload["truncated"] is True
+
+
 def test_empty_overview_names_all_enabled_vendor_sources(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
     monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))

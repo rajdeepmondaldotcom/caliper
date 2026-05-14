@@ -21,7 +21,7 @@ from caliper.models import (
 from caliper.pricing import RateCard
 
 
-def _options(tmp_path: Path, *, compact: bool = False):
+def _options(tmp_path: Path, *, compact: bool = False, width: int | None = None):
     now = dt.datetime(2026, 5, 13, 12, 0, tzinfo=dt.UTC)
     return build_options(
         days=1,
@@ -30,6 +30,7 @@ def _options(tmp_path: Path, *, compact: bool = False):
         state_db=tmp_path / "state.sqlite",
         codex_config=tmp_path / "missing.toml",
         compact=compact,
+        width=width,
     )
 
 
@@ -122,6 +123,78 @@ def test_render_table_names_non_codex_data_source(tmp_path: Path) -> None:
 
     assert "Data source: Claude Code local logs" in text
     assert "Session root:" not in text
+
+
+def test_human_table_marks_unsupported_pricing_as_na(tmp_path: Path) -> None:
+    options = _options(tmp_path, width=120)
+    event = _event(model="unknown-model", model_source="unknown")
+    unsupported = Aggregate(key="unsupported", label="unsupported")
+    unsupported.add_event(
+        event,
+        CostTotals(cost_usd="0", calculated_cost_usd="0", unpriced_events=1),
+        CostTotals(cost_usd="0"),
+        long_context=False,
+        unknown_model=True,
+        unknown_tier=False,
+    )
+
+    text = render_module.render_table(
+        _load_result(event),
+        options,
+        [unsupported],
+        "Surface",
+        rate_card=RateCard.load(None, "model"),
+        total=unsupported,
+    )
+
+    assert "n/a" in text
+    assert "events have no USD rate" in text
+
+
+def test_human_table_preserves_true_zero_cost(tmp_path: Path) -> None:
+    options = _options(tmp_path, width=120)
+    event = _event()
+    zero = Aggregate(key="zero", label="zero")
+    zero.add_event(
+        event,
+        CostTotals(cost_usd="0", calculated_cost_usd="0"),
+        CostTotals(cost_usd="0"),
+        long_context=False,
+        unknown_model=False,
+        unknown_tier=False,
+    )
+
+    text = render_module.render_table(
+        _load_result(event),
+        options,
+        [zero],
+        "Surface",
+        rate_card=RateCard.load(None, "model"),
+        total=zero,
+    )
+
+    assert "$0.00" in text
+    assert "n/a" not in text
+
+
+def test_narrow_table_uses_scan_friendly_columns(tmp_path: Path) -> None:
+    options = _options(tmp_path, width=80)
+    event = _event(model="gpt-supercalifragilisticexpialidocious-model-with-extra-tail")
+    total = aggregate_total(_load_result(event), options, rate_card=RateCard.load(None, "model"))
+
+    text = render_module.render_table(
+        _load_result(event),
+        options,
+        [total],
+        "Surface",
+        rate_card=RateCard.load(None, "model"),
+        total=total,
+    )
+
+    assert "Tokens" in text
+    assert "Pricing" in text
+    assert "Reported $" not in text
+    assert "supercalifragilisticexpialidocious\n" not in text
 
 
 def test_pricing_status_and_warning_branches() -> None:

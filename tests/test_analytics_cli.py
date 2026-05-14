@@ -230,6 +230,61 @@ def test_compare_returns_balanced_delta(tmp_path) -> None:
     assert "cost_usd_exact" in payload["delta"]
 
 
+def test_compare_markdown_uses_human_money_and_percent_format(tmp_path) -> None:
+    session_root, state_db, missing_cfg = _build_fixture(tmp_path, tier="standard")
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "--a",
+            "last 1 days",
+            "--b",
+            "previous 1 days",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+            "--format",
+            "markdown",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "| cost_usd | $" in result.output
+    assert "%" in result.output
+    assert "1,100" in result.output
+    assert "Decimal(" not in result.output
+
+
+def test_whatif_markdown_uses_human_money_and_percent_format(tmp_path) -> None:
+    session_root, state_db, missing_cfg = _build_fixture(tmp_path, tier="fast")
+    result = runner.invoke(
+        app,
+        [
+            "whatif",
+            "--days",
+            "1",
+            "--tier",
+            "standard",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+            "--format",
+            "markdown",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "| cost_usd | $" in result.output
+    assert "%" in result.output
+    assert "Decimal(" not in result.output
+
+
 def test_compare_by_vendor_breaks_out_each_vendor(tmp_path) -> None:
     """`caliper compare --by vendor --format json` yields a by_vendor array."""
     session_root, state_db, missing_cfg = _build_fixture(tmp_path, tier="standard")

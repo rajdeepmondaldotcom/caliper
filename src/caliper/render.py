@@ -532,7 +532,7 @@ def _print_report_header(
 def _print_data_source(console: Console, result: LoadResult, options: RuntimeOptions) -> None:
     vendor = _single_tool_vendor(result)
     if vendor in {None, "", "openai-codex"}:
-        console.print(f"Session root: {options.session_root}")
+        console.print(f"Session root: {_human_path(options.session_root, options)}")
         return
     labels = {
         "claude-code": "Claude Code local logs",
@@ -540,6 +540,12 @@ def _print_data_source(console: Console, result: LoadResult, options: RuntimeOpt
         "aider": "Aider chat histories",
     }
     console.print(f"Data source: {labels.get(vendor, vendor)}")
+
+
+def _human_path(path: Path, options: RuntimeOptions) -> str:
+    if options.show_paths:
+        return str(path)
+    return _redact_path_string(str(path), options)
 
 
 def _single_tool_vendor(result: LoadResult) -> str | None:
@@ -550,6 +556,9 @@ def _single_tool_vendor(result: LoadResult) -> str | None:
 
 
 def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOptions) -> Table:
+    if _uses_narrow_table(options):
+        return _narrow_usage_table(rows, total, options)
+
     table = Table(show_lines=False, expand=not options.compact)
     table.add_column("Group")
     table.add_column("Models", overflow="fold", max_width=42)
@@ -568,9 +577,9 @@ def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOption
             _table_int(row.totals.cached_input_tokens, options),
             _table_int(row.totals.output_tokens, options),
             _table_int(row.totals.total_tokens, options),
-            _table_float(row.costs.cost_usd, options, prefix="$"),
+            _cost_cell(row.costs, options),
             _reported_cost(row.costs, options),
-            _table_float(row.costs.calculated_cost_usd, options, prefix="$"),
+            _calculated_cost(row.costs, options),
         )
     table.add_section()
     table.add_row(
@@ -580,9 +589,42 @@ def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOption
         _table_int(total.totals.cached_input_tokens, options),
         _table_int(total.totals.output_tokens, options),
         _table_int(total.totals.total_tokens, options),
-        _table_float(total.costs.cost_usd, options, prefix="$"),
+        _cost_cell(total.costs, options),
         _reported_cost(total.costs, options),
-        _table_float(total.costs.calculated_cost_usd, options, prefix="$"),
+        _calculated_cost(total.costs, options),
+    )
+    return table
+
+
+def _uses_narrow_table(options: RuntimeOptions) -> bool:
+    width = options.width
+    if width is None:
+        width = 100 if options.compact else shutil.get_terminal_size((140, 24)).columns
+    return options.compact or width < 100
+
+
+def _narrow_usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOptions) -> Table:
+    table = Table(show_lines=False, expand=False)
+    table.add_column("Group", overflow="ellipsis", no_wrap=True, max_width=24)
+    table.add_column("Models", overflow="ellipsis", no_wrap=True, max_width=26)
+    table.add_column("Tokens", justify="right", no_wrap=True)
+    table.add_column("Cost", justify="right", no_wrap=True)
+    table.add_column("Pricing", no_wrap=True)
+    for row in rows:
+        table.add_row(
+            short_table_label(redact(row.label, options.show_prompts)),
+            compact_models_oneline(row, limit=2),
+            _table_int(row.totals.total_tokens, options),
+            _cost_cell(row.costs, options),
+            pricing_status(row),
+        )
+    table.add_section()
+    table.add_row(
+        "Total",
+        compact_models_oneline(total, limit=2),
+        _table_int(total.totals.total_tokens, options),
+        _cost_cell(total.costs, options),
+        pricing_status(total),
     )
     return table
 
@@ -735,6 +777,27 @@ def _table_float(value: Any, options: RuntimeOptions, prefix: str = "") -> str:
     if prefix:
         return f"{prefix}{decimal_value(value):,.2f}"
     return f"{decimal_value(value):,.2f}"
+
+
+def _unsupported_cost(costs: CostTotals) -> bool:
+    return (
+        costs.unpriced_events > 0
+        and costs.vendor_reported_events == 0
+        and decimal_value(costs.cost_usd) == 0
+        and decimal_value(costs.calculated_cost_usd) == 0
+    )
+
+
+def _cost_cell(costs: CostTotals, options: RuntimeOptions) -> str:
+    if _unsupported_cost(costs):
+        return "n/a"
+    return _table_float(costs.cost_usd, options, prefix="$")
+
+
+def _calculated_cost(costs: CostTotals, options: RuntimeOptions) -> str:
+    if costs.unpriced_events and decimal_value(costs.calculated_cost_usd) == 0:
+        return "n/a"
+    return _table_float(costs.calculated_cost_usd, options, prefix="$")
 
 
 def _reported_cost(costs: CostTotals, options: RuntimeOptions) -> str:

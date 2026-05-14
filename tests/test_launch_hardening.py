@@ -81,6 +81,30 @@ def test_json_show_paths_restores_absolute_paths(tmp_path: Path) -> None:
     assert "/tmp/project-alpha" in result.output
 
 
+def test_human_overview_redacts_session_root_by_default(tmp_path: Path) -> None:
+    args = _args(tmp_path)
+    result = runner.invoke(app, ["overview", *args, "--width", "120"])
+
+    assert result.exit_code == 0, result.output
+    assert "Session root: <redacted-path>" in result.output
+    assert str(tmp_path) not in result.output
+
+    visible = runner.invoke(app, ["overview", *args, "--show-paths", "--width", "120"])
+    assert visible.exit_code == 0, visible.output
+    assert "Session root:" in visible.output
+    assert "sessions" in visible.output
+    assert "<redacted-path>" not in visible.output
+
+
+def test_overview_accepts_scoped_days_window(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["overview", *_args(tmp_path, window=True), "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert [row["label"] for row in payload["breakdowns"]] == ["Last 7 days"]
+    assert payload["totals"]["total_tokens"] == 1100
+
+
 def test_empty_overview_is_onboarding_not_zero_table(tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()

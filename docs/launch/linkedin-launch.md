@@ -34,7 +34,7 @@ constraint, so I want to hear what would change my mind.
 
 Install:
 
-uvx --from caliper-ai caliper
+uvx --isolated --from caliper-ai caliper
 
 Repo: github.com/rajdeepmondaldotcom/caliper
 

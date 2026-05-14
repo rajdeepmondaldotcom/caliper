@@ -39,6 +39,7 @@ from caliper.budgets import (
     SEVERITY_EXIT_CODE,
     SEVERITY_WARN,
     alert_records,
+    current_period_intervals,
     max_severity,
     parse_budgets_table,
     usage_for_periods,
@@ -306,7 +307,7 @@ ShowPathsOpt = Annotated[
     typer.Option(
         "--show-paths",
         "--include-local-paths",
-        help="Include absolute local paths in machine-readable output. Redacted by default.",
+        help="Include absolute local paths in output. Redacted by default.",
     ),
 ]
 OfflineOpt = Annotated[
@@ -490,6 +491,10 @@ OPTION_KEYS = (
 ROOT_OPTION_DEFAULTS: dict[str, Any] = {
     "output_format": "table",
     "output": None,
+    "since": None,
+    "until": None,
+    "days": None,
+    "timezone": "local",
     "session_root": None,
     "state_db": None,
     "codex_config": None,
@@ -849,6 +854,10 @@ def main(
     ] = False,
     output_format: FormatOpt = "table",
     output: OutputOpt = None,
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
     session_root: SessionRootOpt = None,
     state_db: StateDbOpt = None,
     codex_config: CodexConfigOpt = None,
@@ -882,8 +891,10 @@ def _run_overview(values: dict) -> None:
     _validate_format(output_format)
     now = dt.datetime.now(tz=local_timezone())
     option_values = {key: values[key] for key in OPTION_KEYS if key in values}
-    option_values["days"] = 90.0
-    option_values["until"] = iso_z(now)
+    scoped = any(values.get(key) is not None for key in ("since", "until", "days"))
+    if not scoped:
+        option_values["days"] = 90.0
+        option_values["until"] = iso_z(now)
     try:
         longest_options = build_options(**option_values)
     except ValueError as exc:
@@ -896,9 +907,7 @@ def _run_overview(values: dict) -> None:
     ) as progress:
         longest_result = _safe_load_usage(longest_options, progress=progress)
     rate_card = _safe_load_rate_card(longest_options)
-    overview_windows = [
-        (f"Last {days} days", now - dt.timedelta(days=days)) for days in (7, 30, 90)
-    ]
+    overview_windows = _overview_windows(longest_options, now, scoped=scoped)
     with _interactive_status("Aggregating overview windows...", output_format, values["output"]):
         rows, total = aggregate_overview_windows(
             longest_result,
@@ -936,6 +945,23 @@ def _run_overview(values: dict) -> None:
         values["output"],
         total=total,
     )
+
+
+def _overview_windows(
+    options: RuntimeOptions,
+    now: dt.datetime,
+    *,
+    scoped: bool,
+) -> list[tuple[str, dt.datetime]]:
+    if not scoped:
+        return [(f"Last {days} days", now - dt.timedelta(days=days)) for days in (7, 30, 90)]
+
+    span_days = (options.end - options.start).total_seconds() / 86_400.0
+    if abs(span_days - round(span_days)) < 0.001:
+        label = f"Last {int(round(span_days))} days"
+    else:
+        label = "Selected window"
+    return [(label, options.start)]
 
 
 _VENDOR_DISPLAY_LABELS: dict[str, str] = {
@@ -1041,6 +1067,10 @@ def _interactive_status(message: str, output_format: str, output: Path | None):
 
 @app.command()
 def overview(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
     output_format: FormatOpt = "table",
     output: OutputOpt = None,
     session_root: SessionRootOpt = None,
@@ -2194,7 +2224,13 @@ def rates_refresh(
 def rates_catalog(
     query: Annotated[
         str | None,
-        typer.Option("--model-name-query", "--query", "-q", help="Filter model names."),
+        typer.Option(
+            "--model",
+            "--model-name-query",
+            "--query",
+            "-q",
+            help="Filter model names.",
+        ),
     ] = None,
     provider: Annotated[
         str | None,
@@ -2217,10 +2253,18 @@ def rates_catalog(
             help="Refresh stale/missing pricing catalog first.",
         ),
     ] = False,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", min=1, help="Cap returned rows. Table defaults to 25."),
+    ] = None,
+    show_all: Annotated[
+        bool,
+        typer.Option("--all", help="Show every matching row in table output."),
+    ] = False,
     pricing_source: PricingSourceOpt = "auto",
     pricing_cache_ttl_hours: PricingCacheTtlOpt = 24,
 ) -> None:
-    """Search the cached pricing catalog. Use --query to filter model names."""
+    """Search the cached pricing catalog. Use --model/--query to filter model names."""
     _validate_format(output_format)
     catalog = load_cached_catalog()
     if allow_network or not catalog.models:
@@ -2248,9 +2292,14 @@ def rates_catalog(
             "no cached live pricing catalog yet; embedded rates are active. Run "
             "`caliper rates refresh --allow-network` to populate live provider pricing."
         )
+    display_limit = _rates_catalog_limit(output_format, limit, show_all)
+    display_rows = rows[:display_limit] if display_limit is not None else rows
     payload = {
-        "catalog": rows,
+        "catalog": display_rows,
         "model_count": len(rows),
+        "returned_count": len(display_rows),
+        "limit": display_limit,
+        "truncated": len(display_rows) < len(rows),
         "catalog_source": catalog.source if catalog.models else "cache",
         "embedded_available": True,
         "warnings": warnings,
@@ -2262,15 +2311,16 @@ def rates_catalog(
         typer.echo(json_dumps_enveloped(payload))
         return
     if output_format == "csv":
-        typer.echo(records_to_csv(rows), nl=False)
+        typer.echo(records_to_csv(display_rows), nl=False)
         return
     if output_format == "markdown":
-        if not rows and warnings:
+        if not display_rows and warnings:
             typer.echo(f"_{warnings[-1]}_\n", nl=False)
             return
-        typer.echo(records_to_markdown(rows), nl=False)
+        typer.echo(records_to_markdown(display_rows), nl=False)
         return
     console.print("[bold]Caliper - Pricing Catalog[/bold]")
+    console.print(f"Matches: {len(rows):,}")
     for warning in warnings:
         console.print(f"[yellow]{warning}[/yellow]")
     table = Table(show_lines=False)
@@ -2280,7 +2330,7 @@ def rates_catalog(
     table.add_column("Cached $/M", justify="right")
     table.add_column("Output $/M", justify="right")
     table.add_column("Context", justify="right")
-    for row in rows[:100]:
+    for row in display_rows:
         table.add_row(
             str(row["provider"]),
             str(row["model"]),
@@ -2290,8 +2340,23 @@ def rates_catalog(
             str(row["context_window"]),
         )
     console.print(table)
-    if len(rows) > 100:
-        console.print(f"[dim]Showing 100 of {len(rows):,} models; use --query to narrow.[/dim]")
+    if len(display_rows) < len(rows):
+        console.print(
+            "[dim]"
+            f"Showing {len(display_rows):,} of {len(rows):,} models; use --model, "
+            "--provider, --limit, or --all."
+            "[/dim]"
+        )
+
+
+def _rates_catalog_limit(output_format: str, limit: int | None, show_all: bool) -> int | None:
+    if show_all:
+        return None
+    if limit is not None:
+        return limit
+    if output_format == "table":
+        return 25
+    return None
 
 
 def _daily_cost_usd_series(events, options: RuntimeOptions, rate_card: RateCard) -> list[float]:
@@ -2619,7 +2684,7 @@ def compare(
         typer.echo(records_to_csv(compare_records), nl=False)
         return
     if output_format == "markdown":
-        typer.echo(records_to_markdown(compare_records), nl=False)
+        typer.echo(_records_to_human_markdown(compare_records), nl=False)
         return
 
     console.print("[bold]Caliper - Compare[/bold]")
@@ -3039,12 +3104,71 @@ def _render_whatif_report(report, output_format: str) -> None:
         typer.echo(records_to_csv(report.records()), nl=False)
         return
     if output_format == "markdown":
-        typer.echo(records_to_markdown(report.records()), nl=False)
+        typer.echo(_records_to_human_markdown(report.records()), nl=False)
         return
     if report.noop:
         console.print(report.noop_message)
         return
     _render_whatif_table(report)
+
+
+def _records_to_human_markdown(records: list[dict]) -> str:
+    return records_to_markdown([_humanize_markdown_record(record) for record in records])
+
+
+def _humanize_markdown_record(record: dict) -> dict:
+    metric = str(record.get("metric", ""))
+    if metric == "cost_usd":
+        return _humanize_cost_record(record)
+    if metric in {"tokens", "events"}:
+        return _humanize_count_record(record)
+    return record
+
+
+def _humanize_cost_record(record: dict) -> dict:
+    formatted = dict(record)
+    for field in ("a", "b", "actual", "projected"):
+        if field in formatted and formatted[field] != "":
+            formatted[field] = _format_money(formatted[field])
+    if "delta" in formatted and formatted["delta"] != "":
+        formatted["delta"] = _format_money(formatted["delta"], signed=True)
+    for field in ("pct", "cost_usd_pct"):
+        if field in formatted and formatted[field] != "":
+            formatted[field] = _format_percent(formatted[field], signed=True)
+    return formatted
+
+
+def _humanize_count_record(record: dict) -> dict:
+    formatted = dict(record)
+    for field in ("a", "b", "actual", "projected"):
+        if field in formatted and formatted[field] != "":
+            formatted[field] = _format_count(formatted[field])
+    if "delta" in formatted and formatted["delta"] != "":
+        formatted["delta"] = _format_count(formatted["delta"], signed=True)
+    for field in ("pct", "tokens_pct"):
+        if field in formatted and formatted[field] != "":
+            formatted[field] = _format_percent(formatted[field], signed=True)
+    return formatted
+
+
+def _format_money(value: object, *, signed: bool = False) -> str:
+    amount = Decimal(str(value))
+    if signed:
+        sign = "+" if amount > 0 else "-" if amount < 0 else ""
+        return f"{sign}${abs(amount):,.2f}"
+    return f"${amount:,.2f}"
+
+
+def _format_count(value: object, *, signed: bool = False) -> str:
+    amount = int(Decimal(str(value)))
+    sign = "+" if signed and amount > 0 else ""
+    return f"{sign}{amount:,}"
+
+
+def _format_percent(value: object, *, signed: bool = False) -> str:
+    amount = float(value)
+    sign = "+" if signed and amount > 0 else ""
+    return f"{sign}{amount:,.2f}%"
 
 
 def _render_whatif_table(report) -> None:
@@ -3634,6 +3758,7 @@ def budgets_check(
 ) -> None:
     """Check the \\[budgets] table in .caliper.toml. Exits 0 ok, 1 warn, 2 breach.
 
+    Daily, weekly, and monthly mean the current local calendar period to now.
     Wire into CI: a non-zero exit fails the job."""
     _validate_format(output_format)
     try:
@@ -3676,10 +3801,11 @@ def budgets_check(
     status = pricing_status(total)
     warnings = pricing_warnings(total)
     now = dt.datetime.now(tz=local_timezone())
-    usage = usage_for_periods(result.events, options, rate_card, now)
+    windows = current_period_intervals(now)
+    usage = usage_for_periods(result.events, options, rate_card, now, windows=windows)
     alerts = evaluate_budgets(budget_list, usage)
     worst = max_severity(alerts)
-    records = alert_records(alerts, usage, status)
+    records = alert_records(alerts, usage, status, windows=windows)
     _render_budget_report(
         output_format=output_format,
         records=records,
