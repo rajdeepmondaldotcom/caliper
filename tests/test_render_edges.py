@@ -261,3 +261,60 @@ def test_parser_issue_warning_no_longer_dumps_paths():
     assert "1,477 files" in out
     assert "caliper doctor" in out
     assert "/very/long/path/1" not in out
+
+
+def test_compact_models_includes_vendor_chip_when_breakdowns_present():
+    from decimal import Decimal
+
+    from caliper.models import Aggregate, CostTotals, ModelBreakdown, TokenTotals
+    from caliper.render import compact_models, vendor_chip
+
+    def _breakdown(model: str, vendor: str, dollars: float) -> ModelBreakdown:
+        mb = ModelBreakdown(
+            key=f"{model}|standard",
+            model=model,
+            service_tier="standard",
+            model_vendor=vendor,
+        )
+        mb.costs.api_dollars = Decimal(str(dollars))
+        mb.totals = TokenTotals()
+        return mb
+
+    item = Aggregate(key="x", label="x", models={"a", "b"})
+    item.model_breakdowns = {
+        "claude-opus-4.7": _breakdown("claude-opus-4.7", "anthropic", 50.0),
+        "gpt-5.5": _breakdown("gpt-5.5", "openai", 30.0),
+    }
+    item.costs = CostTotals()
+    rendered = compact_models(item)
+    assert "[dim]Anthropic · OpenAI[/dim]" in rendered
+    assert vendor_chip(item) == "Anthropic · OpenAI"
+
+
+def test_vendor_chip_empty_for_blank_row():
+    from caliper.models import Aggregate
+    from caliper.render import vendor_chip
+
+    assert vendor_chip(Aggregate(key="x", label="x")) == ""
+
+
+def test_compact_models_oneline_drops_chip():
+    from decimal import Decimal
+
+    from caliper.models import Aggregate, CostTotals, ModelBreakdown, TokenTotals
+    from caliper.render import compact_models_oneline
+
+    mb = ModelBreakdown(
+        key="m|standard",
+        model="claude-opus-4.7",
+        service_tier="standard",
+        model_vendor="anthropic",
+    )
+    mb.costs.api_dollars = Decimal("10")
+    mb.totals = TokenTotals()
+    item = Aggregate(key="x", label="x", models={"claude-opus-4.7"})
+    item.model_breakdowns = {"claude-opus-4.7": mb}
+    item.costs = CostTotals()
+    out = compact_models_oneline(item)
+    assert "\n" not in out
+    assert "Anthropic" not in out

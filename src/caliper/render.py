@@ -487,14 +487,26 @@ def short_model(name: str) -> str:
 
 
 def compact_models(row: Aggregate, limit: int = 3) -> str:
-    """Render a set of model names so the cell stays scannable.
+    """Render the top models on line 1 and the vendor chip on line 2.
 
     Returns the top ``limit`` model breakdowns sorted by spend (API
-    dollars desc), with a "+N more" suffix when there are extras. Falls
-    back to alphabetical when per-model costs are unavailable. Vendor
-    prefixes (``claude-``, ``openai-``) are stripped so the cell fits a
-    typical 40-column report layout.
+    dollars desc), with a "+N" suffix when there are extras. Falls back
+    to alphabetical when per-model costs are unavailable. Vendor
+    prefixes (``claude-``, ``openai-``) are stripped from model names
+    so the cell fits a typical 40-column report layout. Beneath that
+    line a dim chip lists the distinct model vendors present in the
+    row (e.g. ``Anthropic · OpenAI``). Use :func:`compact_models_oneline`
+    when the caller wants the single-line variant.
     """
+    one_line = compact_models_oneline(row, limit=limit)
+    chip = vendor_chip(row)
+    if not chip:
+        return one_line
+    return f"{one_line}\n[dim]{chip}[/dim]"
+
+
+def compact_models_oneline(row: Aggregate, limit: int = 3) -> str:
+    """The historical single-line form. Kept for JSON, CSV, and tests."""
     if not row.models:
         return "-"
     ranked = _rank_models(row)
@@ -504,6 +516,46 @@ def compact_models(row: Aggregate, limit: int = 3) -> str:
     remaining = len(ranked) - len(head)
     suffix = f" +{remaining}" if remaining > 0 else ""
     return " · ".join(head) + suffix
+
+
+_VENDOR_LABELS: dict[str, str] = {
+    "anthropic": "Anthropic",
+    "openai": "OpenAI",
+    "anysphere": "Anysphere",
+    "google": "Google",
+    "mistral": "Mistral",
+    "meta": "Meta",
+    "unknown": "unknown",
+}
+
+
+def vendor_chip(row: Aggregate) -> str:
+    """Return a comma-free vendor chip for the row, sorted by spend.
+
+    Falls back to the alphabetical model-vendor set when per-breakdown
+    spend is not available. Returns an empty string when no vendor
+    information exists.
+    """
+    breakdowns = getattr(row, "model_breakdowns", None) or {}
+    if breakdowns:
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for breakdown in sorted(
+            breakdowns.values(),
+            key=lambda mb: float(mb.costs.api_dollars),
+            reverse=True,
+        ):
+            vendor = getattr(breakdown, "model_vendor", "unknown") or "unknown"
+            if vendor in seen:
+                continue
+            seen.add(vendor)
+            ordered.append(vendor)
+        vendors = ordered
+    else:
+        vendors = sorted(getattr(row, "model_vendors", set()) or set())
+    if not vendors:
+        return ""
+    return " · ".join(_VENDOR_LABELS.get(v, v) for v in vendors)
 
 
 def _rank_models(row: Aggregate) -> list[str]:

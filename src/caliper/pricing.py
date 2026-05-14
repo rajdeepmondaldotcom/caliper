@@ -201,6 +201,7 @@ def model_vendor_glyph(vendor: str) -> str:
         VENDOR_META: "L",
     }.get(vendor, "?")
 
+
 PRICING_SOURCES = [
     PricingSource(
         name="OpenAI API pricing",

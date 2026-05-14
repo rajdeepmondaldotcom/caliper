@@ -184,11 +184,14 @@ def _add_summary_event(
     unknown_model: bool,
     unknown_tier: bool,
 ) -> None:
+    from caliper.pricing import model_vendor as _model_vendor
+
     item.totals.add_usage(event.usage)
     item.costs.add(costs)
     item.cache_savings.add(cache_savings)
     if event.model:
         item.models.add(event.model)
+        item.model_vendors.add(_model_vendor(event.model))
     if event.vendor:
         item.vendors.add(event.vendor)
     if event.service_tier:
