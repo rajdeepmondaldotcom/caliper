@@ -1,11 +1,14 @@
 """Caliper.
 
-Measure every line of AI-written code with offline-first usage intelligence.
+Offline cost ledger for AI-assisted coding. Reads local Codex,
+Claude Code, Cursor, and Aider logs. Prints what each PR cost.
 """
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
+
+from caliper.persona import VoiceLintError, VoiceViolation, voice_lint, voice_lint_strict
 
 try:
     __version__ = version("caliper-ai")
@@ -14,4 +17,11 @@ except PackageNotFoundError:
 
 SCHEMA_VERSION = 1
 
-__all__ = ["SCHEMA_VERSION", "__version__"]
+__all__ = [
+    "SCHEMA_VERSION",
+    "VoiceLintError",
+    "VoiceViolation",
+    "__version__",
+    "voice_lint",
+    "voice_lint_strict",
+]

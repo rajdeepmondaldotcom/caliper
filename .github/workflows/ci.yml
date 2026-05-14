@@ -36,6 +36,8 @@ jobs:
         run: uv run ruff check .
       - name: Ruff format check
         run: uv run ruff format --check .
+      - name: Voice lint (persona)
+        run: uv run pytest tests/test_persona.py tests/test_persona_pinned.py -q
       - name: Tests
         run: PYTHONWARNINGS=error::ResourceWarning uv run pytest
       - name: Coverage gate
