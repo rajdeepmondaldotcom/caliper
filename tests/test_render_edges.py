@@ -199,3 +199,65 @@ def test_limits_rendering_and_reset_epoch_edges(tmp_path: Path) -> None:
     assert render_module._reset_epoch(now.timestamp() - 1) == "now"
     assert "h" in render_module._reset_epoch(time.time() + 3700)
     assert render_module._percent(None) == "-"
+
+
+def test_short_model_strips_vendor_prefix():
+    from caliper.render import short_model
+
+    assert short_model("claude-sonnet-4.6") == "sonnet-4.6"
+    assert short_model("claude-opus-4.7") == "opus-4.7"
+    assert short_model("openai-foo") == "foo"
+    assert short_model("gpt-5.5") == "gpt-5.5"  # GPT-N stays
+    assert short_model("mistral-medium") == "mistral-medium"
+
+
+def test_compact_models_returns_dash_for_empty():
+    from caliper.models import Aggregate
+    from caliper.render import compact_models
+
+    item = Aggregate(key="empty", label="empty")
+    assert compact_models(item) == "-"
+
+
+def test_compact_models_ranks_by_spend_when_breakdowns_present():
+    from decimal import Decimal
+
+    from caliper.models import Aggregate, CostTotals, ModelBreakdown, TokenTotals
+    from caliper.render import compact_models
+
+    def _breakdown(model: str, dollars: float) -> ModelBreakdown:
+        mb = ModelBreakdown(key=f"{model}|standard", model=model, service_tier="standard")
+        mb.costs.api_dollars = Decimal(str(dollars))
+        mb.totals = TokenTotals()
+        return mb
+
+    item = Aggregate(key="x", label="x", models={"a", "b", "c", "d"})
+    item.model_breakdowns = {
+        "claude-opus-4.7": _breakdown("claude-opus-4.7", 10.0),
+        "gpt-5.5": _breakdown("gpt-5.5", 50.0),
+        "claude-haiku-4.5": _breakdown("claude-haiku-4.5", 5.0),
+        "claude-sonnet-4.6": _breakdown("claude-sonnet-4.6", 30.0),
+    }
+    item.costs = CostTotals()
+    rendered = compact_models(item, limit=3)
+    # gpt-5.5 has highest spend; expect it first
+    assert rendered.startswith("gpt-5.5 ·")
+    assert "+1" in rendered  # one model truncated
+
+
+def test_parser_issue_warning_no_longer_dumps_paths():
+    from caliper.evidence import parser_issue_warning
+    from caliper.models import ParserIssue
+
+    issue = ParserIssue(
+        vendor="cursor",
+        message="Cursor files have no per-event token counts",
+        severity="warn",
+        kind="cursor-missing-tokens",
+        count=1477,
+        examples=("/very/long/path/1", "/very/long/path/2"),
+    )
+    out = parser_issue_warning(issue)
+    assert "1,477 files" in out
+    assert "caliper doctor" in out
+    assert "/very/long/path/1" not in out

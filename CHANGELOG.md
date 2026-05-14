@@ -2,6 +2,25 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.4 - 2026-05-14
+
+Polish pass on the table output so reports scan cleanly in a 100–140
+column terminal.
+
+### Changed
+
+- `Models` cells in every grouped table (`overview`, `daily`, `weekly`,
+  `monthly`, `project`, `session`, `models`, …) now show at most three
+  model names ranked by spend, joined with `·`, and suffixed with
+  `+N` when more models exist. Vendor prefixes (`claude-`, `openai-`)
+  are stripped so the cell fits without wrapping.
+- Parser-issue warnings (e.g. Cursor files with no per-event token
+  counts) no longer dump three full filesystem paths into every
+  report. The summary form now reads "N files (run `caliper doctor`
+  for examples)"; the verbose form remains available from
+  `caliper.evidence.parser_issue_warning_verbose` for the doctor
+  command.
+
 ## 0.0.3 - 2026-05-14
 
 First release with the interactive Textual workspace baked into the

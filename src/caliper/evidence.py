@@ -35,6 +35,11 @@ class EvidenceDimension:
 
 
 def parser_issue_warning(issue: ParserIssue) -> str:
+    return f"{issue.message}: {issue.count:,} files (run `caliper doctor` for examples)"
+
+
+def parser_issue_warning_verbose(issue: ParserIssue) -> str:
+    """Long form including example paths. Used by doctor only."""
     examples = "; ".join(issue.examples)
     suffix = f" (examples: {examples})" if examples else ""
     return f"{issue.message}: {issue.count:,} files{suffix}"

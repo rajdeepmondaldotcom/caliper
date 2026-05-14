@@ -440,7 +440,7 @@ def _print_report_header(
 def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOptions) -> Table:
     table = Table(show_lines=False, expand=not options.compact)
     table.add_column("Group")
-    table.add_column("Models")
+    table.add_column("Models", overflow="fold", max_width=42)
     table.add_column("Input", justify="right")
     table.add_column("Cached", justify="right")
     table.add_column("Output", justify="right")
@@ -450,7 +450,7 @@ def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOption
     for row in rows:
         table.add_row(
             short_table_label(redact(row.label, options.show_prompts)),
-            "\n".join(sorted(row.models)) or "-",
+            compact_models(row),
             _table_int(row.totals.input_tokens, options),
             _table_int(row.totals.cached_input_tokens, options),
             _table_int(row.totals.output_tokens, options),
@@ -461,7 +461,7 @@ def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOption
     table.add_section()
     table.add_row(
         "Total",
-        "\n".join(sorted(total.models)) or "-",
+        compact_models(total),
         _table_int(total.totals.input_tokens, options),
         _table_int(total.totals.cached_input_tokens, options),
         _table_int(total.totals.output_tokens, options),
@@ -470,6 +470,54 @@ def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOption
         _table_float(total.costs.api_dollars, options, prefix="$"),
     )
     return table
+
+
+_MODEL_PREFIX_DROP = ("claude-", "openai-", "gpt-")
+
+
+def short_model(name: str) -> str:
+    """Strip well-known vendor prefixes so model cells stay scannable."""
+    lowered = name.lower()
+    if lowered.startswith("gpt-"):
+        return name  # GPT-N is already short
+    for prefix in _MODEL_PREFIX_DROP:
+        if lowered.startswith(prefix):
+            return name[len(prefix) :]
+    return name
+
+
+def compact_models(row: Aggregate, limit: int = 3) -> str:
+    """Render a set of model names so the cell stays scannable.
+
+    Returns the top ``limit`` model breakdowns sorted by spend (API
+    dollars desc), with a "+N more" suffix when there are extras. Falls
+    back to alphabetical when per-model costs are unavailable. Vendor
+    prefixes (``claude-``, ``openai-``) are stripped so the cell fits a
+    typical 40-column report layout.
+    """
+    if not row.models:
+        return "-"
+    ranked = _rank_models(row)
+    if not ranked:
+        ranked = sorted(row.models)
+    head = [short_model(name) for name in ranked[:limit]]
+    remaining = len(ranked) - len(head)
+    suffix = f" +{remaining}" if remaining > 0 else ""
+    return " · ".join(head) + suffix
+
+
+def _rank_models(row: Aggregate) -> list[str]:
+    breakdowns = getattr(row, "model_breakdowns", None) or {}
+    if not breakdowns:
+        return []
+    return [
+        breakdown.model
+        for breakdown in sorted(
+            breakdowns.values(),
+            key=lambda mb: float(mb.costs.api_dollars),
+            reverse=True,
+        )
+    ]
 
 
 def _print_report_footer(console: Console, result: LoadResult, total: Aggregate) -> None:
