@@ -2,6 +2,34 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.15 - 2026-05-14
+
+Release plumbing harden + local publish convenience.
+
+### Added
+
+- `scripts/publish.sh` runs the full local-publish flow keyed off
+  the repo-local `.env` (git-ignored): bump pyproject, lint, test,
+  build, twine check, twine upload, poll PyPI. Prints the exact
+  git commands to commit + tag at the end. Never auto-pushes.
+- `.env.example` rewritten as a brief how-to. Token never leaves
+  the developer machine. CI uses the `PYPI_API_TOKEN` repo secret.
+
+### Changed
+
+- `.github/workflows/release.yml` now declares
+  `permissions: contents: write` at the workflow level (was `read`
+  at top, `write` on the staging job only). Removes ambiguity that
+  surfaced as transient HTTP 403 on 0.0.14.
+- Both `Create or refresh draft release` and `Publish staged
+  release` steps now retry 3x with 10s backoff on transient API
+  failures. Attempt count logged.
+- `workflow_dispatch` added with an optional `tag` input so any
+  release can be rerun from the Actions UI without re-tagging the
+  commit.
+- Post-publish PyPI verify retry budget lifted from 5x15s to
+  8x15s.
+
 ## 0.0.14 - 2026-05-14
 
 Install docs in plain language.
