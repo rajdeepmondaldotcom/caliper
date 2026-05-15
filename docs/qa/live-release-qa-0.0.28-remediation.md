@@ -2,7 +2,7 @@
 
 Date: 2026-05-15 IST
 Target reviewed: `caliper-ai==0.0.27`
-Fixed release: `0.0.28`
+Fixed release: `caliper-ai==0.0.28`
 
 ## Summary
 
@@ -11,7 +11,8 @@ shipping: the command palette did not list every shipped screen. The direct
 shortcuts worked, but palette discovery lagged behind the screen set.
 
 `0.0.28` fixes that gap, raises the coverage gate from 85% to 88%, and adds this
-final QA record with the code-quality critique requested for launch review.
+final QA record with the code-quality critique requested for launch review. It
+has been published to PyPI and verified from a fresh install path.
 
 ## Actions Taken
 
@@ -51,6 +52,13 @@ final QA record with the code-quality critique requested for launch review.
 - `uvx twine check dist/*`
 - Built-wheel version, Doctor encoded-path redaction, command-palette
   completeness, and TUI navigation probe.
+- PyPI JSON reports `0.0.28`.
+- `uvx --isolated --refresh --from caliper-ai==0.0.28 caliper --version`
+- `pipx run --spec caliper-ai==0.0.28 caliper --version`
+- `CALIPER_SMOKE_VERSION=0.0.28 scripts/live-release-smoke.sh`
+- GitHub Release workflow `25897292201` completed successfully.
+- GitHub CI, Docs, CodeQL, and OSSF Scorecard completed successfully for
+  commit `a3e54e1`.
 
 ## Remaining Backlog
 

@@ -5,11 +5,12 @@ Target: `caliper-ai==0.0.28`
 
 ## Verdict
 
-`0.0.28` is the build I would put in front of Hacker News.
+Live `0.0.28` is the build I would put in front of Hacker News.
 
-The release candidate keeps the `0.0.27` privacy and install fixes, closes the
-last command-palette discoverability gap found during the code-quality pass, and
-tightens the test coverage gate from the stale temporary 85% floor to 88%.
+The published release keeps the `0.0.27` privacy and install fixes, closes the
+last command-palette discoverability gap found during the code-quality pass,
+tightens the test coverage gate from the stale temporary 85% floor to 88%, and
+passes the post-release PyPI install smoke.
 
 This is not mathematically perfect. It is launch-good: install works, trust
 defaults are boring, the TUI keymap and palette now agree, the repo is much
@@ -22,6 +23,13 @@ rather than a reason to hold the release.
 - `uvx --isolated --no-cache --from caliper-ai==0.0.27 caliper --version`.
 - `pipx run --spec caliper-ai==0.0.27 caliper --version`.
 - Published-package `CALIPER_SMOKE_VERSION=0.0.27 scripts/live-release-smoke.sh`.
+- PyPI metadata for live `caliper-ai==0.0.28`.
+- `uvx --isolated --refresh --from caliper-ai==0.0.28 caliper --version`.
+- `pipx run --spec caliper-ai==0.0.28 caliper --version`.
+- Published-package `CALIPER_SMOKE_VERSION=0.0.28 scripts/live-release-smoke.sh`.
+- GitHub Release workflow for `v0.0.28`, including PyPI publish, GitHub release
+  publish, and post-release install smoke.
+- Push workflows for `0.0.28`: CI, Docs, CodeQL, and OSSF Scorecard.
 - Empty first-run `overview` at 80 columns and compact 50 columns with all vendor
   roots isolated.
 - Smoke artifact privacy grep for local paths, temp roots, state DB names, and
@@ -124,7 +132,8 @@ repo-quality smell is coverage not being back at 90% yet."
 
 ## Good Enough?
 
-Release candidate `0.0.28`: yes.
+Live `0.0.28`: yes.
 
 The only package-affecting defect found in this pass was the incomplete command
-palette. It is fixed, covered by targeted tests, and ready for the release gate.
+palette. It is fixed, covered by targeted tests, published, and verified from
+PyPI.
