@@ -106,6 +106,7 @@ from caliper.rate_audit import (
     rate_card_records,
 )
 from caliper.render import (
+    _redact_paths,
     format_int,
     pricing_status,
     pricing_warnings,
@@ -1798,6 +1799,7 @@ def doctor(
     config: ConfigOpt = None,
     rates_file: RatesFileOpt = None,
     vendors: VendorOpt = None,
+    show_paths: ShowPathsOpt = False,
     output_format: Annotated[
         str,
         typer.Option("--output-format", "--format", "-f", help="table, json, csv, or markdown."),
@@ -1816,6 +1818,7 @@ def doctor(
             config=config,
             rates_file=rates_file,
             vendors=vendors,
+            show_paths=show_paths,
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
@@ -1829,7 +1832,21 @@ def doctor(
         result=result,
     )
     worst = worst_health_status(checks)
-    check_records = [check.to_record() for check in checks]
+    check_records = [
+        {
+            **check.to_record(),
+            "detail": _redact_paths(check.detail, options),
+        }
+        for check in checks
+    ]
+    warning_summary_records = [
+        summary.to_record()
+        for summary in parser_warning_summary(
+            result.warnings if result else [],
+            result.parser_issues if result else [],
+        )
+    ]
+    warning_summary_records = _redact_paths(warning_summary_records, options)
 
     if output_format == "json":
         typer.echo(
@@ -1837,13 +1854,7 @@ def doctor(
                 {
                     "checks": check_records,
                     "worst": worst,
-                    "warning_summary": [
-                        summary.to_record()
-                        for summary in parser_warning_summary(
-                            result.warnings if result else [],
-                            result.parser_issues if result else [],
-                        )
-                    ],
+                    "warning_summary": warning_summary_records,
                 }
             )
         )
@@ -1868,9 +1879,13 @@ def doctor(
     table.add_column("Check")
     table.add_column("Status")
     table.add_column("Detail")
-    for check in checks:
-        style = HEALTH_STATUS_STYLES[check.status]
-        table.add_row(check.label, f"[{style}]{check.status.upper()}[/{style}]", check.detail)
+    for check in check_records:
+        style = HEALTH_STATUS_STYLES[check["status"]]
+        table.add_row(
+            check["label"],
+            f"[{style}]{check['status'].upper()}[/{style}]",
+            check["detail"],
+        )
     console.print(table)
     console.print(
         f"Overall: [{HEALTH_STATUS_STYLES[worst]}]{worst.upper()}[/{HEALTH_STATUS_STYLES[worst]}]"

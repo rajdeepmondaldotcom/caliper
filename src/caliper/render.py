@@ -331,11 +331,25 @@ def _redact_path_string(value: str, options: RuntimeOptions) -> str:
     for root in sorted(root_strings, key=len, reverse=True):
         if root and root in redacted:
             redacted = redacted.replace(root, "<redacted-path>")
+    redacted = _redact_encoded_absolute_path_segments(redacted)
     if redacted != value:
         return redacted
     if value.startswith("/"):
         return "<redacted-path>"
     return re.sub(r"(?<![:\w])/(?:[^\s;,)]+)", "<redacted-path>", value)
+
+
+def _redact_encoded_absolute_path_segments(value: str) -> str:
+    """Redact path fragments encoded into vendor directory names.
+
+    Cursor and Claude Code can encode project paths as a single path segment,
+    for example ``Users-name-Documents-repo``. Absolute-path replacement does
+    not catch those because there is no slash left to match.
+    """
+
+    encoded_absolute_roots = r"(?:[A-Za-z][-_])?[-_]?(?:Users|home|private[-_]var|tmp)[-_]"
+    segment = rf"(^|[/\\]){encoded_absolute_roots}[^/\\\s,;)]+"
+    return re.sub(segment, r"\1<redacted-path>", value)
 
 
 def report_payload(

@@ -24,7 +24,9 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.screen import Screen
-from textual.widgets import Header, Static
+from textual.widgets import Static
+
+from caliper.tui.widgets.app_header import CaliperHeader
 
 
 class CaliperScreen(Screen):
@@ -85,7 +87,7 @@ class CaliperScreen(Screen):
         cls.BINDINGS = [*CaliperScreen.GLOBAL_BINDINGS, *local_bindings]
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield CaliperHeader(show_clock=True)
         with Container(id="top"):
             for widget in self.top():
                 yield widget

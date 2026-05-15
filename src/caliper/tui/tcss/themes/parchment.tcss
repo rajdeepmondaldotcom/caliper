@@ -5,7 +5,7 @@ Screen {
     color: #1f2024;
 }
 
-Header {
+Header, CaliperHeader {
     background: #ece5d5;
     color: #1f2024;
 }

@@ -5,10 +5,11 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Header, Static
+from textual.widgets import Static
 
 from caliper.tui.formatting import format_cost_usd_cell
 from caliper.tui.state import AppSnapshot
+from caliper.tui.widgets.app_header import CaliperHeader
 from caliper.tui.widgets.cost_card import CostCard
 from caliper.tui.widgets.window_panel import WindowPanel
 
@@ -40,7 +41,7 @@ class HomeScreen(Screen):
     """
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield CaliperHeader(show_clock=True)
         yield Vertical(
             Horizontal(id="cards"),
             Horizontal(id="windows"),

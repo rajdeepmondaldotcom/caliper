@@ -36,7 +36,7 @@ class WhatIfInput(Input):
             return
         event.prevent_default()
         event.stop()
-        self.app.action_go(_EMPTY_INPUT_NAV_KEYS[event.key])
+        self.app.call_later(self.app.action_go, _EMPTY_INPUT_NAV_KEYS[event.key])
 
 
 class WhatIfScreen(CaliperScreen):

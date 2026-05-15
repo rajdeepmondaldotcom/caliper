@@ -171,17 +171,17 @@ class CaliperApp(App):
     def on_unmount(self) -> None:
         self._stop_refresh_monitoring()
 
-    def on_key(self, event) -> None:
+    async def on_key(self, event) -> None:
         key = event.key
         if key in self._GLOBAL_NAV_KEYS:
             event.prevent_default()
             event.stop()
-            self.action_go(self._GLOBAL_NAV_KEYS[key])
+            await self.action_go(self._GLOBAL_NAV_KEYS[key])
             return
         if key == "question_mark":
             event.prevent_default()
             event.stop()
-            self.action_show_help()
+            await self.action_show_help()
             return
         if key == "r":
             event.prevent_default()
@@ -319,22 +319,22 @@ class CaliperApp(App):
         self.notify(f"Theme: {next_theme}")
 
     # ------------------------------------------------------------------ navigation
-    def action_go(self, name: str) -> None:
+    async def action_go(self, name: str) -> None:
         if name == "home":
-            self._show_home()
+            await self._show_home()
             return
         screen_cls = self._SCREENS.get(name)
         if screen_cls is None:
             self.notify(f"Unknown screen: {name}")
             return
-        self._show_home()
-        self.push_screen(screen_cls())
+        await self._show_home()
+        await self.push_screen(screen_cls())
 
-    def _show_home(self) -> None:
+    async def _show_home(self) -> None:
         while self.screen_stack and not isinstance(self.screen_stack[-1], HomeScreen):
-            self.pop_screen()
+            await self.pop_screen()
         if not self.screen_stack or not isinstance(self.screen_stack[-1], HomeScreen):
-            self.push_screen(HomeScreen())
+            await self.push_screen(HomeScreen())
 
     def action_step_back(self) -> None:
         self._step_interval(-1)
@@ -374,8 +374,8 @@ class CaliperApp(App):
         )
         self.action_refresh()
 
-    def action_show_help(self) -> None:
-        self.push_screen(HelpScreen())
+    async def action_show_help(self) -> None:
+        await self.push_screen(HelpScreen())
 
     # ------------------------------------------------------------------ refresh
     def action_refresh(self) -> None:

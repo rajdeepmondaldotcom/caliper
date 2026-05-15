@@ -2,6 +2,23 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.27 - 2026-05-15
+
+Final polish fix after the brutal 0.0.26 live release QA pass.
+
+### Fixed
+
+- `caliper doctor` now redacts local diagnostic paths by default across table,
+  JSON, Markdown, and CSV output. Pass `--show-paths` to intentionally reveal
+  local paths for debugging.
+- Default path redaction now also catches local paths encoded into vendor
+  directory names such as Cursor project folders.
+- TUI screens now use a Caliper-owned stable header widget instead of Textual's
+  built-in `Header`, avoiding delayed title-update crashes during fast keyboard
+  navigation.
+- TUI global navigation now awaits screen transitions, and What-If input fields
+  preserve global shortcut navigation when empty and focused.
+
 ## 0.0.26 - 2026-05-15
 
 Final live-release privacy fix after the brutal 0.0.25 QA pass.

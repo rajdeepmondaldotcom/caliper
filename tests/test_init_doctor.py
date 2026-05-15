@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -65,6 +66,8 @@ def test_doctor_table_lists_expected_checks(tmp_path) -> None:
     assert "Python" in result.output
     assert "Session root" in result.output
     assert "Rate card" in result.output
+    assert str(tmp_path) not in result.output
+    assert "<redacted-path>" in result.output
 
 
 def test_doctor_json_emits_checks_and_worst(tmp_path) -> None:
@@ -92,6 +95,34 @@ def test_doctor_json_emits_checks_and_worst(tmp_path) -> None:
     assert {"checks", "worst"} <= set(payload.keys())
     labels = {check["label"] for check in payload["checks"]}
     assert {"Python", "Session root", "Rate card", "Clock"} <= labels
+    assert str(tmp_path) not in result.output
+    assert "<redacted-path>" in result.output
+
+
+def test_doctor_show_paths_restores_diagnostic_paths(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    session_root.mkdir()
+    state_db = tmp_path / "state.sqlite"
+    state_db.write_text("")
+    missing_cfg = tmp_path / "missing.toml"
+    result = runner.invoke(
+        app,
+        [
+            "doctor",
+            "--format",
+            "json",
+            "--show-paths",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+        ],
+    )
+    assert result.exit_code in {0, 1, 2}
+    assert str(session_root) in result.output
+    assert str(state_db) in result.output
 
 
 def test_doctor_json_summarizes_repeated_parser_warnings(monkeypatch, tmp_path) -> None:
@@ -135,17 +166,76 @@ def test_doctor_json_summarizes_repeated_parser_warnings(monkeypatch, tmp_path) 
     )
     assert cursor_coverage["status"] == "warn"
     assert "5 Cursor files have no per-event token counts" in cursor_coverage["detail"]
-    assert payload["warning_summary"] == [
-        {
-            "kind": "cursor-token-coverage",
-            "count": 5,
-            "examples": [
-                str(root / "projects" / "project-alpha" / "empty-0.jsonl"),
-                str(root / "projects" / "project-alpha" / "empty-1.jsonl"),
-                str(root / "projects" / "project-alpha" / "empty-2.jsonl"),
-            ],
-        }
+    assert str(tmp_path) not in result.output
+    assert payload["warning_summary"][0]["kind"] == "cursor-token-coverage"
+    assert payload["warning_summary"][0]["count"] == 5
+    assert payload["warning_summary"][0]["examples"] == [
+        "<redacted-path>/cursor/projects/project-alpha/empty-0.jsonl",
+        "<redacted-path>/cursor/projects/project-alpha/empty-1.jsonl",
+        "<redacted-path>/cursor/projects/project-alpha/empty-2.jsonl",
     ]
+
+    visible = runner.invoke(
+        app,
+        [
+            "doctor",
+            "--format",
+            "json",
+            "--show-paths",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+            "--vendor",
+            "cursor",
+        ],
+    )
+    assert visible.exit_code == 1, visible.output
+    visible_payload = json.loads(visible.output)
+    assert visible_payload["warning_summary"][0]["examples"] == [
+        str(root / "projects" / "project-alpha" / "empty-0.jsonl"),
+        str(root / "projects" / "project-alpha" / "empty-1.jsonl"),
+        str(root / "projects" / "project-alpha" / "empty-2.jsonl"),
+    ]
+
+
+def test_doctor_redacts_encoded_cursor_project_paths(monkeypatch, tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    session_root.mkdir()
+    state_db = tmp_path / "state.sqlite"
+    state_db.write_text("")
+    root = tmp_path / "cursor"
+    encoded_project = f"Users-{Path.home().name}-Documents-GitHub-private-repo"
+    path = root / "projects" / encoded_project / "empty.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"timestamp":"2026-05-12T00:00:00Z"}\n')
+    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(root))
+
+    result = runner.invoke(
+        app,
+        [
+            "doctor",
+            "--format",
+            "json",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+            "--vendor",
+            "cursor",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    examples = payload["warning_summary"][0]["examples"]
+    assert examples == ["<redacted-path>/cursor/projects/<redacted-path>/empty.jsonl"]
+    assert Path.home().name not in result.output
+    assert "private-repo" not in result.output
 
 
 def test_doctor_rejects_bad_format(tmp_path) -> None:
@@ -175,6 +265,7 @@ def test_doctor_markdown_format(tmp_path) -> None:
     )
     assert result.exit_code in {0, 1, 2}
     assert "| label | status | detail |" in result.output
+    assert str(tmp_path) not in result.output
 
 
 def test_budgets_missing_config_prints_literal_table_name(tmp_path) -> None:
