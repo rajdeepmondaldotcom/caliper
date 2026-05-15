@@ -1,7 +1,8 @@
 """Caliper's house voice: Calm, Accountable Clarity.
 
-The rules that govern every user-facing string Caliper prints. Sourced
-from `docs/persona-overhaul/01-plan.md` and `VOICE_PROFILE_RAJDEEP.md`.
+The rules that govern every user-facing string Caliper prints. The
+release-planning notes that shaped this voice were retired after launch.
+The enforceable contract now lives in this module and its tests.
 
 :func:`voice_lint` returns a list of violations for a given string.
 Callers run it in tests, in CI, or inline before shipping copy. Empty

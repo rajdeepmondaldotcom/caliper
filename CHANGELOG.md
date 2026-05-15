@@ -476,8 +476,7 @@ Honest loading + per-vendor tables on the overview command.
 
 Persona overhaul, round one. Caliper's terminal output starts speaking
 in its own voice: short sentences, named constraints, decisions over
-decoration. The work follows
-`docs/persona-overhaul/01-plan.md`.
+decoration. The historical planning notes were retired after launch.
 
 ### Added
 
@@ -574,8 +573,7 @@ base install.
 
 ### Internal
 
-- See `docs/textual-tui/` for the nine-phase plan, audits, research,
-  and post-implementation log driving this work.
+- Historical TUI planning notes were retired after the launch cleanup.
 
 ## 0.0.2 - 2026-05-13
 

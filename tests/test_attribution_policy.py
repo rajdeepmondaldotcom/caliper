@@ -56,12 +56,6 @@ def _tracked_files() -> list[Path]:
             continue
         if line.startswith("tests/test_attribution_policy"):
             continue
-        # Skip planning artefacts that quote the banned strings as
-        # documentation of the rule.
-        if line.startswith("docs/release-and-ux-overhaul/"):
-            continue
-        if line.startswith("docs/persona-overhaul/"):
-            continue
         # Skip historical changelog entries we cannot rewrite without
         # force-push to a protected branch.
         if line == "CHANGELOG.md":
