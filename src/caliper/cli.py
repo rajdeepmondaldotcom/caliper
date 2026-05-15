@@ -2263,6 +2263,7 @@ def rates_catalog(
     ] = False,
     pricing_source: PricingSourceOpt = "auto",
     pricing_cache_ttl_hours: PricingCacheTtlOpt = 24,
+    show_paths: ShowPathsOpt = False,
 ) -> None:
     """Search the cached pricing catalog. Use --model/--query to filter model names."""
     _validate_format(output_format)
@@ -2287,11 +2288,14 @@ def rates_catalog(
         rows = [row for row in rows if lowered_provider in str(row["provider"]).lower()]
     warnings = list(catalog.warnings)
     cache_path = pricing_catalog_path()
+    cache_path_text = str(cache_path)
     if not catalog.models:
         warnings.append(
             "no cached live pricing catalog yet; embedded rates are active. Run "
             "`caliper rates refresh --allow-network` to populate live provider pricing."
         )
+    if not show_paths:
+        warnings = [warning.replace(cache_path_text, "<redacted-path>") for warning in warnings]
     display_limit = _rates_catalog_limit(output_format, limit, show_all)
     display_rows = rows[:display_limit] if display_limit is not None else rows
     payload = {
@@ -2303,7 +2307,7 @@ def rates_catalog(
         "catalog_source": catalog.source if catalog.models else "cache",
         "embedded_available": True,
         "warnings": warnings,
-        "cache_path": str(cache_path),
+        "cache_path": cache_path_text if show_paths else "<redacted-path>",
         "using_embedded_rate_card": not catalog.models,
         "next_commands": ["caliper rates refresh --allow-network"] if not catalog.models else [],
     }
@@ -3864,6 +3868,7 @@ def statusline(
     no_dedupe: NoDedupeOpt = False,
     no_parse_cache: NoParseCacheOpt = False,
     default_model: DefaultModelOpt = "gpt-5.5",
+    show_paths: ShowPathsOpt = False,
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     vendors: VendorOpt = None,
@@ -3904,6 +3909,7 @@ def statusline(
             no_dedupe=no_dedupe,
             no_parse_cache=no_parse_cache,
             default_model=default_model,
+            show_paths=show_paths,
             offline=offline,
             compact=compact,
             vendors=vendors,
@@ -3937,30 +3943,55 @@ def _statusline_text(
     no_dedupe: bool,
     no_parse_cache: bool,
     default_model: str,
+    show_paths: bool,
     offline: bool,
     compact: bool,
     vendors: list[str] | None,
 ) -> str:
     try:
+        values = _with_parent_options(
+            {
+                "since": since,
+                "until": until or iso_z(dt.datetime.now(tz=local_timezone())),
+                "days": days,
+                "timezone": timezone,
+                "session_root": session_root,
+                "state_db": state_db,
+                "codex_config": codex_config,
+                "config": config,
+                "pricing_mode": pricing_mode,
+                "service_tier": service_tier,
+                "unknown_service_tier": unknown_service_tier,
+                "tier_overrides": tier_overrides,
+                "rates_file": rates_file,
+                "no_dedupe": no_dedupe,
+                "no_parse_cache": no_parse_cache,
+                "default_model": default_model,
+                "show_paths": show_paths,
+                "offline": offline,
+                "vendors": vendors,
+            }
+        )
         options = build_options(
-            since=since,
-            until=until or iso_z(dt.datetime.now(tz=local_timezone())),
-            days=days,
-            timezone=timezone,
-            session_root=session_root,
-            state_db=state_db,
-            codex_config=codex_config,
-            config=config,
-            pricing_mode=pricing_mode,
-            service_tier=service_tier,
-            unknown_service_tier=unknown_service_tier,
-            tier_overrides=tier_overrides,
-            rates_file=rates_file,
-            no_dedupe=no_dedupe,
-            no_parse_cache=no_parse_cache,
-            default_model=default_model,
-            offline=offline,
-            vendors=vendors,
+            since=values["since"],
+            until=values["until"],
+            days=values["days"],
+            timezone=values["timezone"],
+            session_root=values["session_root"],
+            state_db=values["state_db"],
+            codex_config=values["codex_config"],
+            config=values["config"],
+            pricing_mode=values["pricing_mode"],
+            service_tier=values["service_tier"],
+            unknown_service_tier=values["unknown_service_tier"],
+            tier_overrides=values["tier_overrides"],
+            rates_file=values["rates_file"],
+            no_dedupe=values["no_dedupe"],
+            no_parse_cache=values["no_parse_cache"],
+            default_model=values["default_model"],
+            show_paths=values["show_paths"],
+            offline=values["offline"],
+            vendors=values["vendors"],
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
@@ -3970,7 +4001,7 @@ def _statusline_text(
     if output_format == "json":
         return (
             json.dumps(
-                with_caliper_envelope(statusline_payload(snapshot)),
+                with_caliper_envelope(statusline_payload(snapshot, options)),
                 separators=(",", ":"),
             )
             + "\n"

@@ -157,3 +157,22 @@ def test_insight_actions_are_copy_pasteable_commands(tmp_path: Path) -> None:
     assert "<cheaper>" not in result.output
     assert " against " not in result.output
     assert "caliper whatif --hypothetical-model claude-sonnet-4.6" in result.output
+
+
+def test_statusline_json_redacts_paths_and_session_identity_by_default(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["statusline", *_args(tmp_path, window=True), "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert "/tmp/project-alpha" not in result.output
+    assert "2026-05-12T00-00-00-launch" not in result.output
+    assert "<redacted-path>" in result.output
+    assert "<redacted-session>" in result.output
+
+
+def test_release_smoke_scripts_isolate_external_vendor_roots() -> None:
+    root = Path(__file__).parent.parent
+    for name in ("release-smoke.sh", "live-release-smoke.sh"):
+        text = (root / "scripts" / name).read_text()
+        assert "CLAUDE_CONFIG_DIR" in text
+        assert "CALIPER_CURSOR_HOME" in text
+        assert "CALIPER_AIDER_ROOT" in text

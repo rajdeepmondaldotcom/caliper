@@ -7,7 +7,7 @@ from decimal import Decimal
 from caliper.aggregation import aggregate_total, event_cost
 from caliper.models import LoadResult, RuntimeOptions, UsageEvent, decimal_string
 from caliper.pricing import RateCard
-from caliper.render import pricing_status, pricing_warnings
+from caliper.render import _redact_paths, pricing_status, pricing_warnings
 from caliper.subscriptions import subscription_plan_payload, subscription_warnings
 from caliper.timeutil import iso_z, load_timezone
 from caliper.windows import WindowState, compute_window_state, format_seconds_remaining
@@ -104,9 +104,12 @@ def _top_project(events: list[UsageEvent], rate_card: RateCard) -> tuple[str, De
     return max(costs_by_project.items(), key=lambda item: (item[1], item[0]))
 
 
-def statusline_payload(snapshot: StatuslineSnapshot) -> dict:
+def statusline_payload(
+    snapshot: StatuslineSnapshot,
+    options: RuntimeOptions | None = None,
+) -> dict:
     latest = snapshot.latest_event
-    return {
+    payload = {
         "generated_at": iso_z(snapshot.generated_at),
         "window": {
             "start": iso_z(snapshot.window_start),
@@ -144,6 +147,7 @@ def statusline_payload(snapshot: StatuslineSnapshot) -> dict:
             "plans": subscription_plan_payload(set(snapshot.plan_types)),
         },
     }
+    return _redact_paths(payload, options) if options is not None else payload
 
 
 def render_statusline_text(snapshot: StatuslineSnapshot) -> str:

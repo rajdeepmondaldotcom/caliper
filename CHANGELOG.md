@@ -2,6 +2,22 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.26 - 2026-05-15
+
+Final live-release privacy fix after the brutal 0.0.25 QA pass.
+
+### Fixed
+
+- `caliper statusline --format json` now redacts local project paths and
+  session identity by default. Pass `--show-paths` to intentionally reveal
+  local statusline identity.
+- `caliper rates catalog --format json` now redacts the local pricing-cache
+  path and cache-miss warning path by default. Pass `--show-paths` to reveal the
+  cache path.
+- Release smoke scripts now isolate Codex, Claude Code, Cursor, Aider, parse
+  cache, and XDG data roots so they do not accidentally read maintainer-local
+  usage data.
+
 ## 0.0.25 - 2026-05-15
 
 Security and final release hygiene pass after 0.0.24.

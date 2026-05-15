@@ -76,12 +76,27 @@ def test_statusline_json_exposes_latest_usage_and_limit_windows(tmp_path) -> Non
     assert payload["sessions"] == 1
     assert payload["latest"]["model"] == "gpt-5.5"
     assert payload["latest"]["service_tier"] == "standard"
-    assert payload["latest"]["project"] == "/tmp/project-alpha"
-    assert payload["top_project"]["label"] == "/tmp/project-alpha"
+    assert payload["latest"]["session_id"] == "<redacted-session>"
+    assert payload["latest"]["project"] == "<redacted-path>"
+    assert payload["top_project"]["label"] == "<redacted-path>"
+    assert "/tmp/project-alpha" not in result.output
     assert payload["today"]["cache_ratio"] == 0.5
     assert payload["today"]["cost_usd_exact"]
     assert payload["rate_limits"]["primary"]["limit_id"] == "codex"
     assert payload["subscription"]["plans"][0]["slug"] == "pro"
+
+
+def test_statusline_json_show_paths_restores_latest_usage_identity(tmp_path) -> None:
+    result = runner.invoke(
+        app,
+        ["statusline", *_fixture(tmp_path), "--format", "json", "--show-paths"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["latest"]["project"] == "/tmp/project-alpha"
+    assert payload["top_project"]["label"] == "/tmp/project-alpha"
+    assert payload["latest"]["session_id"] == "2026-05-12T00-00-00-statusline"
 
 
 def test_statusline_compact_stays_prompt_sized(tmp_path) -> None:

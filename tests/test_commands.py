@@ -588,8 +588,15 @@ def test_rates_catalog_empty_cache_surfaces_warning(monkeypatch, tmp_path) -> No
     assert payload["catalog_source"] == "cache"
     assert payload["embedded_available"] is True
     assert any("rates refresh --allow-network" in warning for warning in payload["warnings"])
+    assert payload["cache_path"] == "<redacted-path>"
+    assert str(tmp_path) not in result.output
     assert payload["using_embedded_rate_card"] is True
     assert payload["next_commands"] == ["caliper rates refresh --allow-network"]
+
+    visible = runner.invoke(app, ["rates", "catalog", "--format", "json", "--show-paths"])
+    assert visible.exit_code == 0, visible.output
+    visible_payload = json.loads(visible.output)
+    assert visible_payload["cache_path"] == str(tmp_path / "rates-fetched.json")
 
 
 def test_rates_catalog_defaults_to_scan_friendly_table_limit(monkeypatch) -> None:
