@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "caliper-ai"
-version = "0.0.27"
+version = "0.0.28"
 description = "The cost layer for AI-assisted development. Reads local Codex, Claude Code, Cursor, and Aider logs and prints what each PR cost. Offline. No login."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -114,10 +114,9 @@ source = ["src/caliper"]
 branch = true
 
 [tool.coverage.report]
-# Temporary 85 floor while the new TUI screens land. Snapshot tests
-# in a follow-up will lift it back to 90 once they cover the screen
-# compose paths.
-fail_under = 85
+# Keep the gate close to observed total coverage; lift to 90 once
+# remaining TUI worker and command-palette branches are covered.
+fail_under = 88
 exclude_also = [
   "if __name__ == .__main__.:",
   "raise NotImplementedError",

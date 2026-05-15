@@ -63,10 +63,47 @@ def test_palette_provider_loads():
     from caliper.tui.palette import CaliperCommands
 
     cmds = CaliperCommands.app_actions.fget(CaliperCommands.__new__(CaliperCommands))  # type: ignore[attr-defined]
-    names = [name for name, _key, _help in cmds]
-    assert "Go to Home" in names
-    assert "Cycle theme" in names
-    assert "Refresh" in names
+    actions = {name: key for name, key, _help in cmds}
+    assert actions["Go to Home"] == "1"
+    assert actions["Go to Receipt"] == "0"
+    assert actions["Go to What-If"] == "w"
+    assert actions["Go to Budgets"] == "b"
+    assert actions["Go to Insights"] == "i"
+    assert actions["Go to Help"] == "question_mark"
+    assert actions["Cycle theme"] == "t"
+    assert actions["Refresh"] == "r"
+
+
+def test_palette_provider_discovers_and_searches_new_screen_actions():
+    import asyncio
+
+    from caliper.tui.palette import CaliperCommands
+
+    class FakeApp:
+        def __init__(self) -> None:
+            self.keys: list[str] = []
+
+        async def simulate_key(self, key: str) -> None:
+            self.keys.append(key)
+
+    class FakeScreen:
+        focused = None
+
+        def __init__(self) -> None:
+            self.app = FakeApp()
+
+    async def _collect():
+        provider = CaliperCommands(FakeScreen())  # type: ignore[arg-type]
+        discovered = [hit async for hit in provider.discover()]
+        searched = [hit async for hit in provider.search("receipt")]
+        await discovered[0].command()
+        return provider.screen.app.keys, discovered, searched
+
+    keys, discovered, searched = asyncio.run(_collect())
+
+    assert keys == ["1"]
+    assert {hit.text for hit in discovered} >= {"Go to Receipt", "Go to What-If", "Go to Help"}
+    assert [hit.text for hit in searched] == ["Go to Receipt"]
 
 
 def test_welcome_state_helpers_round_trip(tmp_path, monkeypatch):

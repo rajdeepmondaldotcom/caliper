@@ -2,6 +2,19 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.28 - 2026-05-15
+
+Final code-quality and TUI discoverability polish after the 0.0.27 live release
+QA pass.
+
+### Fixed
+
+- TUI command palette entries now include every shipped screen: Receipt,
+  What-If, Budgets, Help, and Insights were missing from palette discovery even
+  though their direct keyboard shortcuts worked.
+- Raised the coverage gate from the stale temporary 85% floor to 88% after the
+  final code-quality pass measured 88.88% total coverage.
+
 ## 0.0.27 - 2026-05-15
 
 Final polish fix after the brutal 0.0.26 live release QA pass.
