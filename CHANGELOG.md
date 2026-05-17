@@ -2,6 +2,24 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.31 - 2026-05-17
+
+Final launch hardening after the 0.0.30 pass. This release fixes the
+dashboard's small-screen report layout and moves PyPI publishing fully onto
+Trusted Publisher OIDC.
+
+### Fixed
+
+- Static dashboard now avoids document-level horizontal overflow on desktop,
+  tablet, and mobile. Dense model/project tables scroll inside their own
+  panels instead of widening the whole page.
+- CSS-only dashboard tooltips no longer materialize hidden content until
+  hover, preventing off-screen tooltip text from expanding page width.
+- GitHub Actions PyPI publishing now uses Trusted Publisher OIDC directly
+  and no longer passes a long-lived `PYPI_API_TOKEN` secret.
+- Security documentation and release workflow tests now pin the Trusted
+  Publisher contract.
+
 ## 0.0.30 - 2026-05-17
 
 Launch-hardening after the dashboard rebuild. This release tightens the
