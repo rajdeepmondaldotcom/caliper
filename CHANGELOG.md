@@ -2,6 +2,16 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.34 - 2026-05-18
+
+### Changed
+
+- Reworked the public README around the real product path: install Caliper,
+  run `caliper dashboard`, and get a private local browser report from real
+  logs.
+- Polished package metadata and GitHub repository positioning around the
+  local cost-ledger, private dashboard, and per-PR AI-cost reporting use case.
+
 ## 0.0.33 - 2026-05-17
 
 ### Fixed
