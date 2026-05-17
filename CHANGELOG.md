@@ -2,6 +2,15 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.33 - 2026-05-17
+
+### Fixed
+
+- `caliper dashboard` now opens a generated local HTML dashboard directly
+  when run from an interactive terminal, instead of dumping the full HTML
+  document into the terminal. Piped output still emits raw HTML, and
+  `--stdout` makes raw HTML explicit.
+
 ## 0.0.32 - 2026-05-17
 
 Release-pipeline correction after the unpublished 0.0.31 tag. This release

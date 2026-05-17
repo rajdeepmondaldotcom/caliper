@@ -154,6 +154,20 @@ console = Console()
 
 OUTPUT_FORMATS = ("table", "json", "csv", "markdown", "compat-json")
 
+
+def _dashboard_stdout_is_interactive() -> bool:
+    return sys.stdout.isatty()
+
+
+def _open_dashboard_in_browser(target: Path) -> bool:
+    import webbrowser
+
+    try:
+        return webbrowser.open(target.resolve().as_uri())
+    except webbrowser.Error:
+        return False
+
+
 SinceOpt = Annotated[
     str | None,
     typer.Option(
@@ -1823,11 +1837,23 @@ def _render_shape_table(report: SessionShapeReport) -> str:
 def dashboard(
     output: Annotated[
         Path | None,
-        typer.Option("--out", "--output", "-o", help="HTML output file. Default: stdout."),
+        typer.Option(
+            "--out",
+            "--output",
+            "-o",
+            help=(
+                "HTML output file. Without --output, an interactive terminal "
+                "opens a temporary dashboard; piped output still prints HTML."
+            ),
+        ),
     ] = None,
     open_in_browser: Annotated[
         bool,
         typer.Option("--open", help="Open the generated dashboard in the default browser."),
+    ] = False,
+    stdout_html: Annotated[
+        bool,
+        typer.Option("--stdout", help="Print the dashboard HTML instead of opening a browser."),
     ] = False,
     theme: Annotated[
         str,
@@ -1881,29 +1907,43 @@ def dashboard(
     top_threads: TopThreadsOpt = 10,
     vendors: VendorOpt = None,
 ) -> None:
-    """Render a self-contained static HTML dashboard. Offline. No external resources."""
+    """Open a self-contained static HTML dashboard. Offline. No external resources."""
     if theme not in {"dark", "light", "print"}:
         raise _exit_error("--theme must be one of: dark, light, print")
     if density not in {"comfortable", "compact"}:
         raise _exit_error("--density must be one of: comfortable, compact")
+    if stdout_html and (output is not None or open_in_browser):
+        raise _exit_error("--stdout cannot be combined with --output or --open")
     if demo:
         payload = sample_dashboard(show_paths=show_paths)
     else:
         values = dict(locals())
         # The dashboard command does not take an output_format; carve out before _options.
-        for k in ("output", "open_in_browser", "theme", "density", "no_deltas", "demo"):
+        dashboard_only_keys = (
+            "output",
+            "open_in_browser",
+            "stdout_html",
+            "theme",
+            "density",
+            "no_deltas",
+            "demo",
+        )
+        for k in dashboard_only_keys:
             values.pop(k, None)
         values["output_format"] = "table"
         options = _options(values)
         result = _safe_load_usage(options)
         payload = build_handoff_dashboard(result, options, with_deltas=not no_deltas)
     text = render_dashboard(payload, theme=theme, density=density)
-    if output is None and not open_in_browser:
+    should_open = open_in_browser or (
+        output is None and not stdout_html and _dashboard_stdout_is_interactive()
+    )
+    if stdout_html or (output is None and not should_open):
         typer.echo(text, nl=False)
         return
     if output is None:
-        # --open without --out: write to a stable tempfile so the browser
-        # has something on disk to open.
+        # Browser preview without --out: write to a stable tempfile so the
+        # browser has a real file to open and refresh.
         import tempfile
 
         tmpdir = Path(tempfile.gettempdir())
@@ -1915,19 +1955,15 @@ def dashboard(
     target.write_text(text, encoding="utf-8")
     suffix = " (overwritten)" if already_existed else ""
     typer.echo(f"Wrote {target}{suffix}")
-    if open_in_browser:
-        import webbrowser
-
-        opened = False
-        try:
-            opened = webbrowser.open(target.resolve().as_uri())
-        except webbrowser.Error:
-            opened = False
+    if should_open:
+        opened = _open_dashboard_in_browser(target)
         if not opened:
             typer.echo(
                 f"Could not open a browser automatically. "
                 f"The file is at {target} — open it manually."
             )
+        else:
+            typer.echo(f"Opened {target}")
 
 
 @app.command()

@@ -92,7 +92,7 @@ caliper-demo      3 models     $43
 ```
 
 ```bash
-caliper dashboard --demo --open
+caliper dashboard --demo
 ```
 
 The dashboard command writes one self-contained HTML file and opens it in a
@@ -212,8 +212,8 @@ caliper shape --lookback-days 7      # tool-use & session shape (Claude Code)
 caliper insights                     # ranked signals with next commands
 caliper advise                       # grouped model/tier recommendations
 caliper evidence                     # explain how trustworthy the numbers are
-caliper dashboard --open             # self-contained HTML file from your logs
-caliper dashboard --demo --open      # self-contained HTML demo, no log reads
+caliper dashboard                    # opens a self-contained HTML dashboard
+caliper dashboard --demo             # opens a synthetic dashboard, no log reads
 ```
 
 The first run parses everything and writes a sidecar parse cache. Later runs
@@ -249,12 +249,15 @@ entry point.
 ## Static HTML dashboard
 
 ```bash
+caliper dashboard
+caliper dashboard --demo
 caliper dashboard --output ~/caliper.html --open
-caliper dashboard --demo --open
 ```
 
-One self-contained HTML file. Open it in any browser. Email it to your
-manager. Drop it on a USB drive. **No external resources** — no CDN, no
+One self-contained HTML file. Run `caliper dashboard` to open it directly in
+your default browser. Use `--output` when you want to keep a named file, or
+`--stdout` when you are piping raw HTML. Email it to your manager. Drop it on
+a USB drive. **No external resources** — no CDN, no
 `<script src>`, no `<link rel="stylesheet">`, no `fetch(`, no
 `@import`. The privacy invariant is tested in CI:
 
@@ -276,7 +279,9 @@ Flags:
 | `--demo` | off | Render built-in synthetic data instead of reading local logs. |
 | `--no-deltas` | off | Skip the period-over-period parse pass (one fewer aggregate). |
 | `--show-paths` | off | Show full project paths instead of basenames. |
-| `--open` | off | Open the generated file in your default browser. |
+| `--output PATH` | temp file | Write the dashboard to a named HTML file. |
+| `--open` | auto without `--output` | Open the generated file in your default browser. |
+| `--stdout` | off | Print raw HTML instead of opening a browser. |
 
 ## Privacy is a constraint, not a feature
 

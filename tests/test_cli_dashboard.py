@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import webbrowser as _webbrowser
+from pathlib import Path
+from urllib.parse import urlparse
 
 from typer.testing import CliRunner
 
@@ -68,6 +70,83 @@ def test_dashboard_overwrite_hint(monkeypatch, tmp_path) -> None:
     second = runner.invoke(app, ["dashboard", "--output", str(out), *_common_args(tmp_path)])
     assert second.exit_code == 0, second.output
     assert "(overwritten)" in second.output
+
+
+def test_dashboard_default_prints_html_when_stdout_is_not_tty(tmp_path) -> None:
+    result = runner.invoke(app, ["dashboard", "--demo"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("<!doctype html>")
+    assert "Wrote" not in result.output
+
+
+def test_dashboard_default_opens_browser_for_interactive_terminal(monkeypatch, tmp_path) -> None:
+    opened: list[str] = []
+
+    monkeypatch.setattr("caliper.cli._dashboard_stdout_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        _webbrowser,
+        "open",
+        lambda url, *args, **kwargs: opened.append(url) or True,
+    )
+
+    result = runner.invoke(app, ["dashboard", "--demo"])
+
+    assert result.exit_code == 0, result.output
+    assert "<!doctype html>" not in result.output
+    assert "Wrote" in result.output
+    assert "Opened" in result.output
+    assert opened
+    opened_path = Path(urlparse(opened[0]).path)
+    assert opened_path.name == "caliper-dashboard.html"
+    assert opened_path.exists()
+    assert opened_path.read_text(encoding="utf-8").startswith("<!doctype html>")
+
+
+def test_dashboard_stdout_flag_keeps_raw_html_explicit(monkeypatch) -> None:
+    opened: list[str] = []
+
+    monkeypatch.setattr("caliper.cli._dashboard_stdout_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        _webbrowser,
+        "open",
+        lambda url, *args, **kwargs: opened.append(url) or True,
+    )
+
+    result = runner.invoke(app, ["dashboard", "--demo", "--stdout"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("<!doctype html>")
+    assert not opened
+
+
+def test_dashboard_output_does_not_open_without_open_flag(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("caliper.cli._dashboard_stdout_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        _webbrowser,
+        "open",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not open")),
+    )
+    out = tmp_path / "report.html"
+
+    result = runner.invoke(app, ["dashboard", "--demo", "--output", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert "Wrote" in result.output
+    assert "Opened" not in result.output
+    assert out.read_text(encoding="utf-8").startswith("<!doctype html>")
+
+
+def test_dashboard_stdout_rejects_output_or_open(tmp_path) -> None:
+    out = tmp_path / "report.html"
+
+    with_output = runner.invoke(app, ["dashboard", "--demo", "--stdout", "--output", str(out)])
+    assert with_output.exit_code != 0
+    assert "cannot be combined" in with_output.output
+
+    with_open = runner.invoke(app, ["dashboard", "--demo", "--stdout", "--open"])
+    assert with_open.exit_code != 0
+    assert "cannot be combined" in with_open.output
 
 
 def test_dashboard_headless_open_fallback(monkeypatch, tmp_path) -> None:
