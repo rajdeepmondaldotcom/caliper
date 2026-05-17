@@ -1266,7 +1266,7 @@ def _forecast_band(
 
     dot_cls = "forecast-dot" + (" is-warn" if off_band else "")
     return (
-        f'<div class="forecast-band">'
+        '<div class="forecast-band">'
         + "".join(svg_parts)
         + f'<span class="{dot_cls}" style="left:{mid_pct:.3f}%"></span>'
         + f'<div class="forecast-band-labels">{label_html}</div>'
