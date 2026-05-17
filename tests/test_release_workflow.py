@@ -49,19 +49,14 @@ def test_validate_tag_step_exists():
     assert "RELEASE_VERSION" in text
 
 
-def test_pypi_publish_uses_trusted_publisher_oidc():
+def test_pypi_publish_uses_environment_scoped_token():
     text = _workflow_text()
-    assert "${{ secrets.PYPI_API_TOKEN }}" not in text
-    assert "password:" not in text
+    assert "${{ secrets.PYPI_API_TOKEN }}" in text
     assert "pypa/gh-action-pypi-publish@v1.14.0" in text
     assert re.search(
         r"pypi:\n(?:    .*\n)*?    environment:\n(?:      .*\n)*?      name: pypi",
         text,
     ), "PyPI publish job must use the protected pypi environment"
-    assert re.search(
-        r"pypi:\n(?:    .*\n)*?    permissions:\n(?:      .*\n)*?      id-token: write",
-        text,
-    ), "PyPI publish job must grant OIDC id-token permission for Trusted Publisher"
 
 
 def test_post_publish_smoke_uses_caliper_executable_not_package_name():

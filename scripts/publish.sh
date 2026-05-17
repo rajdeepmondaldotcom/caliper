@@ -6,8 +6,8 @@
 #   ./scripts/publish.sh 0.0.30       # bumps pyproject, then prepares artifacts
 #
 # PyPI publish happens through the GitHub Actions release workflow using
-# Trusted Publisher OIDC. Push an annotated vX.Y.Z tag after this script
-# passes.
+# the protected `pypi` environment secret. Push an annotated vX.Y.Z tag
+# after this script passes.
 
 set -euo pipefail
 
@@ -59,12 +59,14 @@ cat <<EOF
 
   Next steps (run yourself; this script does not commit, tag, push, or upload):
 
-    git add pyproject.toml CHANGELOG.md
+    git add pyproject.toml uv.lock CHANGELOG.md .github/workflows/release.yml \\
+      SECURITY.md docs/release-and-ux-overhaul/RUNBOOK-publish.md \\
+      tests/test_release_workflow.py scripts/publish.sh
     git commit -m "chore(release): $VER"
     git push origin main
     git tag -a "v$VER" -m "v$VER"
     git push origin "v$VER"
 
-  CI will detect the tag, re-build, publish to PyPI via Trusted Publisher,
-  publish the GitHub release, and run the post-release smoke.
+  CI will detect the tag, re-build, publish to PyPI through the protected
+  pypi environment, publish the GitHub release, and run the post-release smoke.
 EOF

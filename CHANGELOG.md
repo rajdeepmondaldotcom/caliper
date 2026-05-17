@@ -2,11 +2,25 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.32 - 2026-05-17
+
+Release-pipeline correction after the unpublished 0.0.31 tag. This release
+keeps the dashboard overflow fixes and publishes through the protected
+GitHub Actions `pypi` environment token that is configured for the project.
+
+### Fixed
+
+- GitHub Actions PyPI publishing now uses the existing environment-scoped
+  `PYPI_API_TOKEN` secret after PyPI rejected the unconfigured Trusted
+  Publisher OIDC exchange.
+- Security documentation, the release runbook, and workflow guard tests now
+  describe the actual protected-environment publish path.
+
 ## 0.0.31 - 2026-05-17
 
-Final launch hardening after the 0.0.30 pass. This release fixes the
-dashboard's small-screen report layout and moves PyPI publishing fully onto
-Trusted Publisher OIDC.
+Unpublished release attempt after the 0.0.30 pass. This tag fixed the
+dashboard's small-screen report layout but PyPI rejected the release because
+the Trusted Publisher was not configured for the project.
 
 ### Fixed
 
@@ -15,10 +29,8 @@ Trusted Publisher OIDC.
   panels instead of widening the whole page.
 - CSS-only dashboard tooltips no longer materialize hidden content until
   hover, preventing off-screen tooltip text from expanding page width.
-- GitHub Actions PyPI publishing now uses Trusted Publisher OIDC directly
-  and no longer passes a long-lived `PYPI_API_TOKEN` secret.
-- Security documentation and release workflow tests now pin the Trusted
-  Publisher contract.
+- GitHub Actions PyPI publishing attempted to use Trusted Publisher OIDC
+  directly. PyPI rejected the exchange because no matching publisher existed.
 
 ## 0.0.30 - 2026-05-17
 
