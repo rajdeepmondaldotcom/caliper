@@ -73,8 +73,8 @@ def test_manual_dispatch_uses_input_tag_for_checkout_and_release_steps():
     text = _workflow_text()
 
     assert "ref: ${{ env.RELEASE_TAG }}" in text
-    assert "tag=\"${RELEASE_TAG}\"" in text
-    assert "CALIPER_SMOKE_VERSION=\"${RELEASE_VERSION}\"" in text
+    assert 'tag="${RELEASE_TAG}"' in text
+    assert 'CALIPER_SMOKE_VERSION="${RELEASE_VERSION}"' in text
 
 
 def test_release_smokes_dashboard_from_wheel_and_pypi():

@@ -185,8 +185,7 @@ def delta_chip(value: float | None, polarity: str = "more-is-bad") -> str:
     tip = "vs. previous equal window"
     if value == 0:
         return (
-            f'<span class="delta delta-flat" data-tip="flat &mdash; {esc(tip)}">'
-            "·&nbsp;0.0%</span>"
+            f'<span class="delta delta-flat" data-tip="flat &mdash; {esc(tip)}">·&nbsp;0.0%</span>'
         )
     up = value > 0
     if polarity == "neutral" or polarity == "more-is-good":
@@ -220,25 +219,16 @@ _STATUS_TIPS = {
 def severity_pill(severity: str) -> str:
     label = "CRIT" if severity == "critical" else severity.upper()
     tip = _SEVERITY_TIPS.get(severity, severity)
-    return (
-        f'<span class="sev sev-{esc(severity)}" data-tip="{esc(tip)}">'
-        f"{label}</span>"
-    )
+    return f'<span class="sev sev-{esc(severity)}" data-tip="{esc(tip)}">{label}</span>'
 
 
 def status_word(status: str) -> str:
     tip = _STATUS_TIPS.get(status, status)
-    return (
-        f'<span class="status status-{esc(status)}" data-tip="{esc(tip)}">'
-        f"{esc(status)}</span>"
-    )
+    return f'<span class="status status-{esc(status)}" data-tip="{esc(tip)}">{esc(status)}</span>'
 
 
 def vendor_badge(vendor: str) -> str:
-    return (
-        f'<span class="vendor-badge" data-tip="vendor: {esc(vendor)}">'
-        f"{esc(vendor)}</span>"
-    )
+    return f'<span class="vendor-badge" data-tip="vendor: {esc(vendor)}">{esc(vendor)}</span>'
 
 
 def category_legend() -> str:
@@ -454,13 +444,9 @@ def render_cards(t: Totals, empty: bool) -> str:
             f"</div>"
         )
 
-    cost_tip = (
-        f"Total spend across all vendors in this window. "
-        f"Events: {fmt_int(t.events)}."
-    )
+    cost_tip = f"Total spend across all vendors in this window. Events: {fmt_int(t.events)}."
     cache_tip = (
-        f"Estimated savings from cached input tokens. "
-        f"Hit rate: {fmt_pct(t.cache_hit_rate)}."
+        f"Estimated savings from cached input tokens. Hit rate: {fmt_pct(t.cache_hit_rate)}."
     )
     tokens_tip = (
         f"Input + output tokens consumed. Cached input: "
@@ -469,8 +455,7 @@ def render_cards(t: Totals, empty: bool) -> str:
         f"{fmt_tokens(t.output_tokens)}."
     )
     sessions_tip = (
-        f"Distinct sessions in window. Turns: {t.turns} · "
-        f"tools/turn: {t.tools_per_turn:.2f}."
+        f"Distinct sessions in window. Turns: {t.turns} · tools/turn: {t.tools_per_turn:.2f}."
     )
 
     return (
@@ -669,7 +654,7 @@ def render_cost_over_time(daily: list[DailyPoint], empty: bool) -> str:
     _strip_n = max(1, len(daily) - 1)
     cells = "".join(
         f'<span class="shape-cell shape-{SHAPE_TO_CAT.get(d.shape, "mixed")}"'
-        f'{_tip_anchor(i / _strip_n)}'
+        f"{_tip_anchor(i / _strip_n)}"
         f' data-tip="{esc(d.day)} · {esc(d.shape)} · {fmt_money(d.cost_usd)}"></span>'
         for i, d in enumerate(daily)
     )
@@ -685,14 +670,11 @@ def render_cost_over_time(daily: list[DailyPoint], empty: bool) -> str:
         zone_center = zone_left + zone_w / 2
         events_label = f"{d.events:,} event{'s' if d.events != 1 else ''}"
         peak_tag = " · peak" if d is peak else ""
-        tip = (
-            f"{d.day} · {fmt_money(d.cost_usd)} · {events_label} "
-            f"· {d.shape}{peak_tag}"
-        )
+        tip = f"{d.day} · {fmt_money(d.cost_usd)} · {events_label} · {d.shape}{peak_tag}"
         anchor = _tip_anchor(zone_center / 100.0)
         hit_zones.append(
             f'<div class="chart-hit" data-tip="{esc(tip)}"'
-            f'{anchor}'
+            f"{anchor}"
             f' style="left:{zone_left:.4f}%;width:{zone_w:.4f}%"></div>'
         )
 
@@ -778,9 +760,7 @@ def render_yearly_heatmap(h: YearlyHeatmap | None) -> str:
         week = (lead_blanks + i) // 7
         anchor = _tip_anchor(week / weeks_denom)
         cell_html.append(
-            f'<div class="heat-cell heat-level-{cell.level}"'
-            f'{anchor}'
-            f' data-tip="{esc(tip)}"></div>'
+            f'<div class="heat-cell heat-level-{cell.level}"{anchor} data-tip="{esc(tip)}"></div>'
         )
     # Trailing blanks so the last column always has 7 rows
     remainder = (lead_blanks + len(h.cells)) % 7
@@ -880,11 +860,7 @@ def render_recap(recap: Recap | None) -> str:
             c = by_key.get((dow, hour))
             level = c.level if c else 0
             value = c.value if c else 0
-            tip_value = (
-                f"{value:,} event{'s' if value != 1 else ''}"
-                if value
-                else "no events"
-            )
+            tip_value = f"{value:,} event{'s' if value != 1 else ''}" if value else "no events"
             hour_label = (
                 "12 AM"
                 if hour == 0
@@ -894,20 +870,15 @@ def render_recap(recap: Recap | None) -> str:
                 if hour < 12
                 else f"{hour - 12} PM"
             )
-            tip = (
-                f"{_DAY_OF_WEEK_FULL[dow]} · {hour_label} · {tip_value}"
-            )
+            tip = f"{_DAY_OF_WEEK_FULL[dow]} · {hour_label} · {tip_value}"
             anchor = _tip_anchor(hour / 23.0)
             hour_cells.append(
-                f'<div class="hour-cell hour-level-{level}"'
-                f'{anchor}'
-                f' data-tip="{esc(tip)}"></div>'
+                f'<div class="hour-cell hour-level-{level}"{anchor} data-tip="{esc(tip)}"></div>'
             )
 
     # Day labels (left column): M T W T F S S
     day_labels = "".join(
-        f'<span class="hour-dow">{_DAY_OF_WEEK_FULL[dow][:1]}</span>'
-        for dow in range(7)
+        f'<span class="hour-dow">{_DAY_OF_WEEK_FULL[dow][:1]}</span>' for dow in range(7)
     )
 
     # Hour labels (top row): 12 AM / 6 AM / 12 PM / 6 PM placed at grid cols 1/7/13/19
