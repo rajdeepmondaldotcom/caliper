@@ -2,10 +2,12 @@
 
 # Caliper
 
-### The cost layer for AI-assisted development.
+### The local cost ledger for AI-assisted development.
 
-Reads local Codex, Claude Code, Cursor, and Aider logs. Prints what each PR
-cost. Offline. No login.
+Run one command. Get a private browser dashboard showing what your AI coding
+actually cost by project, model, vendor, pull request, and time window.
+
+**Offline by default. No account. No upload. No telemetry.**
 
 [![CI](https://github.com/rajdeepmondaldotcom/caliper/actions/workflows/ci.yml/badge.svg)](https://github.com/rajdeepmondaldotcom/caliper/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/caliper-ai.svg)](https://pypi.org/project/caliper-ai/)
@@ -13,47 +15,137 @@ cost. Offline. No login.
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ```bash
-uvx --isolated --from caliper-ai caliper
+uv tool install caliper-ai
+caliper dashboard
 ```
 
 </div>
 
 ---
 
-## About Caliper
+## What Caliper Is
 
-Caliper is a small, local-first Python CLI that turns AI coding session logs
-into one usage record and prints what each pull request cost.
+Caliper reads the local logs already written by OpenAI Codex CLI, Claude Code,
+Cursor, and Aider. It normalizes them into one event shape, applies explicit
+pricing, and gives you cost reports you can actually use:
 
-It supports token-bearing logs from OpenAI Codex CLI, Claude Code, Cursor,
-and Aider. It reads files those tools already write to your disk, joins them
-into one frozen event shape, prices them with sourced rate cards, and
-attributes the cost to a PR, a commit, or a project when the local evidence
-contains enough git context.
+- What did this pull request cost?
+- Which project is driving the bill?
+- Which model or vendor is expensive?
+- How much did cache reuse save?
+- Are these numbers exact, estimated, partial, or unsupported?
+- Can I inspect all of this without uploading prompts anywhere?
 
-There is no daemon, no SDK, no account, and no telemetry. The default usage
-path makes zero network calls. Optional pricing refresh and GitHub CLI PR
-resolution sit behind explicit flags.
+The answer stays on your machine.
 
-Caliper is MIT-licensed and built by one developer who wanted to know which
-PRs spent the four-figure bill.
+## The First Command
 
-## The problem
+```bash
+caliper dashboard
+```
 
-You ran Codex, Claude Code, Cursor, or Aider this month. A bill arrived. You
-cannot point at one pull request and say what it cost.
+Caliper opens a self-contained HTML dashboard in your browser. It reads your
+real local logs, writes a temporary local HTML file, and uses no external
+resources. If no logs are found, the dashboard still opens and `caliper doctor`
+tells you exactly what Caliper could and could not detect.
 
-The vendor dashboards each speak their own dialect, sit behind a login, and
-stop at the model boundary. None of them know which commits, which PRs, or
-which projects spent the money.
+For terminal output:
 
-Caliper reads the logs those tools already write to your disk, joins them
-into one event shape, and answers the only question that matters in a budget
-review: **what did this PR cost.**
+```bash
+caliper overview
+caliper project --lookback-days 30
+caliper pr 42
+caliper evidence
+caliper doctor
+```
 
-## The 30-second proof
+## Why It Exists
 
-Four commands against a sanitized local fixture.
+AI coding tools are good at spending tokens and bad at explaining the bill.
+Vendor dashboards are per-tool, per-account, and behind logins. They do not
+know your local git history, project folders, pull requests, cache hit rate, or
+evidence quality.
+
+Caliper is the missing local ledger.
+
+| What you need to know | What Caliper reads |
+|---|---|
+| PR cost | Local git attribution and session metadata. |
+| Project cost | Local working directories and vendor project records. |
+| Model mix | Model names and service tiers recorded by the tools. |
+| Cache savings | Cached input and cache creation token fields where vendors expose them. |
+| Confidence | Evidence grades for usage, model, tier, pricing, project, and git attribution. |
+
+## Install
+
+Requires Python 3.11 or newer.
+
+```bash
+# Persistent global tool. Recommended.
+uv tool install caliper-ai
+
+# Update later.
+uv tool upgrade caliper-ai
+```
+
+One-off run:
+
+```bash
+uvx --isolated --from caliper-ai caliper dashboard
+```
+
+Other install paths:
+
+```bash
+# pipx
+pipx install caliper-ai
+pipx upgrade caliper-ai
+
+# venv + pip
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install caliper-ai
+```
+
+The PyPI package is `caliper-ai`; the command is `caliper`.
+
+Use this form for `uvx`:
+
+```bash
+uvx --isolated --from caliper-ai caliper
+```
+
+Avoid this:
+
+```bash
+uvx caliper
+```
+
+That can resolve a different package. If a just-published version exists on
+PyPI but `uv` cannot find it yet, the resolver cache or PyPI simple index is
+stale. Wait a moment, then run:
+
+```bash
+UV_NO_CACHE=1 uv tool install --force caliper-ai
+```
+
+## What You Get
+
+| Surface | Command | Purpose |
+|---|---|---|
+| Browser dashboard | `caliper dashboard` | Open the local HTML report. |
+| Overview | `caliper overview` | Rolling 7 / 30 / 90 day spend. |
+| PR receipt | `caliper pr 42` | Cost attributed to one pull request. |
+| Git range receipt | `caliper pr --git-range main...branch` | Cost for an explicit local range. |
+| Project rollup | `caliper project` | Spend by repository or folder. |
+| Model rollup | `caliper models` | Spend by model and vendor. |
+| Evidence report | `caliper evidence` | How trustworthy each dimension is. |
+| Doctor | `caliper doctor` | Local setup and data coverage. |
+| Insights | `caliper insights` | Ranked findings with next commands. |
+| TUI | `caliper tui` | Interactive terminal workspace. |
+| Budgets | `caliper budgets check` | CI-friendly warning and breach exits. |
+
+## Example Output
 
 ```bash
 caliper overview
@@ -72,6 +164,16 @@ Cache savings: $640 at 72.4% cache hit
 ```
 
 ```bash
+caliper project --lookback-days 30
+```
+
+```text
+payments-api       4 models     $81
+frontend-lab       4 models     $63
+internal-tools     3 models     $43
+```
+
+```bash
 caliper insights
 ```
 
@@ -81,48 +183,9 @@ saving about $612. Keep prompts and file context stable
 to preserve cache hits.
 ```
 
-```bash
-caliper project --lookback-days 30
-```
+Names and numbers above are sanitized examples.
 
-```text
-demo-api          4 models     $81
-frontend-lab      4 models     $63
-caliper-demo      3 models     $43
-```
-
-```bash
-caliper dashboard --demo
-```
-
-The dashboard command writes one self-contained HTML file and opens it in a
-browser. `--demo` uses built-in synthetic data, so reviewers can try the
-dashboard without reading local logs.
-
-Names and numbers above are sanitized examples. No account. No upload.
-The first run took eleven seconds on a cold cache. Later runs are under a
-second.
-
-## Who this is for
-
-- **Indie developers paying their own AI bill.** You see the credit card
-  charge. You want the line items.
-- **Engineering managers running AI-heavy teams.** You want a number per PR
-  that survives a budget meeting.
-- **Anyone under a strict data policy.** Logs stay on disk. The parser is
-  open and small enough to read end to end.
-
-## Who this is not for
-
-- Teams that want a hosted dashboard with sign-in. There are products for
-  that. Caliper is not one.
-- Teams that have not adopted Codex, Claude Code, Cursor, or Aider. There is
-  nothing on disk to read.
-
-If you want this to also speak to GitHub Copilot or to a hosted SaaS, open
-an issue. The wedge stays local-first.
-
-## What a PR receipt looks like
+## PR Receipts
 
 ```bash
 caliper pr 42
@@ -138,200 +201,139 @@ Caliper - PR #42
   cursor        composer                  23   72,118 / 19,000     22%   $1.60
 ```
 
-`caliper pr <N>` uses local fetched pull refs by default and filters local
-events whose recorded git SHA matches those commits. Pass `--allow-network`
-to let Caliper ask GitHub CLI to resolve the PR commits, or pass an explicit
-range:
+By default, `caliper pr <N>` uses local fetched pull refs and filters events
+whose recorded git SHA matches the PR commits.
+
+If you want Caliper to ask the GitHub CLI for PR commit resolution, opt in:
+
+```bash
+caliper pr 42 --allow-network
+```
+
+Or pass a local range:
 
 ```bash
 caliper pr --git-range main...feature-branch
 ```
 
-The receipt carries evidence grades, so missing local git attribution is
-visible instead of being silently treated as exact. The same shape is
-available per commit (`caliper commit <sha>`) and per project
-(`caliper project`).
+Every receipt carries evidence grades. Missing git attribution is surfaced as
+partial evidence instead of being silently treated as exact.
 
-## How it works, in one breath
-
-1. Caliper reads JSONL session logs from `~/.codex/sessions`,
-   `~/.claude/projects`, the local Cursor store, and Aider chat history.
-2. It joins them into one frozen event shape: vendor, model, service tier,
-   project, session, timestamp, token counts, cache counts, pricing source,
-   git SHA where present.
-3. It groups, prices, and prints. The pricing catalog ships embedded and
-   can be refreshed from public sources behind an explicit flag.
-
-There is no daemon, no agent, no SDK. The default code path makes zero
-network calls.
-
-## Install
-
-Requires Python 3.11+. Pick the line that fits your setup.
-
-```bash
-# Zero-install. Ignores any persistent uv tool install. Recommended.
-uvx --isolated --from caliper-ai caliper
-
-# Persistent global tool (uv). Good for daily use.
-uv tool install caliper-ai
-uv tool upgrade caliper-ai     # later, to update
-
-# Persistent global tool (pipx). Works the same way.
-pipx install caliper-ai
-pipx upgrade caliper-ai
-
-# Plain pip inside a virtualenv. Standard.
-python -m venv .venv && source .venv/bin/activate
-python -m pip install caliper-ai
-```
-
-PyPI distribution name is `caliper-ai`. Command and Python import are
-both `caliper`. `uvx caliper` (without `--from`) hits a different,
-unrelated package; always use `--from caliper-ai caliper`. If
-`uvx --from caliper-ai caliper --version` shows an older version on your
-machine, uv is reusing a persistent tool install; run `uv tool upgrade
-caliper-ai` or use the isolated command above.
-
-If you see `error: No virtual environment found` from `uv pip
-install`, that command only installs into an active venv. Use one of
-the four paths above instead.
-
-If you see `error: externally-managed-environment` from system `pip3`
-on macOS or recent Debian, the same fix applies: pick a venv-based
-or tool-based path. PEP 668 blocks system installs on purpose.
-
-## First sixty seconds
-
-```bash
-caliper                              # rolling 7 / 30 / 90 summary
-caliper doctor                       # verifies your local setup
-caliper daily --lookback-days 7      # daily rollup
-caliper project --lookback-days 30   # which projects cost what
-caliper shape --lookback-days 7      # tool-use & session shape (Claude Code)
-caliper insights                     # ranked signals with next commands
-caliper advise                       # grouped model/tier recommendations
-caliper evidence                     # explain how trustworthy the numbers are
-caliper dashboard                    # opens a self-contained HTML dashboard
-caliper dashboard --demo             # opens a synthetic dashboard, no log reads
-```
-
-The first run parses everything and writes a sidecar parse cache. Later runs
-reuse it. The cache stores normalized usage records and parser metadata on
-your machine; default output still redacts prompts, paths, git identifiers,
-and session identifiers. Pass `--disable-parse-cache` when you want to bypass
-the cache, or delete the directory named by `CALIPER_CACHE_DIR`.
-
-If `caliper` shows no data after the first run, your AI tools probably
-write logs to a non-default location. Run `caliper doctor` — it lists
-which tools were detected and what's missing.
-
-## Interactive workspace
-
-If you prefer to live inside the data, `caliper-ai` also ships with an
-interactive Textual workspace:
-
-```bash
-caliper tui                              # against your real logs
-caliper tui --demo                       # synthetic fixture, zero disk reads
-```
-
-The TUI is a single Python process built on
-[Textual](https://github.com/Textualize/textual). It reuses every pure
-module the classic CLI uses (parser, pricing, aggregation, windows,
-insights) and adds only presentation: a Home overview with cost cards,
-primary/secondary limit panels, the insights feed, and recent sessions.
-The workspace reuses the same parser, pricing, aggregation, windows, and
-insights modules as the CLI. Offline by default. No login. No telemetry. The
-classic CLI is the stable surface; the Textual workspace is an additional
-entry point.
-
-## Static HTML dashboard
+## Dashboard
 
 ```bash
 caliper dashboard
-caliper dashboard --demo
-caliper dashboard --output ~/caliper.html --open
 ```
 
-One self-contained HTML file. Run `caliper dashboard` to open it directly in
-your default browser. Use `--output` when you want to keep a named file, or
-`--stdout` when you are piping raw HTML. Email it to your manager. Drop it on
-a USB drive. **No external resources** — no CDN, no
-`<script src>`, no `<link rel="stylesheet">`, no `fetch(`, no
-`@import`. The privacy invariant is tested in CI:
+The dashboard is one local HTML file:
+
+- opens in your default browser
+- contains no CDN references
+- contains no external stylesheet links
+- contains no external script tags
+- makes no fetches
+- can be saved, emailed, or archived as a standalone artifact
+
+Useful variants:
 
 ```bash
-grep -E "://|<script|<link" ~/caliper.html  # → no matches
+caliper dashboard --output ~/caliper.html --open
+caliper dashboard --theme light
+caliper dashboard --theme print --output ~/caliper-print.html
+caliper dashboard --stdout > caliper.html
 ```
 
-The dashboard reports the same numbers the CLI does, plus session
-shape (what kind of work the AI did), per-day dominant work pattern,
-period-over-period delta chips, a daily-mean reference line on the cost
-chart, a forecast band, and an evidence audit table.
-
-Flags:
+Dashboard flags:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--theme {dark,light,print}` | `dark` | Visual theme. Light is Stripe-receipt clean; print collapses to ink-on-paper. |
+| `--theme {dark,light,print}` | `dark` | Visual theme. |
 | `--density {comfortable,compact}` | `comfortable` | Row density. |
-| `--demo` | off | Render built-in synthetic data instead of reading local logs. |
-| `--no-deltas` | off | Skip the period-over-period parse pass (one fewer aggregate). |
+| `--no-deltas` | off | Skip the period-over-period comparison pass. |
 | `--show-paths` | off | Show full project paths instead of basenames. |
 | `--output PATH` | temp file | Write the dashboard to a named HTML file. |
-| `--open` | auto without `--output` | Open the generated file in your default browser. |
-| `--stdout` | off | Print raw HTML instead of opening a browser. |
+| `--open` | auto without `--output` | Open the generated file in your browser. |
+| `--stdout` | off | Print raw HTML for scripts and pipes. |
 
-## Privacy is a constraint, not a feature
-
-- No login, ever.
-- No upload, ever.
-- No telemetry, ever.
-- Prompts and titles are redacted in default output. Pass `--show-prompts`
-  if you want them.
-- Absolute local paths, repo origins, git identifiers, and session identifiers
-  are redacted in machine-readable output by default. Pass `--show-paths` only
-  when you explicitly want those identifiers in JSON.
-- Default usage analysis makes no network calls. Pricing refresh and GitHub
-  CLI PR resolution require explicit flags. The privacy invariant is tested.
-
-If you do not trust the claim, read `src/caliper/parser.py` and
-`src/caliper/parse_cache.py`. They are short on purpose.
-
-## Pricing is explicit
-
-- Money is computed in `Decimal`.
-- Cached input, cache creation, output, and reasoning tokens are tracked
-  separately when the source exposes them.
-- Long-context multipliers are applied per model.
-- Unknown or partial pricing is surfaced as a warning, never silently
-  guessed.
-- The embedded rate card carries a `checked` date. `caliper doctor` warns
-  past 30 days and fails past 90.
-- Report evidence is graded as `exact`, `estimated`, `partial`, or
-  `unsupported`. JSON reports carry the evidence metadata; table and
-  receipt outputs surface the status so budget numbers do not look more
-  certain than the local logs allow.
+The privacy invariant is tested in CI:
 
 ```bash
+grep -E "://|<script|<link" ~/caliper.html  # no matches
+```
+
+## Trust Model
+
+Caliper is built around a hard local boundary.
+
+| Boundary | Default |
+|---|---|
+| Login | none |
+| Upload | none |
+| Telemetry | none |
+| Daemon | none |
+| Request proxy | none |
+| Network calls during usage analysis | none |
+| Prompt output | redacted |
+| Absolute paths | redacted |
+| Git identifiers | redacted in machine-readable output |
+| Pricing refresh | explicit network-enabled command |
+| GitHub PR lookup | explicit `--allow-network` |
+
+If you want to inspect the boundary, start here:
+
+- [src/caliper/parser.py](src/caliper/parser.py)
+- [src/caliper/parse_cache.py](src/caliper/parse_cache.py)
+- [src/caliper/network.py](src/caliper/network.py)
+- [src/caliper/dashboards/html.py](src/caliper/dashboards/html.py)
+
+## Accuracy and Evidence
+
+Caliper does not pretend every local log is perfect. It reports what the
+evidence supports.
+
+- Costs use `Decimal`.
+- Cached input, cache creation, output, and reasoning tokens are tracked
+  separately when vendors expose them.
+- Long-context multipliers are applied per model.
+- Unknown pricing is surfaced as a warning, not silently guessed.
+- Cursor files without per-event token counts are reported by `caliper doctor`.
+- Evidence is graded as `exact`, `estimated`, `partial`, or `unsupported`.
+
+Use these before treating a number as a budget fact:
+
+```bash
+caliper evidence
+caliper doctor
 caliper rates show
-caliper rates catalog
+```
+
+Refresh public pricing catalogs only when you explicitly want network access:
+
+```bash
 caliper rates refresh --allow-network
 ```
 
-Use a pinned rate card when you need to match an invoice exactly:
+Pin a local rate card when you need to match an invoice:
 
 ```bash
 caliper daily --rate-card-file ./rates.json
 ```
 
+## Supported Sources
+
+| Source | What Caliper reads |
+|---|---|
+| OpenAI Codex CLI | Local session logs, state DB metadata, model and token fields. |
+| Claude Code | Project JSONL logs, tool-use shape, cache token fields. |
+| Cursor | Local token-bearing records when available. |
+| Aider | Local chat history and usage records. |
+
+Some vendor files are transcript-only or missing token details. Caliper keeps
+those gaps visible in `caliper doctor` and `caliper evidence`.
+
 ## Budgets in CI
 
-Caliper exits with stable codes so CI can gate on cost.
-Budget periods are current local calendar periods: daily means local
-midnight to now, weekly means the current local week to now, and monthly
-means the current local month to now.
+Caliper exits with stable codes, so CI can warn or fail on usage budgets.
 
 ```toml
 # .caliper.toml
@@ -346,12 +348,14 @@ caliper budgets check
 ```
 
 | Exit | Meaning |
-|------|---------|
-| `0`  | ok |
-| `1`  | warning threshold crossed |
-| `2`  | breach threshold crossed |
+|---:|---|
+| `0` | ok |
+| `1` | warning threshold crossed |
+| `2` | breach threshold crossed |
 
-Add the command to your CI step. The exit code is the contract.
+Budget periods are current local calendar periods: daily means local midnight
+to now, weekly means the current local week to now, and monthly means the
+current local month to now.
 
 ## Exports
 
@@ -361,24 +365,55 @@ caliper export prometheus --metrics-port 9090
 caliper export grafana
 ```
 
-Receipts render as Markdown or HTML and are suitable for finance handoff.
-The Prometheus exporter is a local `/metrics` process for live scraping.
-The Grafana exporter prints a static dashboard JSON you can import or keep
-under source control. The optional `[prom]` extra brings
-`prometheus-client` in.
+| Exporter | Reads usage logs? | Output |
+|---|---:|---|
+| `export receipt` | yes | Markdown or HTML monthly receipt |
+| `export prometheus` | yes | Local `/metrics` server |
+| `export grafana` | no | Static Grafana dashboard JSON |
 
-| Exporter | Usage data? | Output | Source flags |
-|---|---:|---|---|
-| `export receipt` | yes | Markdown or HTML receipt for one month | accepts session/config/rate flags |
-| `export prometheus` | yes | local `/metrics` server | accepts session/config/rate flags |
-| `export grafana` | no | static dashboard JSON template | does not read usage logs |
+The optional Prometheus dependency is available as an extra:
 
-## Python library
+```bash
+pipx install "caliper-ai[prom]"
+```
+
+## Interactive Workspace
+
+```bash
+caliper tui
+```
+
+The TUI is built with Textual and reuses the same parser, pricing,
+aggregation, evidence, and insight modules as the CLI. It adds an interactive
+home screen, cost cards, limit panels, insight feed, recent sessions, models,
+forecasting, receipts, and doctor output.
+
+The classic CLI remains the stable automation surface. The TUI is the place
+to explore.
+
+## Configuration
+
+```bash
+caliper init
+```
+
+That writes a commented `.caliper.toml`.
+
+Common environment overrides:
+
+| Variable | Meaning |
+|---|---|
+| `CALIPER_CACHE_DIR` | Parse-cache location. |
+| `CALIPER_DATA_DIR` | Pricing-catalog location. |
+| `CODEX_HOME` | OpenAI Codex CLI data location. |
+| `CLAUDE_CONFIG_DIR` | Claude Code data location. |
+
+## Python API
 
 ```python
-from caliper.parser import load_usage
-from caliper.config import build_options
 from caliper.aggregation import aggregate_total
+from caliper.config import build_options
+from caliper.parser import load_usage
 
 options = build_options(days=7)
 result = load_usage(options)
@@ -387,66 +422,65 @@ total = aggregate_total(result, options)
 print(total.totals.total_tokens)
 ```
 
-The public import path is `caliper`. The dataclasses are frozen.
+The public import path is `caliper`. Core dataclasses are frozen.
 
-## Configuration
+## Who It Is For
 
-```bash
-caliper init                        # writes a commented .caliper.toml
-```
+- Developers paying their own AI bill who want line items instead of a shrug.
+- Engineering managers who need cost per PR, not per vendor account.
+- Teams with strict data policies that cannot upload prompts to another
+  analytics service.
+- Anyone trying to understand whether model choice, service tier, cache hits,
+  or project shape is driving spend.
 
-Environment overrides:
+## Who It Is Not For
 
-- `CALIPER_CACHE_DIR`: parse-cache location.
-- `CALIPER_DATA_DIR`: pricing-catalog location.
-- `CODEX_HOME`: Codex CLI data location.
-- `CLAUDE_CONFIG_DIR`: Claude Code data location.
+- Teams that want a hosted dashboard with sign-in.
+- Teams that need a request proxy or prompt observability platform.
+- Teams whose tools do not write token-bearing local logs.
+- People who want Caliper to call vendor admin APIs by default.
+
+Caliper is intentionally local-first. If you need a multi-tenant SaaS
+dashboard, use one. If you want a receipt from the evidence already on your
+machine, use Caliper.
 
 ## FAQ
 
 **Does it work with Cursor today?**
+
 Yes, when Cursor's local data includes token-bearing records. Some Cursor
 files are transcript-only and do not carry per-event token counts. `caliper
-doctor` flags those so Cursor coverage is visible instead of being implied.
+doctor` reports those files so coverage is explicit.
 
-**Why not just read the vendor dashboards?**
-Because the dashboards are per-vendor and per-account. They do not know
-which commit, which PR, or which project spent the money. They also
-require a login, which is the wrong fit for offline-only workflows.
+**Why not just use the vendor dashboards?**
+
+Vendor dashboards are per-vendor and per-account. They do not know which PR,
+commit, or local project produced the spend. They also require a login.
 
 **How accurate are the costs?**
-As accurate as the rate card. The rate card ships embedded with a
-`checked` date and warns when it ages. You can pin a local rate card to
-match an invoice exactly. Run `caliper evidence` when you need to know
-whether usage, model, tier, pricing, project, and git attribution are exact
-or inferred for the active window.
 
-**What about the Anthropic admin API or the OpenAI usage API?**
-Out of scope on purpose. Caliper is local-only. The trade-off is named:
-you get nothing if the vendor never wrote a log to disk.
+As accurate as the local logs and rate card allow. Run `caliper evidence` to
+see exactly which dimensions are exact, estimated, partial, or unsupported.
 
-**How is this different from Helicone / Langfuse / OpenLLMetry?**
-Those are hosted proxies or telemetry pipelines. Your prompts flow
-through their infrastructure. Caliper does not sit on the request path;
-it reads the logs your tools already wrote to your disk. No proxy, no
-SaaS, no shared infrastructure. If you need a multi-tenant hosted
-dashboard, those products are the right choice. If you want a number
-per PR without uploading anything, this is.
+**Does Caliper upload prompts?**
 
-**Is the cache hit rate real?**
-Yes. Cached input tokens are billed at a different rate than fresh
-input tokens — the parser tracks them separately when the vendor's log
-exposes them (Claude Code: `cache_read_input_tokens` /
-`cache_creation_input_tokens`; Codex: `cached_input_tokens`). Run
-`caliper evidence` to see how each dimension is graded.
+No. Default usage analysis is local-only and redacts prompt-like fields from
+normal output.
 
-**Can I self-host the export?**
-Yes. The Prometheus and Grafana exporters are local processes. The
-HTML dashboard / receipt are files you can email yourself.
+**Can Caliper refresh pricing?**
+
+Yes, but only when you ask for it with an explicit network-enabled command.
+The package also ships an embedded rate card with a checked date.
+
+**How is this different from Helicone, Langfuse, or OpenLLMetry?**
+
+Those are hosted proxies or telemetry pipelines. They are useful if you want
+request-path observability. Caliper does not sit on the request path. It reads
+local logs after the fact.
 
 **Is there a hosted version?**
-No. There is no hosted version on the roadmap. If your team needs a
-hosted dashboard, Caliper is the wrong tool. The wedge stays local.
+
+No. There is no hosted version on the roadmap.
 
 ## Development
 
@@ -466,18 +500,16 @@ uv run python -m build
 uvx twine check dist/*
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution surface
-(rate-card updates, new vendor parsers, schema changes).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution surface:
+rate-card updates, new vendor parsers, schema changes, and release hygiene.
 
-## Who built this
+## Who Built This
 
-I am [Rajdeep Mondal](https://github.com/rajdeepmondaldotcom). I built
-Caliper because I had a four-figure AI coding bill, a clear hunch about
-which projects caused it, and no offline way to prove it. The first
-version paid for itself in one PR review.
+I am [Rajdeep Mondal](https://github.com/rajdeepmondaldotcom). I built Caliper
+because I had a four-figure AI coding bill, a strong hunch about which work
+caused it, and no offline way to prove it.
 
-If Caliper saves you a meeting, a fight, or a renewal, that is the
-intended outcome.
+The first version paid for itself in one PR review.
 
 ## License
 
