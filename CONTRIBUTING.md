@@ -25,7 +25,9 @@ These are not preferences. They are the reasons people trust the project.
 
 1. **Offline by default.** No network call without an explicit
    `--allow-network` flag. The only file in `src/caliper` allowed to import
-   `urllib`, `httpx`, or `requests` is the pricing-network chokepoint.
+   `urllib`, `httpx`, or `requests` is the Caliper-owned HTTP chokepoint.
+   PR commit resolution may delegate to GitHub CLI only when the user passes
+   `--allow-network`.
 2. **One event shape.** Every new vendor parser projects into the same
    frozen `UsageEvent`. The aggregators, budgets, forecasts, insights,
    exporters, and Prometheus exporter must not change when a new vendor
@@ -38,8 +40,8 @@ These are not preferences. They are the reasons people trust the project.
 5. **Stable exit codes.** `caliper budgets check` and `caliper doctor`
    exit `0` ok, `1` warn, `2` fail. CI pipelines depend on this.
 6. **Small runtime dependency list.** Today: `rich`, `typer`,
-   `platformdirs`. The optional `[prom]` extra brings `prometheus-client`.
-   Adding anything else requires a real reason.
+   `platformdirs`, `textual`, and `watchdog`. The optional `[prom]` extra
+   brings `prometheus-client`. Adding anything else requires a real reason.
 7. **No telemetry.** Ever.
 
 ## Before you write code
@@ -67,7 +69,7 @@ uv run python -m build
 bash scripts/release-smoke.sh
 ```
 
-`uv` is required. The coverage floor is 90%. Do not lower it to pass a PR.
+`uv` is required. The coverage floor is 88%. Do not lower it to pass a PR.
 
 ## Code style
 

@@ -1,23 +1,17 @@
 #!/usr/bin/env bash
-# Local PyPI publish, keyed off the repo-local .env.
+# Local release preparation. This script never uploads to PyPI.
 #
 # Usage:
-#   ./scripts/publish.sh              # publishes the version in pyproject.toml
-#   ./scripts/publish.sh 0.0.15       # bumps pyproject + CHANGELOG header, then publishes
+#   ./scripts/publish.sh              # prepares the version in pyproject.toml
+#   ./scripts/publish.sh 0.0.30       # bumps pyproject, then prepares artifacts
 #
-# Reads TWINE_USERNAME and TWINE_PASSWORD from .env (git-ignored).
-# Never prints the token. Never commits .env.
+# PyPI publish happens through the GitHub Actions release workflow using
+# Trusted Publisher OIDC. Push an annotated vX.Y.Z tag after this script
+# passes.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-
-if [[ ! -f .env ]]; then
-  echo "error: .env not found at repo root."
-  echo "       create it with TWINE_USERNAME=__token__ and TWINE_PASSWORD=pypi-...,"
-  echo "       then re-run."
-  exit 2
-fi
 
 # Optional version-bump arg.
 if [[ $# -ge 1 ]]; then
@@ -37,18 +31,7 @@ if [[ $# -ge 1 ]]; then
 fi
 
 VER=$(grep '^version = ' pyproject.toml | head -n1 | awk -F'"' '{print $2}')
-echo "==> publishing caliper-ai $VER"
-
-# Load .env into the environment. Twine reads TWINE_USERNAME / TWINE_PASSWORD.
-set -a
-# shellcheck disable=SC1091
-source .env
-set +a
-
-if [[ -z "${TWINE_USERNAME:-}" || -z "${TWINE_PASSWORD:-}" ]]; then
-  echo "error: TWINE_USERNAME / TWINE_PASSWORD not set after sourcing .env."
-  exit 2
-fi
+echo "==> preparing caliper-ai $VER"
 
 echo "==> running tests"
 uv run pytest -q
@@ -66,25 +49,15 @@ uv run python -m build
 echo "==> twine check"
 uvx twine check dist/*
 
-echo "==> twine upload"
-uvx twine upload dist/*
-
-echo "==> polling PyPI for $VER"
-for attempt in 1 2 3 4 5 6 7 8; do
-  if uvx --refresh --from "caliper-ai==$VER" caliper --version >/dev/null 2>&1; then
-    echo "ok: caliper-ai $VER installable from PyPI"
-    break
-  fi
-  echo "    attempt $attempt: index lag, sleeping 15s..."
-  sleep 15
-done
+echo "==> release smoke"
+bash scripts/release-smoke.sh
 
 cat <<EOF
 
   ==============================
-  caliper-ai $VER published.
+  caliper-ai $VER prepared locally.
 
-  Next steps (run yourself, this script does not push):
+  Next steps (run yourself; this script does not commit, tag, push, or upload):
 
     git add pyproject.toml CHANGELOG.md
     git commit -m "chore(release): $VER"
@@ -92,5 +65,6 @@ cat <<EOF
     git tag -a "v$VER" -m "v$VER"
     git push origin "v$VER"
 
-  CI will detect the tag, re-build, and stage a GitHub release.
+  CI will detect the tag, re-build, publish to PyPI via Trusted Publisher,
+  publish the GitHub release, and run the post-release smoke.
 EOF

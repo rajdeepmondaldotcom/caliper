@@ -14,6 +14,7 @@ from caliper.models import (
     LoadResult,
     RuntimeOptions,
     ThreadMeta,
+    TurnFacts,
     Usage,
     UsageEvent,
     VendorParseStats,
@@ -24,7 +25,7 @@ from caliper.progress import NULL_PROGRESS, ParseProgress
 from caliper.timeutil import parse_event_timestamp
 
 SUPPORTED_SCHEMAS = ("1",)
-PARSER_VERSION = "claude-code-v3"
+PARSER_VERSION = "claude-code-v4"
 
 
 @dataclass(frozen=True)
@@ -178,12 +179,13 @@ def _events_in_window(
 
 def _parse_session(path: Path, options: RuntimeOptions) -> list[UsageEvent]:
     events: list[UsageEvent] = []
+    turn_counter: dict[str, int] = {}
     with path.open(encoding="utf-8", errors="replace") as handle:
         for line_number, line in enumerate(handle, start=1):
             raw = _json_event_from_line(line)
             if raw is None:
                 continue
-            event = _usage_event(raw, path, line_number, options)
+            event = _usage_event(raw, path, line_number, options, turn_counter)
             if event is not None:
                 events.append(event)
     return events
@@ -198,7 +200,11 @@ def _json_event_from_line(line: str) -> dict[str, Any] | None:
 
 
 def _usage_event(
-    raw: dict[str, Any], path: Path, line_number: int, options: RuntimeOptions
+    raw: dict[str, Any],
+    path: Path,
+    line_number: int,
+    options: RuntimeOptions,
+    turn_counter: dict[str, int],
 ) -> UsageEvent | None:
     message = raw.get("message")
     if not isinstance(message, dict):
@@ -229,10 +235,14 @@ def _usage_event(
         thread_source=VENDOR_CLAUDE_CODE,
     )
     vendor_cost = _vendor_cost(raw, options.cost_mode)
+    session_id = str(raw.get("sessionId") or path.stem)
+    turn_index = turn_counter.get(session_id, 0)
+    turn_counter[session_id] = turn_index + 1
+    turn_facts = _turn_facts_from_message(message, raw, turn_index)
     return UsageEvent(
         timestamp=timestamp,
         path=path,
-        session_id=str(raw.get("sessionId") or path.stem),
+        session_id=session_id,
         usage=usage,
         model=model,
         service_tier=service_tier,
@@ -248,6 +258,37 @@ def _usage_event(
         request_id=request_id,
         dedupe_key=dedupe_key,
         raw_model=raw_model,
+        turn_facts=turn_facts,
+    )
+
+
+def _turn_facts_from_message(
+    message: dict[str, Any],
+    raw: dict[str, Any],
+    turn_index: int,
+) -> TurnFacts:
+    content = message.get("content")
+    tool_names: list[str] = []
+    tool_use_count = 0
+    has_thinking = False
+    if isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = str(block.get("type") or "")
+            if block_type == "tool_use":
+                tool_use_count += 1
+                name = block.get("name")
+                if isinstance(name, str) and name:
+                    tool_names.append(name)
+            elif block_type == "thinking":
+                has_thinking = True
+    return TurnFacts(
+        turn_index=turn_index,
+        parent_uuid=str(raw.get("parentUuid") or ""),
+        tool_use_count=tool_use_count,
+        tool_names=tuple(sorted(set(tool_names))),
+        has_thinking_block=has_thinking,
     )
 
 

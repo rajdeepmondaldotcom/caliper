@@ -686,6 +686,31 @@ def test_pr_resolution_guard_rejects_missing_number_and_range() -> None:
         _resolve_pr_commits(None, None, git_no_network=True)
 
 
+def test_pr_resolution_stays_local_by_default(monkeypatch) -> None:
+    calls: list[int] = []
+
+    monkeypatch.setattr(cli, "local_pull_ref", lambda number: None)
+    monkeypatch.setattr(cli, "gh_pr_commit_shas", lambda number: calls.append(number) or ["abc"])
+
+    with pytest.raises(ValueError, match="--allow-network"):
+        cli._resolve_pr_commits(42, None)
+
+    assert calls == []
+
+
+def test_pr_resolution_uses_gh_when_network_allowed(monkeypatch) -> None:
+    calls: list[int] = []
+
+    monkeypatch.setattr(cli, "local_pull_ref", lambda number: None)
+    monkeypatch.setattr(cli, "gh_pr_commit_shas", lambda number: calls.append(number) or ["abc"])
+    monkeypatch.setattr(cli, "commit_for_sha", lambda sha: SimpleNamespace(sha=sha))
+
+    commits = cli._resolve_pr_commits(42, None, allow_network=True)
+
+    assert calls == [42]
+    assert [commit.sha for commit in commits] == ["abc"]
+
+
 def test_pr_command_supports_range_and_renders_zero_when_no_attribution(tmp_path) -> None:
     """`caliper pr --range A...B` against a fresh repo returns an empty per-vendor scope."""
     import os  # noqa: PLC0415

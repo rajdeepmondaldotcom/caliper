@@ -17,8 +17,11 @@ on:
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event.inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -33,6 +36,8 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_TAG }}
       - uses: astral-sh/setup-uv@v8.1.0
       - name: Set up Python
         run: uv python install 3.13
@@ -45,7 +50,8 @@ jobs:
               print(tomllib.load(fh)["project"]["version"])
           PY
           )"
-          tag_version="${GITHUB_REF_NAME#v}"
+          tag_version="${RELEASE_TAG#v}"
+          echo "RELEASE_VERSION=$tag_version" >> "$GITHUB_ENV"
           test "$project_version" = "$tag_version"
       - name: Install
         run: uv sync --all-extras --dev --python 3.13
@@ -69,12 +75,16 @@ jobs:
           wheel="$(ls dist/*.whl)"
           uvx --from "$wheel" caliper --version
           uvx --from "$wheel" caliper --help
+          tmp="$(mktemp -d)"
+          uvx --from "$wheel" caliper dashboard --demo --output "$tmp/dashboard.html"
+          test -s "$tmp/dashboard.html"
+          ! grep -E '://|<script|<link' "$tmp/dashboard.html"
       - name: Generate SBOM (CycloneDX)
         run: |
           set -euo pipefail
           uvx --from cyclonedx-bom cyclonedx-py environment "$(uv run python -c 'import sys; print(sys.prefix)')" \
             --output-format json \
-            --output-file dist/caliper-ai-${GITHUB_REF_NAME#v}.cdx.json
+            --output-file dist/caliper-ai-${RELEASE_TAG#v}.cdx.json
       - name: Upload distributions
         uses: actions/upload-artifact@v7
         with:
@@ -110,7 +120,7 @@ jobs:
           import re
           from pathlib import Path
 
-          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          version = os.environ["RELEASE_TAG"].removeprefix("v")
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
           pattern = rf"^## {re.escape(version)}(?:\s+-[^\n]*)?\n(?P<body>.*?)(?=^## |\Z)"
           match = re.search(pattern, changelog, flags=re.MULTILINE | re.DOTALL)
@@ -123,7 +133,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag || github.ref_name }}"
+          tag="${RELEASE_TAG}"
           # Transient HTTP 403 has hit this step under high API load.
           # Retry three times with a short backoff before giving up.
           for attempt in 1 2 3; do
@@ -154,6 +164,7 @@ jobs:
       url: https://pypi.org/project/caliper-ai/
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Download distributions
         uses: actions/download-artifact@v8
@@ -169,7 +180,6 @@ jobs:
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@v1.14.0
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
           print-hash: true
           skip-existing: true
           verbose: true
@@ -186,7 +196,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag || github.ref_name }}"
+          tag="${RELEASE_TAG}"
           # Same transient HTTP 403 mitigation as the staging step.
           for attempt in 1 2 3; do
             if gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest; then
@@ -205,12 +215,18 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
       - uses: astral-sh/setup-uv@v8.1.0
       - name: Resolve published version
         id: ver
         run: |
-          tag="${{ inputs.tag || github.ref_name }}"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          tag="${RELEASE_TAG}"
+          version="${tag#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_VERSION=${version}" >> "$GITHUB_ENV"
       - name: Install from PyPI and smoke-test
         run: |
           set -euo pipefail
@@ -225,3 +241,7 @@ jobs:
           done
           echo "Published release did not install cleanly within retry budget."
           exit 1
+      - name: Run published dashboard smoke
+        run: |
+          set -euo pipefail
+          CALIPER_SMOKE_VERSION="${RELEASE_VERSION}" bash scripts/live-release-smoke.sh

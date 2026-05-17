@@ -47,6 +47,7 @@ json_ok models uv run caliper models --lookback-days 1 --output-format json --ro
 json_ok evidence uv run caliper evidence --lookback-days 1 --output-format json
 json_ok limits uv run caliper limits --lookback-days 1 --output-format json --row-limit 5
 json_ok insights uv run caliper insights --lookback-days 1 --output-format json --row-limit 5
+json_ok shape uv run caliper shape --lookback-days 1 --output-format json --row-limit 5
 json_ok tail uv run caliper tail --lookback-days 1 --output-format json --event-limit 5
 json_ok statusline uv run caliper statusline --output-format json
 json_ok forecast uv run caliper forecast --forecast-history-days 7 --output-format json
@@ -63,6 +64,14 @@ json_ok rates_catalog uv run caliper rates catalog --output-format json
 json_ok grafana uv run caliper export grafana
 text_ok receipt_md uv run caliper export receipt --receipt-month 2026-05 --receipt-format markdown --receipt-row-limit 2
 text_ok receipt_html uv run caliper export receipt --receipt-month 2026-05 --receipt-format html --receipt-row-limit 2
+text_ok dashboard uv run caliper dashboard --lookback-days 1 --no-deltas --output "$OUT/caliper.html"
+test -s "$OUT/caliper.html"
+if grep -E '://|<script|<link' "$OUT/caliper.html" >/dev/null; then
+  echo "dashboard privacy grep failed"
+  grep -En '://|<script|<link' "$OUT/caliper.html" | head
+  exit 1
+fi
+printf 'dashboard ok html bytes=%s\n' "$(wc -c < "$OUT/caliper.html" | tr -d ' ')"
 json_ok budgets uv run caliper budgets check --config "$ROOT/.caliper.toml" --output-format json
 text_ok live uv run caliper live --refresh-max-ticks 1 --refresh-interval 0.5
 

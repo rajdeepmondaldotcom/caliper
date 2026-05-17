@@ -31,6 +31,11 @@ from caliper.aggregation import (
     aggregate_vendors,
     aggregate_weekly,
 )
+from caliper.analysis import (
+    SessionShapeReport,
+    category_label,
+    compute_session_shape,
+)
 from caliper.arbitrage import explain as explain_arbitrage
 from caliper.arbitrage import recommend as recommend_arbitrage
 from caliper.arbitrage import suggest as suggest_arbitrage
@@ -48,6 +53,8 @@ from caliper.budgets import (
     evaluate as evaluate_budgets,
 )
 from caliper.config import build_options, load_config
+from caliper.dashboards import build_handoff_dashboard, render_dashboard
+from caliper.dashboards.sample_data import sample_dashboard
 from caliper.evidence import evidence_metadata, evidence_rows
 from caliper.exporters import (
     ReceiptInputs,
@@ -947,6 +954,16 @@ def _run_overview(values: dict) -> None:
         total=total,
     )
 
+    # First-run UX hint: if no events were found and we're rendering to a
+    # terminal (not a file or a machine-readable format), surface a one-line
+    # pointer to `caliper doctor`. This is the most common stumble for new
+    # users whose AI tools wrote logs to a non-default location.
+    if output_format == "table" and values["output"] is None and not longest_result.events:
+        typer.echo(
+            "\nNo events found. Run `caliper doctor` to see which AI tools "
+            "Caliper detected and what's missing."
+        )
+
 
 def _overview_windows(
     options: RuntimeOptions,
@@ -1667,6 +1684,250 @@ def _render_insights_table(items) -> str:
         )
     local_console.print(table)
     return buffer.getvalue()
+
+
+@app.command()
+def shape(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 10,
+    vendors: VendorOpt = None,
+) -> None:
+    """Tool-use and session shape: what kind of work the AI did, not just the cost."""
+    if output_format not in {"table", "json"}:
+        raise _exit_error("--output-format must be one of: table, json")
+    options = _options(locals())
+    result = _safe_load_usage(options)
+    report = compute_session_shape(result)
+    if output_format == "json":
+        text = json_dumps_enveloped(_shape_payload(report)) + "\n"
+    else:
+        text = _render_shape_table(report)
+    if output:
+        output.expanduser().write_text(text)
+    else:
+        typer.echo(text, nl=False)
+
+
+def _shape_payload(report: SessionShapeReport) -> dict[str, Any]:
+    return {
+        "totals": {
+            "sessions": report.total_sessions,
+            "turns": report.total_turns,
+            "tool_uses": report.total_tool_uses,
+            "tools_per_turn": round(report.tools_per_turn, 3),
+            "coverage_events": report.coverage_events,
+            "coverage_total_events": report.coverage_total_events,
+        },
+        "top_tools": [{"name": name, "calls": count} for name, count in report.tool_use.per_tool],
+        "categories": [
+            {"category": cat, "label": category_label(cat), "sessions": count}
+            for cat, count in report.category_counts
+        ],
+        "projects": [
+            {
+                "name": item.project_name,
+                "sessions": item.sessions,
+                "turns": item.total_turns,
+                "tool_uses": item.total_tool_uses,
+                "tools_per_turn": round(item.tools_per_turn, 3),
+            }
+            for item in report.projects
+        ],
+        "daily": [
+            {"day": item.day, "turns": item.turns, "tool_uses": item.tool_uses}
+            for item in report.daily
+        ],
+    }
+
+
+def _render_shape_table(report: SessionShapeReport) -> str:
+    buffer = io.StringIO()
+    local_console = Console(file=buffer, width=120, _environ={})
+    local_console.print("[bold]Caliper - Session Shape[/bold]")
+    if report.total_sessions == 0:
+        if report.coverage_total_events:
+            local_console.print(
+                f"No tool-use data in this window. "
+                f"({report.coverage_total_events} events found, none carry session shape — "
+                f"only Claude Code is enriched today.)"
+            )
+        else:
+            local_console.print("No events in this window.")
+        return buffer.getvalue()
+    local_console.print(
+        f"Sessions: {report.total_sessions}    "
+        f"Total turns: {report.total_turns}    "
+        f"Tools/turn avg: {report.tools_per_turn:.2f}"
+    )
+    if report.coverage_total_events and report.coverage_events != report.coverage_total_events:
+        local_console.print(
+            f"[dim]Coverage: {report.coverage_events} of {report.coverage_total_events} "
+            f"events carry session shape (Claude Code only today).[/dim]"
+        )
+    if report.tool_use.per_tool:
+        tools_table = Table(title="Top tools", show_lines=False)
+        tools_table.add_column("Tool")
+        tools_table.add_column("Calls", justify="right")
+        for name, count in report.tool_use.top_n(10):
+            tools_table.add_row(name, format_int(count))
+        local_console.print(tools_table)
+    if report.category_counts:
+        cat_table = Table(title="Session shape distribution", show_lines=False)
+        cat_table.add_column("Shape")
+        cat_table.add_column("Sessions", justify="right")
+        for category, count in report.category_counts:
+            cat_table.add_row(category_label(category), format_int(count))
+        local_console.print(cat_table)
+    if report.projects:
+        project_table = Table(title="Projects", show_lines=False)
+        project_table.add_column("Project")
+        project_table.add_column("Sessions", justify="right")
+        project_table.add_column("Turns", justify="right")
+        project_table.add_column("Tool calls", justify="right")
+        project_table.add_column("Tools/turn", justify="right")
+        for item in report.projects[:10]:
+            project_table.add_row(
+                item.project_name,
+                format_int(item.sessions),
+                format_int(item.total_turns),
+                format_int(item.total_tool_uses),
+                f"{item.tools_per_turn:.2f}",
+            )
+        local_console.print(project_table)
+    return buffer.getvalue()
+
+
+@app.command()
+def dashboard(
+    output: Annotated[
+        Path | None,
+        typer.Option("--out", "--output", "-o", help="HTML output file. Default: stdout."),
+    ] = None,
+    open_in_browser: Annotated[
+        bool,
+        typer.Option("--open", help="Open the generated dashboard in the default browser."),
+    ] = False,
+    theme: Annotated[
+        str,
+        typer.Option(
+            "--theme",
+            help="Visual theme: dark, light, or print.",
+        ),
+    ] = "dark",
+    density: Annotated[
+        str,
+        typer.Option(
+            "--density",
+            help="Row density: comfortable or compact.",
+        ),
+    ] = "comfortable",
+    no_deltas: Annotated[
+        bool,
+        typer.Option(
+            "--no-deltas",
+            help="Skip the period-over-period deltas (one less parse pass).",
+        ),
+    ] = False,
+    demo: Annotated[
+        bool,
+        typer.Option(
+            "--demo",
+            help="Render built-in synthetic data without reading local logs.",
+        ),
+    ] = False,
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 10,
+    vendors: VendorOpt = None,
+) -> None:
+    """Render a self-contained static HTML dashboard. Offline. No external resources."""
+    if theme not in {"dark", "light", "print"}:
+        raise _exit_error("--theme must be one of: dark, light, print")
+    if density not in {"comfortable", "compact"}:
+        raise _exit_error("--density must be one of: comfortable, compact")
+    if demo:
+        payload = sample_dashboard(show_paths=show_paths)
+    else:
+        values = dict(locals())
+        # The dashboard command does not take an output_format; carve out before _options.
+        for k in ("output", "open_in_browser", "theme", "density", "no_deltas", "demo"):
+            values.pop(k, None)
+        values["output_format"] = "table"
+        options = _options(values)
+        result = _safe_load_usage(options)
+        payload = build_handoff_dashboard(result, options, with_deltas=not no_deltas)
+    text = render_dashboard(payload, theme=theme, density=density)
+    if output is None and not open_in_browser:
+        typer.echo(text, nl=False)
+        return
+    if output is None:
+        # --open without --out: write to a stable tempfile so the browser
+        # has something on disk to open.
+        import tempfile
+
+        tmpdir = Path(tempfile.gettempdir())
+        target = tmpdir / "caliper-dashboard.html"
+    else:
+        target = output.expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    already_existed = target.exists()
+    target.write_text(text, encoding="utf-8")
+    suffix = " (overwritten)" if already_existed else ""
+    typer.echo(f"Wrote {target}{suffix}")
+    if open_in_browser:
+        import webbrowser
+
+        opened = False
+        try:
+            opened = webbrowser.open(target.resolve().as_uri())
+        except webbrowser.Error:
+            opened = False
+        if not opened:
+            typer.echo(
+                f"Could not open a browser automatically. "
+                f"The file is at {target} — open it manually."
+            )
 
 
 @app.command()
@@ -2893,7 +3154,18 @@ def pr(
     ] = None,
     git_no_network: Annotated[
         bool,
-        typer.Option("--local-git-only", "--git-no-network", help="Skip gh-based PR resolution."),
+        typer.Option(
+            "--local-git-only",
+            "--git-no-network",
+            help="Compatibility alias; PR resolution is local-only by default.",
+        ),
+    ] = False,
+    allow_network: Annotated[
+        bool,
+        typer.Option(
+            "--allow-network",
+            help="Allow GitHub CLI network resolution for PR numbers.",
+        ),
     ] = False,
     output_format: FormatOpt = "table",
     session_root: SessionRootOpt = None,
@@ -2908,12 +3180,18 @@ def pr(
 ) -> None:
     """Print the cost receipt for a pull request.
 
-    Resolves PR commits via gh by default. Pass --git-range to skip gh."""
+    Uses local fetched pull refs by default. Pass --allow-network to resolve
+    PR commits with GitHub CLI, or pass --git-range for an explicit range."""
     _validate_format(output_format)
     if number is None and range_spec is None:
         raise _exit_error("Provide a PR number or --range A...B.")
     try:
-        commits = _resolve_pr_commits(number, range_spec, git_no_network)
+        commits = _resolve_pr_commits(
+            number,
+            range_spec,
+            git_no_network=git_no_network,
+            allow_network=allow_network,
+        )
         options = build_options(
             days=365.0,
             session_root=session_root,
@@ -2936,20 +3214,26 @@ def pr(
     )
 
 
-def _resolve_pr_commits(number: int | None, range_spec: str | None, git_no_network: bool):
+def _resolve_pr_commits(
+    number: int | None,
+    range_spec: str | None,
+    git_no_network: bool = False,
+    allow_network: bool = False,
+):
     if range_spec:
         return commits_for_revspec(range_spec)
     if number is None:
         raise ValueError("Provide a PR number or --range A...B.")
-    shas = [] if git_no_network else gh_pr_commit_shas(number)
-    if not shas:
-        local = local_pull_ref(number)
-        if local:
-            shas = [local]
+    shas: list[str] = []
+    local = local_pull_ref(number)
+    if local:
+        shas = [local]
+    if not shas and allow_network and not git_no_network:
+        shas = gh_pr_commit_shas(number)
     if not shas:
         raise ValueError(
-            f"Could not resolve PR #{number}. Run `gh auth login`, fetch refs/pull/{number}/head, "
-            "or pass --range A...B."
+            f"Could not resolve PR #{number}. Fetch refs/pull/{number}/head, pass "
+            "--range A...B, or pass --allow-network to resolve with GitHub CLI."
         )
     return [commit_for_sha(sha) for sha in shas]
 

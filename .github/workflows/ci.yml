@@ -93,7 +93,8 @@ jobs:
       - name: No fat runtime dependencies
         run: |
           set -euo pipefail
-          # Permitted runtime deps: rich, typer, platformdirs (post-0.6). Block fat libs.
+          # Permitted runtime deps: rich, typer, platformdirs, textual, watchdog.
+          # Block fat libs.
           if grep -REn '^[[:space:]]*"(pandas|numpy|pydantic|attrs|requests|httpx|aiohttp|pint|scipy)([[:space:]<>=!~]|\")' pyproject.toml \
               | grep -v '^[[:space:]]*#'; then
             echo "::error::Disallowed runtime dependency detected in pyproject.toml"
@@ -136,8 +137,6 @@ jobs:
               ".github",
               "CHANGELOG.md",
               "README.md",
-              "docs",
-              "docs-site/src",
               "pyproject.toml",
               "schemas",
               "scripts",

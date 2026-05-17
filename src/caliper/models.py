@@ -262,6 +262,29 @@ class TierOverride:
 
 
 @dataclass(frozen=True)
+class TurnFacts:
+    turn_index: int = 0
+    parent_uuid: str = ""
+    tool_use_count: int = 0
+    tool_names: tuple[str, ...] = ()
+    has_thinking_block: bool = False
+
+    @classmethod
+    def from_dict(cls, raw: object) -> TurnFacts | None:
+        if not isinstance(raw, dict):
+            return None
+        names = raw.get("tool_names")
+        tool_names = tuple(str(item) for item in names) if isinstance(names, list | tuple) else ()
+        return cls(
+            turn_index=_safe_int(raw.get("turn_index")),
+            parent_uuid=str(raw.get("parent_uuid") or ""),
+            tool_use_count=_safe_int(raw.get("tool_use_count")),
+            tool_names=tool_names,
+            has_thinking_block=bool(raw.get("has_thinking_block")),
+        )
+
+
+@dataclass(frozen=True)
 class UsageEvent:
     timestamp: dt.datetime
     path: Path
@@ -293,6 +316,7 @@ class UsageEvent:
     request_id: str = ""
     dedupe_key: str = ""
     raw_model: str = ""
+    turn_facts: TurnFacts | None = None
 
 
 @dataclass(frozen=True)

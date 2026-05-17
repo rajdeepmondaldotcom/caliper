@@ -1,3 +1,22 @@
+"""Rate-card audit helpers.
+
+This module is split into two surfaces:
+
+- **Offline (read-only)** helpers — `rate_card_payload`,
+  `rate_card_records`, `embedded_rate_snapshot`, `billing_calculation_checks`
+  — used by `caliper rates show` and `caliper rates catalog` without any
+  network access.
+- **Online (opt-in)** helpers — `fetch_rate_sources()` — performs the
+  audit-research workflow against published rate cards. All network I/O
+  routes through `caliper.network.fetch_bytes`, which is the single
+  chokepoint guarded by `--allow-network` at the CLI boundary. The
+  function exists for the test suite and future audit-CLI use; the
+  default code path never invokes it.
+
+Both surfaces share the same internal helpers so the embedded rate card
+and the audit output share one source of truth.
+"""
+
 from __future__ import annotations
 
 import datetime as dt

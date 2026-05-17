@@ -153,10 +153,20 @@ json_ok daily "$VENV/bin/caliper" daily "${COMMON[@]}" --days 1 --format json
 json_ok models "$VENV/bin/caliper" models "${COMMON[@]}" --days 1 --format json
 json_ok evidence "$VENV/bin/caliper" evidence "${COMMON[@]}" --days 1 --format json
 json_ok insights "$VENV/bin/caliper" insights "${COMMON[@]}" --days 1 --format json
+json_ok shape "$VENV/bin/caliper" shape "${COMMON[@]}" --days 1 --format json
 json_ok advise "$VENV/bin/caliper" advise "${COMMON[@]}" --days 1 --format json
 json_ok statusline "$VENV/bin/caliper" statusline "${COMMON[@]}" --days 1 --format json
 json_ok rates_catalog "$VENV/bin/caliper" rates catalog --format json
 text_ok statusline_compact "$VENV/bin/caliper" statusline "${COMMON[@]}" --days 1 --compact
+text_ok shape_help "$VENV/bin/caliper" shape --help
+text_ok dashboard_help "$VENV/bin/caliper" dashboard --help
+text_ok dashboard "$VENV/bin/caliper" dashboard "${COMMON[@]}" --days 1 --no-deltas --output "$OUT/dashboard.html"
+test -s "$OUT/dashboard.html"
+if grep -E '://|<script|<link' "$OUT/dashboard.html" >/dev/null; then
+  echo "dashboard privacy grep failed"
+  grep -En '://|<script|<link' "$OUT/dashboard.html" | head
+  exit 1
+fi
 text_allow_health_exit doctor "$VENV/bin/caliper" doctor "${COMMON[@]}"
 text_ok tui_help "$VENV/bin/caliper" tui --help
 

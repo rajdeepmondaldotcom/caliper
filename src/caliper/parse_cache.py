@@ -12,6 +12,7 @@ from caliper.models import (
     ParsedSessionRecord,
     RateLimitSample,
     ThreadMeta,
+    TurnFacts,
     Usage,
     UsageEvent,
 )
@@ -582,6 +583,8 @@ def _event_from_dict(raw: dict) -> UsageEvent:
     item["thread"] = _thread_from_dict(item["thread"])
     if item.get("vendor_reported_cost_usd") is not None:
         item["vendor_reported_cost_usd"] = Decimal(str(item["vendor_reported_cost_usd"]))
+    if "turn_facts" in item:
+        item["turn_facts"] = TurnFacts.from_dict(item["turn_facts"])
     return UsageEvent(**{key: value for key, value in item.items() if key in USAGE_EVENT_FIELDS})
 
 

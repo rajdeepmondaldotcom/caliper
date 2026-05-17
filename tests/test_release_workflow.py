@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 
 WORKFLOW = Path(__file__).parent.parent / ".github" / "workflows" / "release.yml"
+PUBLISH_SCRIPT = Path(__file__).parent.parent / "scripts" / "publish.sh"
 
 
 def _workflow_text() -> str:
@@ -44,11 +45,18 @@ def test_uvx_refresh_lines_use_from_when_pinning_a_version():
 def test_validate_tag_step_exists():
     text = _workflow_text()
     assert "Validate tag matches pyproject version" in text
+    assert "RELEASE_TAG" in text
+    assert "RELEASE_VERSION" in text
 
 
-def test_pypi_publish_uses_token_secret():
+def test_pypi_publish_uses_trusted_publisher_oidc():
     text = _workflow_text()
-    assert "${{ secrets.PYPI_API_TOKEN }}" in text
+    assert "${{ secrets.PYPI_API_TOKEN }}" not in text
+    assert "pypa/gh-action-pypi-publish@v1.14.0" in text
+    assert re.search(
+        r"pypi:\n(?:    .*\n)*?    permissions:\n(?:      .*\n)*?      id-token: write",
+        text,
+    ), "PyPI publish job must grant id-token: write for Trusted Publisher OIDC"
 
 
 def test_post_publish_smoke_uses_caliper_executable_not_package_name():
@@ -59,3 +67,26 @@ def test_post_publish_smoke_uses_caliper_executable_not_package_name():
         "Expected `uvx --refresh --from caliper-ai==<ver> caliper --version` "
         "in the post-publish smoke step."
     )
+
+
+def test_manual_dispatch_uses_input_tag_for_checkout_and_release_steps():
+    text = _workflow_text()
+
+    assert "ref: ${{ env.RELEASE_TAG }}" in text
+    assert "tag=\"${RELEASE_TAG}\"" in text
+    assert "CALIPER_SMOKE_VERSION=\"${RELEASE_VERSION}\"" in text
+
+
+def test_release_smokes_dashboard_from_wheel_and_pypi():
+    text = _workflow_text()
+
+    assert "caliper dashboard --demo --output" in text
+    assert "scripts/live-release-smoke.sh" in text
+    assert "CALIPER_SMOKE_VERSION" in text
+
+
+def test_local_publish_script_does_not_use_twine_credentials():
+    text = PUBLISH_SCRIPT.read_text()
+
+    assert "twine upload" not in text
+    assert "TWINE_PASSWORD" not in text

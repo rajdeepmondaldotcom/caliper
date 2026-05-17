@@ -1,6 +1,0 @@
-.npm-cache/**
-node_modules/**
-src/**
-tsconfig.json
-*.vsix
-**/*.map

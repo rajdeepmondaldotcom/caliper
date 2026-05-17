@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "caliper-ai"
-version = "0.0.28"
+version = "0.0.30"
 description = "The cost layer for AI-assisted development. Reads local Codex, Claude Code, Cursor, and Aider logs and prints what each PR cost. Offline. No login."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -104,6 +104,12 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["B008"]
+
+# The dashboard renderer is a designer handoff (`HANDOFF.md`) — kept
+# verbatim apart from the CSS inlining recipe. SVG path strings and
+# CSS-in-Python lines exceed our 100-char limit by design.
+[tool.ruff.lint.per-file-ignores]
+"src/caliper/dashboards/html.py" = ["E501", "SIM108"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

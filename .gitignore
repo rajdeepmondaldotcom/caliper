@@ -4,6 +4,10 @@
 .mypy_cache/
 .cursor/
 .venv/
+docs/
+docs-site/
+design-brief/
+editor/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -11,15 +15,13 @@ build/
 dist/
 htmlcov/
 .coverage
-docs-site/.npm-cache/
-docs-site/.astro/
-docs-site/dist/
-docs-site/node_modules/
-editor/vscode/node_modules/
-editor/vscode/out/
-editor/vscode/*.vsix
 .caliper.toml
 docs/agents/
 .env
 .env.*
 !.env.example
+*.local.md
+
+# Designer handoff artifacts — local references, not part of the launch repo.
+caliper-dashboard-design-brief.zip
+out/

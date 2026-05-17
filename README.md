@@ -31,9 +31,9 @@ into one frozen event shape, prices them with sourced rate cards, and
 attributes the cost to a PR, a commit, or a project when the local evidence
 contains enough git context.
 
-There is no daemon, no SDK, no account, and no telemetry. The default code
-path makes zero network calls. The only network call in the whole codebase is
-an opt-in pricing refresh behind a flag.
+There is no daemon, no SDK, no account, and no telemetry. The default usage
+path makes zero network calls. Optional pricing refresh and GitHub CLI PR
+resolution sit behind explicit flags.
 
 Caliper is MIT-licensed and built by one developer who wanted to know which
 PRs spent the four-figure bill.
@@ -53,7 +53,7 @@ review: **what did this PR cost.**
 
 ## The 30-second proof
 
-Three commands against a sanitized local fixture.
+Four commands against a sanitized local fixture.
 
 ```bash
 caliper overview
@@ -90,6 +90,14 @@ demo-api          4 models     $81
 frontend-lab      4 models     $63
 caliper-demo      3 models     $43
 ```
+
+```bash
+caliper dashboard --demo --open
+```
+
+The dashboard command writes one self-contained HTML file and opens it in a
+browser. `--demo` uses built-in synthetic data, so reviewers can try the
+dashboard without reading local logs.
 
 Names and numbers above are sanitized examples. No account. No upload.
 The first run took eleven seconds on a cold cache. Later runs are under a
@@ -130,17 +138,19 @@ Caliper - PR #42
   cursor        composer                  23   72,118 / 19,000     22%   $1.60
 ```
 
-`caliper pr <N>` resolves the PR commits and filters local events whose
-recorded git SHA matches those commits. The receipt carries evidence grades,
-so missing local git attribution is visible instead of being silently treated
-as exact. If the PR cannot be resolved automatically, pass an explicit range:
+`caliper pr <N>` uses local fetched pull refs by default and filters local
+events whose recorded git SHA matches those commits. Pass `--allow-network`
+to let Caliper ask GitHub CLI to resolve the PR commits, or pass an explicit
+range:
 
 ```bash
 caliper pr --git-range main...feature-branch
 ```
 
-The same shape is available per commit (`caliper commit <sha>`) and per
-project (`caliper project`).
+The receipt carries evidence grades, so missing local git attribution is
+visible instead of being silently treated as exact. The same shape is
+available per commit (`caliper commit <sha>`) and per project
+(`caliper project`).
 
 ## How it works, in one breath
 
@@ -198,18 +208,28 @@ caliper                              # rolling 7 / 30 / 90 summary
 caliper doctor                       # verifies your local setup
 caliper daily --lookback-days 7      # daily rollup
 caliper project --lookback-days 30   # which projects cost what
+caliper shape --lookback-days 7      # tool-use & session shape (Claude Code)
 caliper insights                     # ranked signals with next commands
 caliper advise                       # grouped model/tier recommendations
 caliper evidence                     # explain how trustworthy the numbers are
+caliper dashboard --open             # self-contained HTML file from your logs
+caliper dashboard --demo --open      # self-contained HTML demo, no log reads
 ```
 
-The first run parses everything and writes a sidecar cache. Later runs reuse
-it. Pass `--disable-parse-cache` when you want to bypass the cache.
+The first run parses everything and writes a sidecar parse cache. Later runs
+reuse it. The cache stores normalized usage records and parser metadata on
+your machine; default output still redacts prompts, paths, git identifiers,
+and session identifiers. Pass `--disable-parse-cache` when you want to bypass
+the cache, or delete the directory named by `CALIPER_CACHE_DIR`.
+
+If `caliper` shows no data after the first run, your AI tools probably
+write logs to a non-default location. Run `caliper doctor` — it lists
+which tools were detected and what's missing.
 
 ## Interactive workspace
 
-If you prefer to live inside the data, `caliper-ai` ships with an
-interactive Textual workspace built into the base install:
+If you prefer to live inside the data, `caliper-ai` also ships with an
+interactive Textual workspace:
 
 ```bash
 caliper tui                              # against your real logs
@@ -221,16 +241,42 @@ The TUI is a single Python process built on
 module the classic CLI uses (parser, pricing, aggregation, windows,
 insights) and adds only presentation: a Home overview with cost cards,
 primary/secondary limit panels, the insights feed, and recent sessions.
-The workspace includes real screens for Sessions, Intervals, Projects,
-Models, Limits, Live, Forecast, What-If, Budgets, Insights, Doctor, and
-Receipt. Number keys jump across the core screens, `0` opens Receipt,
-`w` opens What-If, `b` opens Budgets, `i` opens Insights, `r` refreshes,
-`t` cycles themes, `p` toggles prompt/path redaction, and `[` / `]` step
-the active time window.
+The workspace reuses the same parser, pricing, aggregation, windows, and
+insights modules as the CLI. Offline by default. No login. No telemetry. The
+classic CLI is the stable surface; the Textual workspace is an additional
+entry point.
 
-Offline by default. No login. No telemetry. The classic CLI is the stable
-surface. The Textual workspace is included for exploration and improving
-quickly; it is an *additional* entry point, never a redirection.
+## Static HTML dashboard
+
+```bash
+caliper dashboard --output ~/caliper.html --open
+caliper dashboard --demo --open
+```
+
+One self-contained HTML file. Open it in any browser. Email it to your
+manager. Drop it on a USB drive. **No external resources** — no CDN, no
+`<script src>`, no `<link rel="stylesheet">`, no `fetch(`, no
+`@import`. The privacy invariant is tested in CI:
+
+```bash
+grep -E "://|<script|<link" ~/caliper.html  # → no matches
+```
+
+The dashboard reports the same numbers the CLI does, plus session
+shape (what kind of work the AI did), per-day dominant work pattern,
+period-over-period delta chips, a daily-mean reference line on the cost
+chart, a forecast band, and an evidence audit table.
+
+Flags:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--theme {dark,light,print}` | `dark` | Visual theme. Light is Stripe-receipt clean; print collapses to ink-on-paper. |
+| `--density {comfortable,compact}` | `comfortable` | Row density. |
+| `--demo` | off | Render built-in synthetic data instead of reading local logs. |
+| `--no-deltas` | off | Skip the period-over-period parse pass (one fewer aggregate). |
+| `--show-paths` | off | Show full project paths instead of basenames. |
+| `--open` | off | Open the generated file in your default browser. |
 
 ## Privacy is a constraint, not a feature
 
@@ -242,8 +288,8 @@ quickly; it is an *additional* entry point, never a redirection.
 - Absolute local paths, repo origins, git identifiers, and session identifiers
   are redacted in machine-readable output by default. Pass `--show-paths` only
   when you explicitly want those identifiers in JSON.
-- The only network call in the codebase is the opt-in pricing refresh,
-  gated by `--allow-network`. The privacy invariant is tested.
+- Default usage analysis makes no network calls. Pricing refresh and GitHub
+  CLI PR resolution require explicit flags. The privacy invariant is tested.
 
 If you do not trust the claim, read `src/caliper/parser.py` and
 `src/caliper/parse_cache.py`. They are short on purpose.
@@ -374,9 +420,24 @@ or inferred for the active window.
 Out of scope on purpose. Caliper is local-only. The trade-off is named:
 you get nothing if the vendor never wrote a log to disk.
 
+**How is this different from Helicone / Langfuse / OpenLLMetry?**
+Those are hosted proxies or telemetry pipelines. Your prompts flow
+through their infrastructure. Caliper does not sit on the request path;
+it reads the logs your tools already wrote to your disk. No proxy, no
+SaaS, no shared infrastructure. If you need a multi-tenant hosted
+dashboard, those products are the right choice. If you want a number
+per PR without uploading anything, this is.
+
+**Is the cache hit rate real?**
+Yes. Cached input tokens are billed at a different rate than fresh
+input tokens — the parser tracks them separately when the vendor's log
+exposes them (Claude Code: `cache_read_input_tokens` /
+`cache_creation_input_tokens`; Codex: `cached_input_tokens`). Run
+`caliper evidence` to see how each dimension is graded.
+
 **Can I self-host the export?**
 Yes. The Prometheus and Grafana exporters are local processes. The
-HTML receipt is a file you can email yourself.
+HTML dashboard / receipt are files you can email yourself.
 
 **Is there a hosted version?**
 No. There is no hosted version on the roadmap. If your team needs a

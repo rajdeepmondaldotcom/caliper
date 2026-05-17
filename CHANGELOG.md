@@ -2,6 +2,75 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.30 - 2026-05-17
+
+Launch-hardening after the dashboard rebuild. This release tightens the
+offline PR-attribution contract, makes the dashboard easier to try, and
+aligns release automation with the Trusted Publisher path.
+
+### Added
+
+- `caliper dashboard --demo` renders the built-in synthetic dashboard
+  without reading local AI-tool logs, so reviewers can open the HTML
+  dashboard on a fresh machine.
+- Release workflow smoke now exercises dashboard rendering and the
+  self-contained HTML privacy gate from both the built wheel and the
+  published package path.
+
+### Changed
+
+- `caliper pr <N>` is local-only by default. Pass `--allow-network` to let
+  Caliper ask GitHub CLI to resolve PR commits, or pass `--git-range` for an
+  explicit local range.
+- README copy now names the dashboard in the first-run path, explains
+  parse-cache privacy, and clarifies where optional GitHub CLI/network
+  resolution starts.
+- Contributor and security docs now reflect the current dependency list,
+  coverage gate, and network boundary.
+
+### Fixed
+
+- Manual release workflow dispatch now uses one release tag/version value
+  across checkout, version validation, release-note extraction, SBOM naming,
+  GitHub release staging, publishing, and post-release smoke.
+- Local release preparation no longer uploads to PyPI with a long-lived
+  token. Publishing stays on GitHub Actions Trusted Publisher OIDC.
+
+## 0.0.29 - 2026-05-17
+
+The dashboard rebuild release. A new designer-led, self-contained HTML
+dashboard replaces the v0.0.28 wedge; the offline invariant is unchanged.
+
+### Added
+
+- `caliper dashboard` now renders the redesigned static HTML page:
+  receipt-style serial, § N section markers, period-over-period delta
+  chips, mean-cost reference line, daily dominant-shape strip, forecast
+  band with linear + EWMA, evidence audit table.
+- `--theme {dark,light,print}`, `--density {comfortable,compact}`, and
+  `--no-deltas` flags on `caliper dashboard`.
+- `caliper shape --output-format json` for machine-readable session shape.
+- Tool-use extraction from Claude Code message blocks (counts and tool
+  names only — never tool arguments).
+- Per-day cache hit rate sparkline (replaces the prior flat
+  approximation).
+- Per-project top-3 tools, keyed by full path so two projects sharing a
+  basename never share a tool list.
+
+### Fixed
+
+- `SECURITY.md` supported-versions table now reflects the actual `0.0.x`
+  release cadence (previously stated `0.4.x`).
+- `SECURITY.md` network-chokepoint reference now points at
+  `caliper/network.py` (the real single entry point); both callers
+  (`pricing_catalog.py`, `rate_audit.py`) are documented.
+- `caliper dashboard --open` degrades gracefully on headless systems
+  with a clear "open this file manually" message.
+- `caliper dashboard --output <existing>` now appends `(overwritten)` to
+  the success line so script users know.
+- `caliper overview` surfaces a one-line `caliper doctor` hint when no
+  events are found — the most common first-run stumble.
+
 ## 0.0.28 - 2026-05-15
 
 Final code-quality and TUI discoverability polish after the 0.0.27 live release

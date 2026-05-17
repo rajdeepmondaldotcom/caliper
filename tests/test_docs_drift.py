@@ -2,32 +2,50 @@ from __future__ import annotations
 
 from pathlib import Path
 
-DOCS_SITE = Path("docs-site/src/content/docs")
-LAUNCH_DOCS = Path("docs/launch")
+SECURITY = Path("SECURITY.md")
+PYPROJECT = Path("pyproject.toml")
+CHANGELOG = Path("CHANGELOG.md")
+CONTRIBUTING = Path("CONTRIBUTING.md")
+PUBLISH_SCRIPT = Path("scripts/publish.sh")
+GITIGNORE = Path(".gitignore")
 
 
-def test_docs_site_install_and_budget_examples_match_live_cli() -> None:
-    docs = "\n".join(path.read_text() for path in DOCS_SITE.glob("*.mdx"))
+def test_security_doc_has_no_broken_trusted_publisher_setup_link() -> None:
+    security = SECURITY.read_text()
 
-    assert "uvx --isolated --from caliper-ai caliper" in docs
-    assert "daily_cost_usd" in docs
-    assert "weekly_cost_usd" in docs
-    assert "monthly_cost_usd" in docs
-
-    stale_needles = [
-        "uvx --from caliper-ai caliper",
-        "daily_credits",
-        "weekly_credits",
-        "monthly_api_dollars",
-        " credits",
-    ]
-    for needle in stale_needles:
-        assert needle not in docs
+    assert "Trusted Publisher" in security
+    assert "docs/caliper-vision/10-pypi-trusted-publisher-setup.md" not in security
 
 
-def test_launch_drafts_match_current_install_and_output_language() -> None:
-    docs = "\n".join(path.read_text() for path in LAUNCH_DOCS.glob("*.md"))
+def test_release_metadata_mentions_current_version() -> None:
+    import re
+    import tomllib
 
-    assert "uvx --isolated --from caliper-ai caliper" in docs
-    assert "uvx --from caliper-ai caliper" not in docs
-    assert " credits" not in docs
+    version = tomllib.loads(PYPROJECT.read_text())["project"]["version"]
+    changelog = CHANGELOG.read_text()
+    security = SECURITY.read_text()
+
+    assert re.search(rf"^## {re.escape(version)}(?:\s+-[^\n]*)?$", changelog, re.MULTILINE)
+    assert f"| `{version}` | yes |" in security
+
+
+def test_contributing_dependency_and_coverage_contract_matches_package() -> None:
+    contributing = CONTRIBUTING.read_text()
+
+    assert "coverage floor is 88%" in contributing
+    for dep in ("rich", "typer", "platformdirs", "textual", "watchdog"):
+        assert dep in contributing
+
+
+def test_local_publish_script_does_not_upload_to_pypi() -> None:
+    script = PUBLISH_SCRIPT.read_text()
+
+    assert "twine upload" not in script
+    assert "TWINE_PASSWORD" not in script
+
+
+def test_docs_and_outreach_trees_are_ignored() -> None:
+    ignore = GITIGNORE.read_text()
+
+    for path in ("docs/", "docs-site/", "design-brief/", "editor/", "*.local.md"):
+        assert path in ignore
