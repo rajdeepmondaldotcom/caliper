@@ -164,7 +164,6 @@ jobs:
       url: https://pypi.org/project/caliper-ai/
     permissions:
       contents: read
-      id-token: write
     steps:
       - name: Download distributions
         uses: actions/download-artifact@v8
@@ -180,6 +179,7 @@ jobs:
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@v1.14.0
         with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
           print-hash: true
           skip-existing: true
           verbose: true
