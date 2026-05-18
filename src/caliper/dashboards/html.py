@@ -15,23 +15,28 @@ Render plan (top to bottom):
     1. <head> with inline <style>          ← see styles.css
     2. Page header (wordmark, window badge, meta, serial)
     3. Optional banner (vendor coverage or stale pricing)
-    4. Summary cards row (Cost / Cache / Tokens / Sessions)
-    5. § 01 Usage windows           (7 / 30 / 90 day rollups)
-    6. § 02 Impact                  (risk and leverage cards)
-    7. § 03 Cost over time          (chart + dominant-shape strip)
-    8. § 04 Activity                (yearly heatmap)
-    9. § 05 Recap                   (hour-of-week heatmap + stats)
-   10. § 06 Session shape           (top tools + category distribution)
-   11. § 07 Models & tiers          (table)
-   12. § 08 Projects                (table with mini-bars)
-   13. § 09 Insights                (severity rails)
-   14. § 10 Forecast                (linear + EWMA cards with band)
-   15. § 11 Evidence                (status table)
-   16. Page footer
+    4. Dashboard navigation + metric glossary
+    5. Summary cards row (Cost / Cache / Tokens / Sessions)
+    6. § 01 Command center         (first-read operational summary)
+    7. § 02 Usage windows          (7 / 30 / 90 day rollups)
+    8. § 03 Impact                 (risk and leverage cards)
+    9. § 04 Cost over time         (chart + dominant-shape strip)
+   10. § 05 Activity               (yearly heatmap)
+   11. § 06 Recap                  (hour-of-week heatmap + stats)
+   12. § 07 Session shape          (top tools + category distribution)
+   13. § 08 Usage mix              (vendor/model/tier/source shares)
+   14. § 09 Savings advisor        (estimated optimization checks)
+   15. § 10 Highest-cost sessions  (highest-impact sessions)
+   16. § 11 Models & tiers         (table)
+   17. § 12 Projects               (table with mini-bars)
+   18. § 13 Rate limits            (pressure and reset signal)
+   19. § 14 Insights               (severity rails)
+   20. § 15 Forecast               (linear + EWMA cards with band)
+   21. § 16 Evidence               (status table)
+   22. Page footer
 
-Every section degrades to a per-section empty placeholder. The 14-day "rich"
-state and the "empty window" state share this same renderer; the data is
-what differs.
+Every section degrades to a per-section empty placeholder. Rich and empty
+states share this same renderer; the data is what differs.
 """
 
 from __future__ import annotations
@@ -52,6 +57,7 @@ from caliper.dashboards.data_models import (
     Forecast,
     ImpactCard,
     Insight,
+    MetricContext,
     MixRow,
     ModelRow,
     ProjectRow,
@@ -62,6 +68,7 @@ from caliper.dashboards.data_models import (
     SessionShape,
     Totals,
     UsageWindow,
+    WindowMeta,
     YearlyHeatmap,
 )
 
@@ -104,6 +111,119 @@ SECTION_NUMBERS = {
     "insights": "14",
     "forecast": "15",
     "evidence": "16",
+}
+
+METRIC_CONTEXTS = {
+    "summary.cost": MetricContext(
+        label="Cost",
+        scope="Selected report window",
+        formula="Sum of event cost_usd after parser dedupe",
+        source="Provider usage logs priced with Caliper's rate card when exact billed cost is unavailable",
+        caveat="Costs can be estimated when logs omit billing fields or pricing coverage is partial.",
+        status="estimated",
+    ),
+    "summary.cache": MetricContext(
+        label="Estimated cache savings",
+        scope="Selected report window",
+        formula="Cached input tokens priced as uncached input minus their cached-input price",
+        source="Parsed cache token counters plus the active rate card",
+        caveat="This is an estimated rate-card saving, not a guaranteed provider bill credit.",
+        status="estimated",
+    ),
+    "summary.tokens": MetricContext(
+        label="Tokens",
+        scope="Selected report window",
+        formula="Sum of parsed total_tokens across deduped usage events",
+        source="Provider or local tool usage logs",
+        caveat="Breakdown shows cached input, uncached input, and output tokens when the source records them.",
+        status="exact",
+    ),
+    "summary.sessions": MetricContext(
+        label="Sessions",
+        scope="Selected report window",
+        formula="Distinct parser session IDs with at least one usage event",
+        source="Session identifiers in local AI coding logs",
+        caveat="Turns and tool-call shape depend on the source log carrying turn facts.",
+        status="exact",
+    ),
+    "windows": MetricContext(
+        label="Rolling usage windows",
+        scope="Overlapping 7, 30, and 90 day windows ending at the dashboard end date",
+        formula="Each window is independently filtered, deduped, and aggregated",
+        source="The same parsed events as the selected report window",
+        caveat="Windows overlap by design, so their values should not be added together.",
+        status="exact",
+    ),
+    "mix.share": MetricContext(
+        label="Share",
+        scope="Selected report window",
+        formula="Row cost divided by selected-window total cost",
+        source="Aggregated table rows and selected-window total cost",
+        caveat="Top-N tables include an Other row when omitted cost exists.",
+        status="estimated",
+    ),
+    "advisor": MetricContext(
+        label="Estimated avoidable spend",
+        scope="Selected report window",
+        formula="Sum of high-confidence model or tier swap recommendations",
+        source="Caliper what-if pricing checks over matching usage events",
+        caveat="Recommendations are heuristics; validate quality and latency before changing workflows.",
+        status="estimated",
+    ),
+    "rate_limits": MetricContext(
+        label="Peak rate-limit usage",
+        scope="Selected report window",
+        formula="Highest primary or secondary usage percentage seen in rate-limit samples or events",
+        source="Rate-limit samples and usage event metadata",
+        caveat="No samples means the dashboard cannot infer rate-limit pressure.",
+        status="partial",
+    ),
+    "forecast": MetricContext(
+        label="Forecast",
+        scope="Current calendar month after the selected window",
+        formula="Daily mean projection plus EWMA recency-weighted projection",
+        source="Selected-window daily costs",
+        caveat="Projection is directional and assumes recent usage remains representative.",
+        status="estimated",
+    ),
+    "evidence": MetricContext(
+        label="Evidence quality",
+        scope="Whole dashboard payload",
+        formula="Average evidence status score minus parser, pricing, and attribution penalties",
+        source="Parser diagnostics, evidence dimensions, and aggregate pricing coverage",
+        caveat="Use this to decide which dashboard numbers deserve manual review.",
+        status="partial",
+    ),
+}
+
+COMMAND_CONTEXT_BY_LABEL = {
+    "Budget posture": MetricContext(
+        label="Budget posture",
+        scope="Configured budget period",
+        formula="Actual or projected spend divided by configured budget",
+        source="Budget configuration and selected usage aggregates",
+        caveat="Shows No budgets until a budget is configured.",
+        status="estimated",
+    ),
+    "Spend velocity": MetricContext(
+        label="Spend velocity",
+        scope="Last 7 days compared with Last 30 days",
+        formula="Last 7 day cost per day compared with Last 30 day cost per day",
+        source="Rolling usage windows",
+        caveat="Needs enough 30 day history to show a trend.",
+        status="estimated",
+    ),
+    "Estimated avoidable spend": METRIC_CONTEXTS["advisor"],
+    "Highest-cost session": MetricContext(
+        label="Highest-cost session",
+        scope="Selected report window",
+        formula="Session with the largest total cost after session aggregation",
+        source="Deduped session rollups",
+        caveat="Use it as a drilldown starting point, not a blame signal.",
+        status="estimated",
+    ),
+    "Peak rate-limit usage": METRIC_CONTEXTS["rate_limits"],
+    "Data quality": METRIC_CONTEXTS["evidence"],
 }
 
 
@@ -246,6 +366,36 @@ def status_word(status: str) -> str:
     return f'<span class="status status-{esc(status)}" data-tip="{esc(tip)}">{esc(status)}</span>'
 
 
+def metric_context_details(ctx: MetricContext, *, summary: str = "Definition") -> str:
+    """Expandable metric source/formula block."""
+    rows = [
+        ("Scope", ctx.scope),
+        ("Formula", ctx.formula),
+        ("Source", ctx.source),
+    ]
+    if ctx.caveat:
+        rows.append(("Note", ctx.caveat))
+    rows_html = "".join(
+        f"<div><dt>{esc(label)}</dt><dd>{esc(value)}</dd></div>" for label, value in rows
+    )
+    status_html = status_word(ctx.status) if ctx.status else ""
+    return (
+        f'<details class="metric-context">'
+        f"<summary><span>{esc(summary)}</span>{status_html}</summary>"
+        f"<dl>{rows_html}</dl>"
+        f"</details>"
+    )
+
+
+def metric_inline_note(ctx: MetricContext) -> str:
+    return f'<div class="metric-inline-note">{esc(ctx.scope)} · {esc(ctx.formula)}</div>'
+
+
+def section_note(text: str, ctx: MetricContext | None = None) -> str:
+    details = metric_context_details(ctx) if ctx else ""
+    return f'<div class="section-note"><p>{esc(text)}</p>{details}</div>'
+
+
 def vendor_badge(vendor: str) -> str:
     return f'<span class="vendor-badge" data-tip="vendor: {esc(vendor)}">{esc(vendor)}</span>'
 
@@ -297,11 +447,12 @@ def mini_bar(name: str, count: int, max_count: int, category: str) -> str:
     )
 
 
-def inline_share_bar(share: float) -> str:
-    """The right-aligned share% cell in tables."""
+def inline_share_bar(share: float, basis_label: str = "selected-window cost") -> str:
+    """The right-aligned share cell in tables."""
     pct = share * 100
     return (
-        f'<span class="inline-bar" data-tip="{pct:.1f}% of total">'
+        f'<span class="inline-bar" data-tip="{pct:.1f}% of {esc(basis_label)}" '
+        f'aria-label="{pct:.1f}% of {esc(basis_label)}">'
         f'<span class="inline-bar-track">'
         f'<span style="width:{pct:.4f}%"></span>'
         f"</span>"
@@ -437,10 +588,24 @@ def render_banner(b: Banner | None) -> str:
 # 3. Summary cards ------------------------------------------------------------
 
 
-def render_cards(t: Totals, empty: bool) -> str:
+def _spark_period_label(window: WindowMeta, values: list[float]) -> str:
+    try:
+        start = dt.date.fromisoformat(window.start)
+        end = dt.date.fromisoformat(window.end)
+        days = max(1, (end - start).days)
+    except ValueError:
+        days = len(values)
+    if days > 0:
+        return f"{days}-day selected window"
+    if values:
+        return f"{len(values)}-point selected window"
+    return "selected window"
+
+
+def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> str:
     if empty:
         cards = []
-        for label in ("Cost", "Cache savings", "Tokens", "Sessions"):
+        for label in ("Cost", "Estimated cache savings", "Tokens", "Sessions"):
             cards.append(
                 f'<div class="card stat" role="group" aria-label="{esc(label)}">'
                 f'<div class="stat-label">{label}</div>'
@@ -450,7 +615,7 @@ def render_cards(t: Totals, empty: bool) -> str:
             )
         return f'<div class="cards">{"".join(cards)}</div>'
 
-    def card(accent, label, value, sub, tip, delta, polarity, spark, spark_color, spark_label):
+    def card(accent, label, value, sub, tip, delta, polarity, spark, spark_color, spark_label, ctx):
         return (
             f'<div class="card stat" data-accent="{accent}" '
             f'data-tip="{esc(tip)}" data-tip-pos="bottom" '
@@ -458,6 +623,8 @@ def render_cards(t: Totals, empty: bool) -> str:
             f'<div class="stat-label">{label}</div>'
             f'<div class="stat-value">{esc(value)}</div>'
             f'<div class="stat-sub">{esc(sub)}</div>'
+            f"{metric_inline_note(ctx)}"
+            f"{metric_context_details(ctx)}"
             f'<div class="stat-foot">'
             f"{delta_chip(delta, polarity)}"
             f"{sparkline(spark, spark_color, spark_label)}"
@@ -465,12 +632,15 @@ def render_cards(t: Totals, empty: bool) -> str:
             f"</div>"
         )
 
-    cost_tip = f"Total spend across all vendors in this window. Events: {fmt_int(t.events)}."
-    cache_tip = (
-        f"Estimated savings from cached input tokens. Hit rate: {fmt_pct(t.cache_hit_rate)}."
+    spark_period = (
+        _spark_period_label(window, t.daily_cost_sparkline) if window else "selected-window"
     )
+    cost_tip = (
+        f"Selected-window spend after parser dedupe. Deduped usage events: {fmt_int(t.events)}."
+    )
+    cache_tip = f"Estimated rate-card savings from cached input tokens. Hit rate: {fmt_pct(t.cache_hit_rate)}."
     tokens_tip = (
-        f"Input + output tokens consumed. Cached input: "
+        f"Parsed total tokens. Cached input: "
         f"{fmt_tokens(t.cached_input_tokens)} · uncached: "
         f"{fmt_tokens(t.uncached_input_tokens)} · output: "
         f"{fmt_tokens(t.output_tokens)}."
@@ -485,17 +655,18 @@ def render_cards(t: Totals, empty: bool) -> str:
             "cost",
             "Cost",
             fmt_money(t.cost_usd),
-            f"{fmt_int(t.events)} events",
+            f"{fmt_int(t.events)} deduped usage events",
             cost_tip,
             t.delta_cost_pct,
             "more-is-bad",
             t.daily_cost_sparkline,
             "var(--accent)",
-            "14-day daily cost",
+            f"{spark_period} daily cost",
+            METRIC_CONTEXTS["summary.cost"],
         )
         + card(
             "cache",
-            "Cache savings",
+            "Estimated cache savings",
             fmt_money(t.cache_savings_usd),
             f"{fmt_pct(t.cache_hit_rate)} hit rate",
             cache_tip,
@@ -503,7 +674,8 @@ def render_cards(t: Totals, empty: bool) -> str:
             "more-is-good",
             t.daily_cache_sparkline,
             "var(--ok)",
-            "14-day cache hit rate",
+            f"{spark_period} cache hit rate",
+            METRIC_CONTEXTS["summary.cache"],
         )
         + card(
             "tokens",
@@ -515,7 +687,8 @@ def render_cards(t: Totals, empty: bool) -> str:
             "neutral",
             t.daily_token_sparkline,
             "var(--accent)",
-            "14-day token volume",
+            f"{spark_period} token volume",
+            METRIC_CONTEXTS["summary.tokens"],
         )
         + card(
             "sessions",
@@ -527,7 +700,8 @@ def render_cards(t: Totals, empty: bool) -> str:
             "neutral",
             t.daily_session_sparkline,
             "var(--mute)",
-            "14-day sessions",
+            f"{spark_period} sessions",
+            METRIC_CONTEXTS["summary.sessions"],
         )
         + "</div>"
     )
@@ -537,23 +711,78 @@ def render_cards(t: Totals, empty: bool) -> str:
 
 
 def render_dashboard_nav(d: Dashboard) -> str:
-    links = [
-        ("command-center", "Command", bool(d.command_center)),
-        ("usage-windows", "Windows", bool(d.usage_windows)),
-        ("impact", "Impact", bool(d.impact_cards)),
-        ("cost-over-time", "Cost", bool(d.daily)),
-        ("usage-mix", "Mix", bool(d.usage_mix)),
-        ("advisor", "Advisor", True),
-        ("top-sessions", "Sessions", bool(d.top_sessions)),
-        ("rate-limits", "Limits", d.rate_limit_pressure is not None),
-        ("evidence", "Evidence", bool(d.evidence or d.quality_score)),
+    groups = [
+        (
+            "Overview",
+            [
+                ("command-center", "Command", bool(d.command_center)),
+                ("metric-glossary", "Glossary", True),
+                ("usage-windows", "Windows", bool(d.usage_windows)),
+                ("impact", "Impact", bool(d.impact_cards)),
+            ],
+        ),
+        (
+            "Spend",
+            [
+                ("cost-over-time", "Cost", bool(d.daily)),
+                ("usage-mix", "Mix", bool(d.usage_mix)),
+                ("advisor", "Advisor", True),
+            ],
+        ),
+        (
+            "Usage",
+            [
+                ("top-sessions", "Sessions", bool(d.top_sessions)),
+                ("models", "Models", bool(d.by_model)),
+                ("projects", "Projects", bool(d.by_project)),
+            ],
+        ),
+        (
+            "Trust",
+            [
+                ("rate-limits", "Limits", d.rate_limit_pressure is not None),
+                ("evidence", "Evidence", bool(d.evidence or d.quality_score)),
+            ],
+        ),
     ]
-    body = "".join(
-        f'<a class="dash-nav-link{" is-muted" if not enabled else ""}" href="#{esc(anchor)}">'
-        f"{esc(label)}</a>"
-        for anchor, label, enabled in links
-    )
+    body_parts: list[str] = []
+    for group, links in groups:
+        body_parts.append(f'<span class="dash-nav-group">{esc(group)}</span>')
+        body_parts.extend(
+            f'<a class="dash-nav-link{" is-muted" if not enabled else ""}" href="#{esc(anchor)}">'
+            f"{esc(label)}</a>"
+            for anchor, label, enabled in links
+        )
+    body = "".join(body_parts)
     return f'<nav class="dash-nav" aria-label="Dashboard sections">{body}</nav>'
+
+
+def render_metric_glossary() -> str:
+    keys = [
+        "summary.cost",
+        "summary.cache",
+        "summary.tokens",
+        "summary.sessions",
+        "windows",
+        "mix.share",
+        "advisor",
+        "rate_limits",
+        "forecast",
+        "evidence",
+    ]
+    rows = "".join(
+        f'<article class="glossary-item" id="metric-{esc(key.replace(".", "-"))}">'
+        f'<div class="glossary-label">{esc(METRIC_CONTEXTS[key].label)}</div>'
+        f'<div class="glossary-copy">{esc(METRIC_CONTEXTS[key].formula)}</div>'
+        f"</article>"
+        for key in keys
+    )
+    return (
+        f'<details class="metric-glossary" id="metric-glossary">'
+        f"<summary>Metric glossary <span>definitions, formulas, and source notes</span></summary>"
+        f'<div class="glossary-grid">{rows}</div>'
+        f"</details>"
+    )
 
 
 # 5. Command center -----------------------------------------------------------
@@ -563,21 +792,27 @@ def render_command_center(cards: list[CommandCenterCard]) -> str:
     sec_id = "command-center"
     if not cards:
         return ""
-    body = "".join(
-        f'<article class="command-card command-card-{esc(card.tone)}">'
-        f'<div class="command-top">'
-        f'<span class="command-label">{esc(card.label)}</span>'
-        f'<span class="command-metric">{esc(card.metric)}</span>'
-        f"</div>"
-        f'<div class="command-value">{esc(card.value)}</div>'
-        f'<div class="command-detail">{esc(card.detail)}</div>'
-        f"</article>"
-        for card in cards
-    )
+    body_parts: list[str] = []
+    for card in cards:
+        ctx = COMMAND_CONTEXT_BY_LABEL.get(card.label)
+        context = metric_context_details(ctx) if ctx else ""
+        body_parts.append(
+            f'<article class="command-card command-card-{esc(card.tone)}">'
+            f'<div class="command-top">'
+            f'<span class="command-label">{esc(card.label)}</span>'
+            f'<span class="command-metric">{esc(card.metric)}</span>'
+            f"</div>"
+            f'<div class="command-value">{esc(card.value)}</div>'
+            f'<div class="command-detail">{esc(card.detail)}</div>'
+            f"{context}"
+            f"</article>"
+        )
+    body = "".join(body_parts)
     return (
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Command center', 'what needs attention first')}"
         f'<div class="sec-body">'
+        f"{section_note('Start here: each card points to the report area most likely to need review.')}"
         f'<div class="command-grid">{body}</div>'
         f"</div></section>"
     )
@@ -625,6 +860,7 @@ def render_usage_windows(windows: list[UsageWindow]) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Usage windows', '7d → 30d → 90d · deduped')}"
         f'<div class="sec-body">'
+        f"{section_note('These rolling windows overlap and are independently deduped; compare them for trend, do not add them together.', METRIC_CONTEXTS['windows'])}"
         f'<div class="usage-window-grid">{"".join(cards)}</div>'
         f"</div></section>"
     )
@@ -641,7 +877,7 @@ def render_impact_cards(cards: list[ImpactCard]) -> str:
     label_order = {
         "Budget risk": 0,
         "Cost driver": 1,
-        "Cache leverage": 2,
+        "Estimated cache savings": 2,
         "Usage rhythm": 3,
         "Dedupe": 4,
     }
@@ -665,6 +901,7 @@ def render_impact_cards(cards: list[ImpactCard]) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Impact', 'risk, drivers, leverage')}"
         f'<div class="sec-body">'
+        f"{section_note('Impact cards translate the raw usage numbers into risk, concentration, cache leverage, and data hygiene signals.')}"
         f'<div class="impact-grid">{body}</div>'
         f"</div></section>"
     )
@@ -842,6 +1079,7 @@ def render_cost_over_time(daily: list[DailyPoint], empty: bool) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Cost over time', f'peak {fmt_money(peak.cost_usd)} · {peak.day}')}"
         f'<div class="sec-body">'
+        f"{section_note('Bars show daily selected-window cost after dedupe; the dashed line is mean daily cost for the same window.', METRIC_CONTEXTS['summary.cost'])}"
         f'<div class="chart-panel">'
         f'<div class="chart-wrap">'
         + "".join(parts)
@@ -1134,6 +1372,7 @@ def render_session_shape(shape: SessionShape | None, empty: bool) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Session shape', f'{shape.total_sessions} sessions · {shape.total_turns} turns')}"
         f'<div class="sec-body">'
+        f"{section_note('Tool and turn metrics come from source logs that expose turn facts; coverage below states how complete that signal is.')}"
         f'<div class="shape-grid">'
         # Top tools panel
         f'<div class="panel shape-tools">'
@@ -1204,7 +1443,7 @@ def render_usage_mix(rows: list[MixRow]) -> str:
                 f"{sparkline(row.daily_cost_sparkline, 'var(--accent)', row.label + ' cost')}"
                 f"</div>"
                 f'<div class="mix-share">'
-                f"{inline_share_bar(row.share)}"
+                f"{inline_share_bar(row.share, 'selected-window cost')}"
                 f"</div>"
                 f"</div>"
             )
@@ -1222,6 +1461,7 @@ def render_usage_mix(rows: list[MixRow]) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Usage mix', 'model, tier, vendor, source')}"
         f'<div class="sec-body">'
+        f"{section_note('Every share bar is row cost divided by selected-window total cost, so categories can be compared on one denominator.', METRIC_CONTEXTS['mix.share'])}"
         f'<div class="mix-controls" role="group" aria-label="Usage mix filter">'
         f"{''.join(filters)}</div>"
         f'<div class="mix-grid">{"".join(panels)}</div>'
@@ -1239,6 +1479,7 @@ def render_advisor(rows: list[AdvisorRecommendation]) -> str:
             f'<section class="sec" id="{sec_id}">'
             f"{section_head(sec_id, 'Savings advisor', 'model and tier swap checks')}"
             f'<div class="sec-body">'
+            f"{section_note('Savings recommendations are heuristic what-if estimates. No row means Caliper found no high-confidence swap in this window.', METRIC_CONTEXTS['advisor'])}"
             f'<div class="panel empty-panel">No high-confidence savings recommendations.</div>'
             f"</div></section>"
         )
@@ -1248,7 +1489,7 @@ def render_advisor(rows: list[AdvisorRecommendation]) -> str:
             f'<article class="advisor-card advisor-card-{esc(row.tone)}">'
             f'<div class="advisor-card-top">'
             f'<h3 class="advisor-title">{esc(row.title)}</h3>'
-            f'<span class="advisor-value">{esc(row.value)}</span>'
+            f'<span class="advisor-value">est. {esc(row.value)}</span>'
             f"</div>"
             f'<p class="advisor-detail">{esc(row.detail)}</p>'
             f'<div class="advisor-meta">'
@@ -1263,12 +1504,13 @@ def render_advisor(rows: list[AdvisorRecommendation]) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Savings advisor', 'estimated avoidable spend')}"
         f'<div class="sec-body">'
+        f"{section_note('Savings are estimated what-if checks over matching usage. Treat them as review candidates before changing model or tier routing.', METRIC_CONTEXTS['advisor'])}"
         f'<div class="advisor-grid">{"".join(cards)}</div>'
         f"</div></section>"
     )
 
 
-# 10. Session outliers --------------------------------------------------------
+# 10. Highest-cost sessions ---------------------------------------------------
 
 
 def render_top_sessions(rows: list[SessionRow]) -> str:
@@ -1296,8 +1538,9 @@ def render_top_sessions(rows: list[SessionRow]) -> str:
         )
     return (
         f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Session outliers', 'sorted by spend impact')}"
+        f"{section_head(sec_id, 'Highest-cost sessions', 'sorted by spend impact')}"
         f'<div class="sec-body">'
+        f"{section_note('Rows are deduped session rollups. Reason explains why the session is worth opening first.')}"
         f'<div class="panel pad-0 table-scroll">'
         f'<table class="data data-sortable session-table">'
         f"<thead><tr>"
@@ -1354,9 +1597,10 @@ def render_rate_limits(pressure: RateLimitPressure | None) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Rate limits', 'pressure and reset signal')}"
         f'<div class="sec-body">'
+        f"{section_note('Pressure percentages are normalized from rate-limit samples and event metadata; missing samples mean pressure is unknown, not zero.', METRIC_CONTEXTS['rate_limits'])}"
         f'<div class="panel limit-panel limit-panel-{esc(pressure.tone)}">'
         f'<div class="limit-panel-head">'
-        f'<div><h3 class="panel-title">Limit pressure</h3>'
+        f'<div><h3 class="panel-title">Peak rate-limit usage</h3>'
         f'<div class="limit-sub">{esc(meta or "No rate-limit samples in this window.")}</div></div>'
         f'<span class="limit-samples">{fmt_int(pressure.sample_count)} samples</span>'
         f"</div>"
@@ -1385,7 +1629,7 @@ def render_models(rows: list[ModelRow], total_cost: float) -> str:
             f'<td><span class="mono">{esc(r.model)}</span>'
             f'<span class="mute"> · {esc(r.tier)}</span></td>'
             f'<td class="num strong" data-value="{r.cost_usd:.8f}">{fmt_money(r.cost_usd)}</td>'
-            f'<td class="num">{inline_share_bar(share)}</td>'
+            f'<td class="num">{inline_share_bar(share, "selected-window cost")}</td>'
             f'<td class="num" data-value="{r.events}">{r.events}</td>'
             f'<td class="num" data-value="{r.tokens}">{fmt_tokens(r.tokens)}</td>'
             f'<td class="num" data-value="{r.cache_hit_rate:.8f}">{fmt_pct_round(r.cache_hit_rate)}</td>'
@@ -1395,12 +1639,13 @@ def render_models(rows: list[ModelRow], total_cost: float) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Models & tiers', 'sorted by cost')}"
         f'<div class="sec-body">'
+        f"{section_note('Rows are sorted by selected-window cost. Share is each model/tier cost divided by selected-window total cost.', METRIC_CONTEXTS['mix.share'])}"
         f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
         f"<thead><tr>"
         f'<th class="th-vendor" data-sort="text">Vendor</th>'
         f'<th class="th-model" data-sort="text">Model · tier</th>'
         f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
-        f'<th class="num">Share</th>'
+        f'<th class="num">Share of window</th>'
         f'<th class="num" data-sort="number">Events</th>'
         f'<th class="num" data-sort="number">Tokens</th>'
         f'<th class="num th-cache" data-sort="number">Cache</th>'
@@ -1413,7 +1658,11 @@ def render_models(rows: list[ModelRow], total_cost: float) -> str:
 # 7. Projects -----------------------------------------------------------------
 
 
-def render_projects(rows: list[ProjectRow], show_paths: bool) -> str:
+def render_projects(
+    rows: list[ProjectRow],
+    show_paths: bool,
+    total_cost: float | None = None,
+) -> str:
     sec_id = "projects"
     if not rows:
         return ""
@@ -1423,7 +1672,13 @@ def render_projects(rows: list[ProjectRow], show_paths: bool) -> str:
     )
     # Global tool max so mini-bars are comparable across rows
     max_tool = max((t.count for r in ordered_rows for t in r.top_tools), default=1)
-    total = sum(r.cost_usd for r in ordered_rows)
+    shown_total = sum(r.cost_usd for r in ordered_rows)
+    total = total_cost if total_cost is not None and total_cost > 0 else shown_total
+    basis_label = (
+        "selected-window cost"
+        if total_cost is not None and total_cost > 0
+        else "shown project cost"
+    )
 
     body = []
     for r in ordered_rows:
@@ -1436,21 +1691,36 @@ def render_projects(rows: list[ProjectRow], show_paths: bool) -> str:
             f"<tr>"
             f'<td><span class="proj-name">{esc(r.name)}</span>{path_html}</td>'
             f'<td class="num strong" data-value="{r.cost_usd:.8f}">{fmt_money(r.cost_usd)}</td>'
-            f'<td class="num">{inline_share_bar(share)}</td>'
+            f'<td class="num">{inline_share_bar(share, basis_label)}</td>'
             f'<td class="num" data-value="{r.events}">{r.events}</td>'
             f'<td class="num" data-value="{r.sessions}">{r.sessions}</td>'
             f'<td class="col-tools">{tools_html}</td>'
+            f"</tr>"
+        )
+    omitted_cost = max(0.0, total - shown_total)
+    if omitted_cost > 0.005:
+        share = omitted_cost / total if total > 0 else 0
+        body.append(
+            f'<tr class="summary-row">'
+            f'<td><span class="proj-name">Other selected-window usage</span>'
+            f'<div class="mono mute proj-path">Cost not represented by the visible project rows.</div></td>'
+            f'<td class="num strong" data-value="{omitted_cost:.8f}">{fmt_money(omitted_cost)}</td>'
+            f'<td class="num">{inline_share_bar(share, basis_label)}</td>'
+            f'<td class="num" data-value="0">—</td>'
+            f'<td class="num" data-value="0">—</td>'
+            f'<td class="col-tools">—</td>'
             f"</tr>"
         )
     return (
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Projects', 'sorted by cost')}"
         f'<div class="sec-body">'
+        f"{section_note('Projects are sorted by selected-window cost. Share uses the selected-window total when available; Other covers any omitted or unattributed cost.', METRIC_CONTEXTS['mix.share'])}"
         f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
         f"<thead><tr>"
         f'<th data-sort="text">Project</th>'
         f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
-        f'<th class="num">Share</th>'
+        f'<th class="num">Share of window</th>'
         f'<th class="num" data-sort="number">Events</th>'
         f'<th class="num" data-sort="number">Sessions</th>'
         f'<th class="th-tools">Top tools</th>'
@@ -1654,14 +1924,15 @@ def render_forecast(f: Forecast | None) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Forecast', f'based on {f.days_analyzed} days · projected through next {f.days_remaining} days')}"
         f'<div class="sec-body">'
+        f"{section_note('Forecast cards are projections from selected-window daily spend, not committed future cost.', METRIC_CONTEXTS['forecast'])}"
         f'<div class="cards forecast-cards">'
         # Linear card
         f'<div class="card forecast-card">'
         f'<div class="forecast-card-head">'
-        f'<div class="stat-label">Linear projection</div>'
+        f'<div class="stat-label">Projected linear total</div>'
         f'<div class="forecast-tag">mean × days</div>'
         f"</div>"
-        f'<div class="stat-value">{fmt_money(f.linear_total)}</div>'
+        f'<div class="stat-value">est. {fmt_money(f.linear_total)}</div>'
         f"{_forecast_band(f.linear_low, f.linear_high, f.linear_total, vmin, vmax, off_band=linear_off)}"
         f'<div class="forecast-sub">'
         f'<span class="forecast-sub-key">±1σ</span> '
@@ -1671,10 +1942,10 @@ def render_forecast(f: Forecast | None) -> str:
         # EWMA card
         f'<div class="card forecast-card">'
         f'<div class="forecast-card-head">'
-        f'<div class="stat-label">EWMA · recency-weighted</div>'
+        f'<div class="stat-label">Projected EWMA total</div>'
         f'<div class="forecast-tag">α = 0.3</div>'
         f"</div>"
-        f'<div class="stat-value">{fmt_money(f.ewma_total)}{off_chip}</div>'
+        f'<div class="stat-value">est. {fmt_money(f.ewma_total)}{off_chip}</div>'
         f"{_forecast_band(f.linear_low, f.linear_high, f.ewma_total, vmin, vmax, accent=True, off_band=ewma_off)}"
         f'<div class="forecast-sub">'
         f'<span class="forecast-sub-key">daily</span> '
@@ -1728,6 +1999,7 @@ def render_evidence(rows: list[EvidenceRow], quality: QualityScore | None = None
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Evidence', 'how trustworthy each number is')}"
         f'<div class="sec-body">'
+        f"{section_note('Evidence tells you which numbers are exact, estimated, partial, or unsupported before you act on the report.', METRIC_CONTEXTS['evidence'])}"
         f"{quality_html}"
         f'<div class="panel pad-0">'
         f'<table class="data evidence"><tbody>{body}</tbody></table>'
@@ -1812,13 +2084,15 @@ INLINE_SCRIPT = r"""
       const glyph = th.querySelector(".sort-glyph");
       if (glyph) glyph.textContent = next === "ascending" ? "↑" : "↓";
       const rows = Array.from(tbody.rows);
-      rows.sort((a, b) => {
+      const summaryRows = rows.filter((row) => row.classList.contains("summary-row"));
+      const sortableRows = rows.filter((row) => !row.classList.contains("summary-row"));
+      sortableRows.sort((a, b) => {
         const av = numeric ? toNumber(a.cells[index]) : (a.cells[index]?.textContent || "");
         const bv = numeric ? toNumber(b.cells[index]) : (b.cells[index]?.textContent || "");
         const result = numeric ? av - bv : String(av).localeCompare(String(bv));
         return next === "ascending" ? result : -result;
       });
-      rows.forEach((row) => tbody.appendChild(row));
+      sortableRows.concat(summaryRows).forEach((row) => tbody.appendChild(row));
     });
   });
 
@@ -2307,6 +2581,133 @@ code { color: var(--accent); font-size: 0.92em; }
 }
 .sec-body > * + * { margin-top: var(--s4); }
 
+.section-note {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+}
+.section-note p {
+  margin: 0;
+}
+
+.metric-context {
+  color: var(--mute);
+  font-size: 11.5px;
+}
+.metric-context summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+.metric-context summary::-webkit-details-marker { display: none; }
+.metric-context summary::before {
+  content: "i";
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+.metric-context[open] summary {
+  color: var(--ink);
+}
+.metric-context dl {
+  display: grid;
+  gap: var(--s2);
+  margin: var(--s2) 0 0;
+}
+.metric-context dl > div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: var(--s3);
+  align-items: start;
+}
+.metric-context dt {
+  color: var(--ghost);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.metric-context dd {
+  margin: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.metric-inline-note {
+  margin-top: var(--s2);
+  color: var(--ghost);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.metric-glossary {
+  margin: var(--s4) 0 var(--s5);
+  padding: var(--s3) var(--s4);
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+}
+.metric-glossary > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  align-items: center;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+.metric-glossary > summary::-webkit-details-marker { display: none; }
+.metric-glossary > summary span {
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+.glossary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s3);
+  margin-top: var(--s4);
+}
+.glossary-item {
+  min-width: 0;
+  padding: var(--s3);
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+}
+.glossary-label {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.glossary-copy {
+  margin-top: 3px;
+  color: var(--mute);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
 /* — Panel --------------------------------------------------------------- */
 
 .panel {
@@ -2418,6 +2819,12 @@ code { color: var(--accent); font-size: 0.92em; }
   overflow: hidden;
   text-overflow: ellipsis;
   letter-spacing: 0.01em;
+}
+.card.stat .metric-context {
+  margin-top: var(--s2);
+}
+.card.stat .metric-context dl > div {
+  grid-template-columns: 58px minmax(0, 1fr);
 }
 .stat-foot {
   margin-top: auto;
@@ -2790,6 +3197,11 @@ code { color: var(--accent); font-size: 0.92em; }
 .data tbody tr:last-child td { border-bottom: 0; }
 .data tbody tr { transition: background-color 80ms ease-out; }
 .data tbody tr:hover { background: var(--panel-hover); }
+.data tbody tr.summary-row td {
+  color: var(--mute);
+  background: var(--panel-2);
+  border-top: 1px solid var(--border);
+}
 
 .data .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .data .strong { color: var(--ink); font-weight: 600; font-size: 13.5px; }
@@ -3630,6 +4042,24 @@ code { color: var(--accent); font-size: 0.92em; }
   backdrop-filter: blur(14px);
 }
 
+.dash-nav-group {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 2px 0 var(--s2);
+  color: var(--ghost);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.dash-nav-group:not(:first-child) {
+  margin-left: var(--s2);
+  padding-left: var(--s3);
+  border-left: 1px solid var(--hairline);
+}
+
 .dash-nav-link {
   display: inline-flex;
   align-items: center;
@@ -3658,9 +4088,9 @@ code { color: var(--accent); font-size: 0.92em; }
 }
 .command-card {
   position: relative;
-  min-height: 142px;
+  min-height: 172px;
   padding: var(--s4);
-  overflow: hidden;
+  overflow: visible;
   background: linear-gradient(180deg, var(--panel), var(--panel-2));
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -3674,7 +4104,7 @@ code { color: var(--accent); font-size: 0.92em; }
 }
 .command-card-good::before { background: var(--ok); }
 .command-card-warn::before { background: var(--warn); }
-.command-card-critical::before { background: var(--danger); }
+.command-card-critical::before { background: var(--bad); }
 .command-top {
   display: flex;
   justify-content: space-between;
@@ -3710,6 +4140,12 @@ code { color: var(--accent); font-size: 0.92em; }
   color: var(--ink-2);
   font-size: 12px;
   line-height: 1.45;
+}
+.command-card .metric-context {
+  margin-top: var(--s3);
+}
+.command-card .metric-context dl > div {
+  grid-template-columns: 60px minmax(0, 1fr);
 }
 
 .mix-controls {
@@ -3811,7 +4247,7 @@ code { color: var(--accent); font-size: 0.92em; }
 }
 .advisor-card-good::before { background: var(--ok); }
 .advisor-card-warn::before { background: var(--warn); }
-.advisor-card-critical::before { background: var(--danger); }
+.advisor-card-critical::before { background: var(--bad); }
 .advisor-card-top {
   display: flex;
   justify-content: space-between;
@@ -3910,7 +4346,7 @@ code { color: var(--accent); font-size: 0.92em; }
 }
 .limit-panel-good::before { background: var(--ok); }
 .limit-panel-warn::before { background: var(--warn); }
-.limit-panel-critical::before { background: var(--danger); }
+.limit-panel-critical::before { background: var(--bad); }
 .limit-panel-head {
   display: flex;
   justify-content: space-between;
@@ -4007,6 +4443,7 @@ code { color: var(--accent); font-size: 0.92em; }
 
 @media (max-width: 920px) {
   .cards { grid-template-columns: repeat(2, 1fr); }
+  .glossary-grid { grid-template-columns: 1fr; }
   .command-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mix-grid,
   .advisor-grid { grid-template-columns: 1fr; }
@@ -4031,6 +4468,25 @@ code { color: var(--accent); font-size: 0.92em; }
   .dash-nav {
     position: static;
     margin-top: 0;
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+  .dash-nav-group {
+    width: 100%;
+    padding-left: var(--s2);
+  }
+  .dash-nav-group:not(:first-child) {
+    margin-left: 0;
+    border-left: 0;
+  }
+  .metric-glossary > summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--s1);
+  }
+  .metric-context dl > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
   .command-grid { grid-template-columns: 1fr; }
   .impact-grid { grid-template-columns: 1fr; }
@@ -4200,6 +4656,7 @@ code { color: var(--accent); font-size: 0.92em; }
   .chart-panel { break-inside: avoid; }
   [class*="twk-"] { display: none !important; }
 }
+
 """
 
 
@@ -4219,7 +4676,8 @@ def render_dashboard(d: Dashboard, *, theme: str = "dark", density: str = "comfo
             render_header(d),
             render_banner(d.banner) if not is_empty else "",
             render_dashboard_nav(d),
-            render_cards(d.totals, is_empty),
+            render_cards(d.totals, is_empty, d.window),
+            render_metric_glossary(),
             render_command_center(d.command_center),
             render_usage_windows(d.usage_windows),
             render_impact_cards(d.impact_cards),
@@ -4231,7 +4689,7 @@ def render_dashboard(d: Dashboard, *, theme: str = "dark", density: str = "comfo
             render_advisor(d.advisor_recommendations) if not is_empty else "",
             render_top_sessions(d.top_sessions) if not is_empty else "",
             render_models(d.by_model, d.totals.cost_usd) if not is_empty else "",
-            render_projects(d.by_project, d.show_paths) if not is_empty else "",
+            render_projects(d.by_project, d.show_paths, d.totals.cost_usd) if not is_empty else "",
             render_rate_limits(d.rate_limit_pressure) if not is_empty else "",
             render_insights(d.insights),
             render_forecast(d.forecast) if not is_empty else "",

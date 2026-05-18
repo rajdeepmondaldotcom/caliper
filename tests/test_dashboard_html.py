@@ -165,14 +165,14 @@ def test_dashboard_renderer_sorts_usage_windows_and_impact_cards() -> None:
 
     cards = [
         ImpactCard("Usage rhythm", "1 active day", "Peak hour 10 AM"),
-        ImpactCard("Cache leverage", "$1", "Good cache", "good"),
+        ImpactCard("Estimated cache savings", "$1", "Good cache", "good"),
         ImpactCard("Budget risk", "120%", "monthly cost", "critical"),
         ImpactCard("Cost driver", "api", "$9", "warn"),
     ]
     impact_html = render_impact_cards(cards)
     assert impact_html.index("Budget risk") < impact_html.index("Cost driver")
-    assert impact_html.index("Cost driver") < impact_html.index("Cache leverage")
-    assert impact_html.index("Cache leverage") < impact_html.index("Usage rhythm")
+    assert impact_html.index("Cost driver") < impact_html.index("Estimated cache savings")
+    assert impact_html.index("Estimated cache savings") < impact_html.index("Usage rhythm")
 
 
 def test_dashboard_renderer_sorts_tables_by_cost() -> None:
@@ -202,9 +202,13 @@ def test_dashboard_renderer_sorts_tables_by_cost() -> None:
             ProjectRow("project-c", "/tmp/project-c", 2, 5, 1, []),
         ],
         show_paths=True,
+        total_cost=10,
     )
     assert project_html.index("project-a") < project_html.index("project-c")
     assert project_html.index("project-c") < project_html.index("project-b")
+    assert "Other selected-window usage" in project_html
+    assert "selected-window cost" in project_html
+    assert "Share of window" in project_html
     assert 'aria-sort="descending"' in project_html
 
 
@@ -213,8 +217,24 @@ def test_dashboard_renders_analysis_drilldowns(monkeypatch, tmp_path) -> None:
     assert "Command center" in html
     assert "Usage mix" in html
     assert "Savings advisor" in html
-    assert "Session outliers" in html
+    assert "Highest-cost sessions" in html
     assert "Rate limits" in html
     assert "Evidence quality" in html
     assert 'class="data data-sortable' in html
     assert 'data-mix-filter="all"' in html
+
+
+def test_dashboard_explains_metrics_and_avoids_stale_window_labels(monkeypatch, tmp_path) -> None:
+    html = _render(monkeypatch, tmp_path)
+    assert "Metric glossary" in html
+    assert "definitions, formulas, and source notes" in html
+    assert "Selected report window" in html
+    assert "deduped usage events" in html
+    assert "Estimated cache savings" in html
+    assert "selected-window cost" in html
+    assert "Formula" in html
+    assert "Source" in html
+    assert "14-day daily cost" not in html
+    assert "14-day cache hit rate" not in html
+    assert "14-day token volume" not in html
+    assert "14-day sessions" not in html

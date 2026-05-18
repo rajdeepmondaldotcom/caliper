@@ -471,7 +471,12 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "neutral",
             ),
             ImpactCard("Budget risk", "78%", "monthly cost: $1,754 of $2,250", "warn"),
-            ImpactCard("Cache leverage", "$612.40", "72.4% input cache hit rate.", "good"),
+            ImpactCard(
+                "Estimated cache savings",
+                "$612.40",
+                "72.4% input cache hit rate.",
+                "good",
+            ),
             ImpactCard(
                 "Usage rhythm",
                 "13 active days",
@@ -500,20 +505,26 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "trend",
             ),
             CommandCenterCard(
-                "Optimization",
+                "Estimated avoidable spend",
                 "$184.20",
                 "3 recommendations ready",
                 "good",
                 "savings",
             ),
             CommandCenterCard(
-                "Session outlier",
+                "Highest-cost session",
                 "$84.10",
                 "long context · 820.0K tokens",
                 "warn",
                 "drilldown",
             ),
-            CommandCenterCard("Limit pressure", "82%", "18 limit samples", "warn", "reliability"),
+            CommandCenterCard(
+                "Peak rate-limit usage",
+                "82%",
+                "18 limit samples",
+                "warn",
+                "reliability",
+            ),
             CommandCenterCard("Data quality", "82/100", "Good", "neutral", "trust"),
         ],
         advisor_recommendations=[

@@ -33,7 +33,11 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
         "Last 30 days",
         "Last 90 days",
     ]
-    assert {card.label for card in dashboard.impact_cards} >= {"Budget risk", "Dedupe"}
+    assert {card.label for card in dashboard.impact_cards} >= {
+        "Budget risk",
+        "Dedupe",
+        "Estimated cache savings",
+    }
 
     html = render_dashboard(dashboard)
     assert "Caliper Dashboard" in html
@@ -42,7 +46,7 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
     assert "Usage windows" in html
     assert "Impact" in html
     assert "Savings advisor" in html
-    assert "Session outliers" in html
+    assert "Highest-cost sessions" in html
     assert dashboard.command_center
     assert dashboard.advisor_recommendations
     assert dashboard.top_sessions

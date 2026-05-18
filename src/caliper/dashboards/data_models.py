@@ -73,7 +73,7 @@ class Totals:
     delta_tokens_pct: float | None = None
     delta_sessions_pct: float | None = None
 
-    # 14-day sparklines. Lengths must match the daily series count.
+    # Selected-window sparklines. Lengths must match the daily series count.
     daily_cost_sparkline: list[float] = field(default_factory=list)
     daily_cache_sparkline: list[float] = field(default_factory=list)
     daily_token_sparkline: list[float] = field(default_factory=list)
@@ -112,6 +112,18 @@ class CommandCenterCard:
     detail: str
     tone: ImpactTone = "neutral"
     metric: str = ""
+
+
+@dataclass(frozen=True)
+class MetricContext:
+    """Human-readable definition metadata for dashboard metrics."""
+
+    label: str
+    scope: str
+    formula: str
+    source: str
+    caveat: str = ""
+    status: EvidenceStatus | None = None
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,31 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.37 - 2026-05-18
+
+### Added
+
+- Added metric-level definitions, formulas, source notes, and status context
+  across the dashboard so every major number explains what it means.
+- Added a compact metric glossary and clearer report navigation grouped around
+  overview, spend, usage, and trust workflows.
+
+### Changed
+
+- Clarified dashboard labels for estimated cache savings, avoidable spend,
+  highest-cost sessions, peak rate-limit usage, deduped usage events, and
+  selected-window share denominators.
+- Project, model, and usage-mix share bars now state their denominator, and
+  project tables include an Other row when selected-window cost is not fully
+  represented by the visible rows.
+- Summary-card sparklines now derive their period labels from the selected
+  dashboard window instead of using stale fixed-window copy.
+
+### Fixed
+
+- Removed stale dashboard documentation and cleaned an undefined critical-card
+  CSS color reference.
+
 ## 0.0.36 - 2026-05-18
 
 ### Added

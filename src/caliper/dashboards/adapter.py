@@ -723,7 +723,7 @@ def _build_impact_cards(
 _IMPACT_LABEL_ORDER = {
     "Budget risk": 0,
     "Cost driver": 1,
-    "Cache leverage": 2,
+    "Estimated cache savings": 2,
     "Usage rhythm": 3,
     "Dedupe": 4,
 }
@@ -838,13 +838,13 @@ def _cache_leverage_card(total: Aggregate) -> ImpactCard:
     savings = float(total.cache_savings.cost_usd)
     if savings > 0:
         return ImpactCard(
-            label="Cache leverage",
+            label="Estimated cache savings",
             value=_format_money(savings),
             detail=f"{_format_pct(cache_hit)} input cache hit rate.",
             tone="good",
         )
     return ImpactCard(
-        label="Cache leverage",
+        label="Estimated cache savings",
         value="No savings",
         detail=f"{_format_pct(cache_hit)} input cache hit rate in the selected window.",
     )
@@ -1305,7 +1305,7 @@ def _build_command_center(
             metric="trend",
         ),
         CommandCenterCard(
-            label="Optimization",
+            label="Estimated avoidable spend",
             value=_format_money(advisor_savings),
             detail=(
                 f"{len(advisor_recommendations):,} recommendations ready"
@@ -1316,7 +1316,7 @@ def _build_command_center(
             metric="savings",
         ),
         CommandCenterCard(
-            label="Session outlier",
+            label="Highest-cost session",
             value=_format_money(top_session.cost_usd) if top_session else "None",
             detail=(
                 f"{top_session.reason} · {_format_tokens(top_session.total_tokens)} tokens"
@@ -1327,7 +1327,7 @@ def _build_command_center(
             metric="drilldown",
         ),
         CommandCenterCard(
-            label="Limit pressure",
+            label="Peak rate-limit usage",
             value=_format_pct_round(peak_limit) if peak_limit is not None else "No samples",
             detail=(
                 f"{rate_limit_pressure.reached_count:,} reached events"
