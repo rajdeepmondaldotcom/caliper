@@ -2,6 +2,29 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.38 - 2026-05-18
+
+### Added
+
+- Added a premium dashboard executive brief with ranked decision queue,
+  audience lenses, and trace links back to the source section behind each
+  conclusion.
+- Added smart comparison cards for 7 day, 30 day, 90 day, previous-window,
+  concentration, rate-limit, and evidence-quality signals.
+- Added `caliper dashboard --lens` and `caliper dashboard --share-safe` so
+  dashboards can be tuned for executive, engineering, finance, or audit review
+  and shared with project names, paths, session labels, and action commands
+  redacted.
+
+### Changed
+
+- Promoted the dashboard's first screen into a clearer analysis cockpit with
+  navigation to the brief, glossary, usage windows, spend, usage, and trust
+  sections.
+- Improved empty, mobile, and print dashboard states so the report remains
+  readable and actionable even when no usage is available or when it is shared
+  outside the terminal.
+
 ## 0.0.37 - 2026-05-18
 
 ### Added

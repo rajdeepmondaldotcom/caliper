@@ -41,6 +41,7 @@ states share this same renderer; the data is what differs.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import hashlib
 import html
@@ -50,10 +51,14 @@ from datetime import datetime
 from caliper.dashboards.data_models import (
     AdvisorRecommendation,
     Banner,
+    BriefFinding,
     CommandCenterCard,
+    ComparisonSignal,
     DailyPoint,
     Dashboard,
+    DecisionQueueItem,
     EvidenceRow,
+    ExecutiveBrief,
     Forecast,
     ImpactCard,
     Insight,
@@ -112,6 +117,13 @@ SECTION_NUMBERS = {
     "forecast": "15",
     "evidence": "16",
 }
+
+LENSES = (
+    ("executive", "Executive"),
+    ("engineer", "Engineer"),
+    ("finance", "Finance"),
+    ("audit", "Audit"),
+)
 
 METRIC_CONTEXTS = {
     "summary.cost": MetricContext(
@@ -396,6 +408,21 @@ def section_note(text: str, ctx: MetricContext | None = None) -> str:
     return f'<div class="section-note"><p>{esc(text)}</p>{details}</div>'
 
 
+def trace_link(anchor: str, label: str = "Inspect") -> str:
+    if not anchor:
+        return ""
+    return (
+        f'<a class="trace-link" href="#{esc(anchor)}" '
+        f'data-trace-target="{esc(anchor)}">{esc(label)}</a>'
+    )
+
+
+def lens_scope_attr(lens: str) -> str:
+    if not lens or lens == "all":
+        return ' data-lens-scope="all"'
+    return f' data-lens-scope="{esc(lens)}"'
+
+
 def vendor_badge(vendor: str) -> str:
     return f'<span class="vendor-badge" data-tip="vendor: {esc(vendor)}">{esc(vendor)}</span>'
 
@@ -615,7 +642,20 @@ def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> st
             )
         return f'<div class="cards">{"".join(cards)}</div>'
 
-    def card(accent, label, value, sub, tip, delta, polarity, spark, spark_color, spark_label, ctx):
+    def card(
+        accent,
+        label,
+        value,
+        sub,
+        tip,
+        delta,
+        polarity,
+        spark,
+        spark_color,
+        spark_label,
+        ctx,
+        anchor,
+    ):
         return (
             f'<div class="card stat" data-accent="{accent}" '
             f'data-tip="{esc(tip)}" data-tip-pos="bottom" '
@@ -627,6 +667,7 @@ def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> st
             f"{metric_context_details(ctx)}"
             f'<div class="stat-foot">'
             f"{delta_chip(delta, polarity)}"
+            f"{trace_link(anchor)}"
             f"{sparkline(spark, spark_color, spark_label)}"
             f"</div>"
             f"</div>"
@@ -663,6 +704,7 @@ def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> st
             "var(--accent)",
             f"{spark_period} daily cost",
             METRIC_CONTEXTS["summary.cost"],
+            "cost-over-time",
         )
         + card(
             "cache",
@@ -676,6 +718,7 @@ def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> st
             "var(--ok)",
             f"{spark_period} cache hit rate",
             METRIC_CONTEXTS["summary.cache"],
+            "usage-mix",
         )
         + card(
             "tokens",
@@ -689,6 +732,7 @@ def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> st
             "var(--accent)",
             f"{spark_period} token volume",
             METRIC_CONTEXTS["summary.tokens"],
+            "usage-mix",
         )
         + card(
             "sessions",
@@ -702,6 +746,7 @@ def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> st
             "var(--mute)",
             f"{spark_period} sessions",
             METRIC_CONTEXTS["summary.sessions"],
+            "top-sessions",
         )
         + "</div>"
     )
@@ -715,6 +760,7 @@ def render_dashboard_nav(d: Dashboard) -> str:
         (
             "Overview",
             [
+                ("executive-brief", "Brief", True),
                 ("command-center", "Command", bool(d.command_center)),
                 ("metric-glossary", "Glossary", True),
                 ("usage-windows", "Windows", bool(d.usage_windows)),
@@ -785,6 +831,154 @@ def render_metric_glossary() -> str:
     )
 
 
+def render_lens_controls(default_lens: str) -> str:
+    buttons = "".join(
+        f'<button class="lens-button{" is-active" if key == default_lens else ""}" '
+        f'type="button" data-lens="{esc(key)}">{esc(label)}</button>'
+        for key, label in LENSES
+    )
+    return (
+        f'<div class="lens-bar" role="group" aria-label="Dashboard audience lens">'
+        f'<span class="lens-label">View as</span>'
+        f"{buttons}"
+        f"</div>"
+    )
+
+
+def render_executive_brief(
+    brief: ExecutiveBrief | None,
+    queue: list[DecisionQueueItem],
+    comparisons: list[ComparisonSignal],
+    *,
+    empty: bool,
+) -> str:
+    if brief is None:
+        if empty:
+            brief = ExecutiveBrief(
+                title="No AI usage detected",
+                verdict="Setup or date range needs review",
+                subtitle="The selected window has no deduped usage events.",
+                tone="warn",
+                findings=[
+                    BriefFinding(
+                        "Verify data sources",
+                        "Run caliper doctor and confirm vendor log locations.",
+                        "No reportable usage",
+                        "warn",
+                        "metric-glossary",
+                        "executive",
+                    )
+                ],
+            )
+        else:
+            return ""
+    findings = "".join(
+        f'<article class="brief-finding brief-finding-{esc(finding.tone)}"'
+        f"{lens_scope_attr(finding.lens)}>"
+        f'<div class="brief-finding-top">'
+        f"<h3>{esc(finding.title)}</h3>"
+        f"<span>{esc(finding.impact)}</span>"
+        f"</div>"
+        f"<p>{esc(finding.detail)}</p>"
+        f"{trace_link(finding.anchor)}"
+        f"</article>"
+        for finding in brief.findings[:5]
+    )
+    queue_items = "".join(
+        f'<li class="decision-item decision-item-{esc(item.tone)}"'
+        f"{lens_scope_attr(item.lens)}>"
+        f'<span class="decision-rank">{item.rank}</span>'
+        f'<div class="decision-copy">'
+        f'<div class="decision-head">'
+        f"<h3>{esc(item.title)}</h3>"
+        f'<span class="decision-evidence">{esc(item.evidence)}</span>'
+        f"</div>"
+        f"<p>{esc(item.detail)}</p>"
+        f'<div class="decision-action">{esc(item.action)}</div>'
+        f"</div>"
+        f"{trace_link(item.anchor)}"
+        f"</li>"
+        for item in queue[:7]
+    )
+    comparison_cards = "".join(
+        f'<article class="comparison-card comparison-card-{esc(item.tone)}"'
+        f"{lens_scope_attr(item.lens)}>"
+        f'<div class="comparison-label">{esc(item.label)}</div>'
+        f'<div class="comparison-value">{esc(item.value)}</div>'
+        f'<div class="comparison-detail">{esc(item.detail)}</div>'
+        f"{trace_link(item.anchor, 'Trace')}"
+        f"</article>"
+        for item in comparisons[:8]
+    )
+    decision_panel = (
+        f'<div class="decision-panel">'
+        f'<div class="premium-panel-head">'
+        f"<h3>Decision queue</h3>"
+        f"<span>{len(queue):,} ranked item{'s' if len(queue) != 1 else ''}</span>"
+        f"</div>"
+        f'<ol class="decision-list">{queue_items}</ol>'
+        f"</div>"
+        if queue
+        else ""
+    )
+    comparisons_panel = (
+        f'<div class="comparison-grid">{comparison_cards}</div>' if comparison_cards else ""
+    )
+    return (
+        f'<section class="premium-brief premium-brief-{esc(brief.tone)}" id="executive-brief">'
+        f'<div class="brief-main">'
+        f'<div class="brief-kicker">Executive brief</div>'
+        f"<h2>{esc(brief.title)}</h2>"
+        f'<p class="brief-verdict">{esc(brief.verdict)}</p>'
+        f'<p class="brief-subtitle">{esc(brief.subtitle)}</p>'
+        f"</div>"
+        f'<div class="brief-findings">{findings}</div>'
+        f"{decision_panel}"
+        f"{comparisons_panel}"
+        f"</section>"
+    )
+
+
+def render_empty_report_guide() -> str:
+    cards = [
+        (
+            "Usage source missing",
+            "No vendor usage records matched this window.",
+            "Run caliper doctor to verify local log locations.",
+        ),
+        (
+            "Comparisons unavailable",
+            "Baselines need current and previous-window usage.",
+            "Widen the date range or wait for more usage history.",
+        ),
+        (
+            "Advisor unavailable",
+            "Savings checks need billable model and token events.",
+            "Once usage appears, recommendations show here automatically.",
+        ),
+        (
+            "Evidence pending",
+            "Quality scoring needs parsed usage, pricing, and attribution signals.",
+            "Check parser and pricing status before sharing a report.",
+        ),
+    ]
+    body = "".join(
+        f'<article class="readiness-card">'
+        f"<h3>{esc(title)}</h3>"
+        f"<p>{esc(detail)}</p>"
+        f"<span>{esc(action)}</span>"
+        f"</article>"
+        for title, detail, action in cards
+    )
+    return (
+        f'<section class="sec report-readiness" id="report-readiness">'
+        f"{section_head('report-readiness', 'Report readiness')}"
+        f'<div class="sec-body">'
+        f'<div class="readiness-grid">{body}</div>'
+        f"</div></section>"
+    )
+
+
 # 5. Command center -----------------------------------------------------------
 
 
@@ -793,6 +987,14 @@ def render_command_center(cards: list[CommandCenterCard]) -> str:
     if not cards:
         return ""
     body_parts: list[str] = []
+    anchors = {
+        "Budget posture": "impact",
+        "Spend velocity": "usage-windows",
+        "Estimated avoidable spend": "advisor",
+        "Highest-cost session": "top-sessions",
+        "Peak rate-limit usage": "rate-limits",
+        "Data quality": "evidence",
+    }
     for card in cards:
         ctx = COMMAND_CONTEXT_BY_LABEL.get(card.label)
         context = metric_context_details(ctx) if ctx else ""
@@ -805,6 +1007,7 @@ def render_command_center(cards: list[CommandCenterCard]) -> str:
             f'<div class="command-value">{esc(card.value)}</div>'
             f'<div class="command-detail">{esc(card.detail)}</div>'
             f"{context}"
+            f"{trace_link(anchors.get(card.label, ''), 'Trace')}"
             f"</article>"
         )
     body = "".join(body_parts)
@@ -2110,6 +2313,40 @@ INLINE_SCRIPT = r"""
     });
   });
 
+  const setLens = (lens) => {
+    document.documentElement.dataset.lens = lens;
+    document.querySelectorAll(".lens-button").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.lens === lens);
+    });
+    document.querySelectorAll("[data-lens-scope]").forEach((item) => {
+      const scope = item.dataset.lensScope || "all";
+      const match = scope === "all" || scope === lens;
+      item.classList.toggle("is-lens-match", match);
+      item.classList.toggle("is-lens-dim", !match);
+    });
+  };
+  const initialLens = document.documentElement.dataset.lens || "executive";
+  setLens(initialLens);
+  document.querySelectorAll(".lens-button").forEach((button) => {
+    button.addEventListener("click", () => setLens(button.dataset.lens || "executive"));
+  });
+
+  const highlightTarget = (id) => {
+    if (!id) return;
+    document.querySelectorAll(".is-trace-target").forEach((item) => {
+      item.classList.remove("is-trace-target");
+    });
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.classList.add("is-trace-target");
+    window.setTimeout(() => target.classList.remove("is-trace-target"), 1800);
+  };
+  document.querySelectorAll("[data-trace-target]").forEach((link) => {
+    link.addEventListener("click", () => highlightTarget(link.dataset.traceTarget || ""));
+  });
+  window.addEventListener("hashchange", () => highlightTarget(location.hash.slice(1)));
+  if (location.hash) highlightTarget(location.hash.slice(1));
+
   const navLinks = Array.from(document.querySelectorAll(".dash-nav-link[href^='#']"));
   const sections = navLinks
     .map((link) => document.getElementById(link.getAttribute("href").slice(1)))
@@ -2705,6 +2942,301 @@ code { color: var(--accent); font-size: 0.92em; }
   margin-top: 3px;
   color: var(--mute);
   font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.lens-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+  margin: 0 0 var(--s4);
+  padding: var(--s2);
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+}
+.lens-label {
+  padding: 0 var(--s2);
+  color: var(--ghost);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.lens-button {
+  min-height: 30px;
+  padding: 0 var(--s3);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.lens-button:hover,
+.lens-button.is-active {
+  color: var(--ink);
+  background: var(--panel-hover);
+  border-color: var(--border);
+}
+
+.premium-brief {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.35fr);
+  gap: var(--s4);
+  margin-bottom: var(--s4);
+  padding: var(--s5);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 64%),
+    var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-lg);
+}
+.premium-brief-warn { border-left-color: var(--warn); }
+.premium-brief-critical { border-left-color: var(--bad); }
+.premium-brief-good { border-left-color: var(--ok); }
+.brief-main {
+  min-width: 0;
+}
+.brief-kicker {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.brief-main h2 {
+  margin: var(--s2) 0 0;
+  color: var(--ink);
+  font-size: clamp(26px, 3.4vw, 42px);
+  line-height: 1.02;
+  letter-spacing: 0;
+}
+.brief-verdict {
+  margin: var(--s3) 0 0;
+  color: var(--ink-2);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.brief-subtitle {
+  margin: var(--s3) 0 0;
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.brief-findings {
+  display: grid;
+  gap: var(--s3);
+}
+.brief-finding {
+  min-width: 0;
+  padding: var(--s3);
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--r-md);
+}
+.brief-finding-good { border-left-color: var(--ok); }
+.brief-finding-warn { border-left-color: var(--warn); }
+.brief-finding-critical { border-left-color: var(--bad); }
+.brief-finding-top {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  align-items: baseline;
+}
+.brief-finding h3,
+.decision-head h3,
+.premium-panel-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+}
+.brief-finding-top span,
+.decision-evidence,
+.premium-panel-head span {
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.brief-finding p {
+  margin: var(--s2) 0 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.decision-panel {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: var(--s4);
+  border-top: 1px solid var(--hairline);
+}
+.premium-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  align-items: baseline;
+  margin-bottom: var(--s3);
+}
+.decision-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.decision-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: var(--s3);
+  align-items: start;
+  min-width: 0;
+  padding: var(--s3);
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--r-md);
+}
+.decision-item-good { border-left-color: var(--ok); }
+.decision-item-warn { border-left-color: var(--warn); }
+.decision-item-critical { border-left-color: var(--bad); }
+.decision-rank {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+}
+.decision-copy {
+  min-width: 0;
+}
+.decision-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  align-items: baseline;
+}
+.decision-item p {
+  margin: var(--s2) 0 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.decision-action {
+  margin-top: var(--s2);
+  color: var(--mute);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.comparison-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s3);
+}
+.comparison-card {
+  min-width: 0;
+  padding: var(--s3);
+  background: color-mix(in srgb, var(--panel-2) 92%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+}
+.comparison-card-good { border-color: color-mix(in srgb, var(--ok) 35%, var(--hairline)); }
+.comparison-card-warn { border-color: color-mix(in srgb, var(--warn) 35%, var(--hairline)); }
+.comparison-card-critical { border-color: color-mix(in srgb, var(--bad) 35%, var(--hairline)); }
+.comparison-label {
+  color: var(--mute);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.comparison-value {
+  margin-top: var(--s2);
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 760;
+  line-height: 1.05;
+}
+.comparison-detail {
+  margin-top: var(--s2);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.trace-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  margin-top: var(--s2);
+  padding: 0 var(--s2);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+}
+.trace-link:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.is-lens-dim {
+  opacity: 0.64;
+}
+.is-lens-match {
+  opacity: 1;
+}
+.is-trace-target {
+  animation: tracePulse 1.8s ease-out;
+}
+@keyframes tracePulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+  45% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s3);
+}
+.readiness-card {
+  padding: var(--s4);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.readiness-card h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+.readiness-card p {
+  margin: var(--s2) 0 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.readiness-card span {
+  display: block;
+  margin-top: var(--s3);
+  color: var(--mute);
+  font-size: 11px;
   line-height: 1.4;
 }
 
@@ -4444,6 +4976,10 @@ code { color: var(--accent); font-size: 0.92em; }
 @media (max-width: 920px) {
   .cards { grid-template-columns: repeat(2, 1fr); }
   .glossary-grid { grid-template-columns: 1fr; }
+  .premium-brief { grid-template-columns: 1fr; }
+  .decision-list,
+  .comparison-grid,
+  .readiness-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .command-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mix-grid,
   .advisor-grid { grid-template-columns: 1fr; }
@@ -4465,6 +5001,46 @@ code { color: var(--accent); font-size: 0.92em; }
 }
 @media (max-width: 640px) {
   .cards { grid-template-columns: 1fr; }
+  .lens-bar {
+    align-items: stretch;
+  }
+  .lens-label {
+    width: 100%;
+    padding: 0 var(--s1);
+  }
+  .lens-button {
+    flex: 1 1 calc(50% - var(--s2));
+  }
+  .premium-brief {
+    padding: var(--s4);
+  }
+  .brief-main h2 {
+    font-size: 28px;
+  }
+  .brief-finding-top,
+  .premium-panel-head,
+  .decision-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--s1);
+  }
+  .brief-finding-top span,
+  .decision-evidence,
+  .premium-panel-head span {
+    white-space: normal;
+  }
+  .decision-list,
+  .comparison-grid,
+  .readiness-grid {
+    grid-template-columns: 1fr;
+  }
+  .decision-item {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+  .decision-item .trace-link {
+    grid-column: 2;
+    justify-self: start;
+  }
   .dash-nav {
     position: static;
     margin-top: 0;
@@ -4651,6 +5227,13 @@ code { color: var(--accent); font-size: 0.92em; }
 @media print {
   body { background: #fff; }
   .page { padding: 32px; max-width: none; }
+  .lens-bar,
+  .trace-link { display: none; }
+  .premium-brief { break-inside: avoid; }
+  .decision-item,
+  .brief-finding,
+  .comparison-card,
+  .readiness-card { break-inside: avoid; }
   .sec { break-inside: avoid; }
   .insight { break-inside: avoid; }
   .chart-panel { break-inside: avoid; }
@@ -4660,24 +5243,109 @@ code { color: var(--accent); font-size: 0.92em; }
 """
 
 
-def render_dashboard(d: Dashboard, *, theme: str = "dark", density: str = "comfortable") -> str:
+def _redact_text(value: str, replacements: dict[str, str]) -> str:
+    out = value
+    for needle, replacement in sorted(
+        replacements.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        if needle:
+            out = out.replace(needle, replacement)
+    return out
+
+
+def _share_safe_dashboard(d: Dashboard) -> Dashboard:
+    replacements: dict[str, str] = {}
+    safe_projects: list[ProjectRow] = []
+    for index, row in enumerate(d.by_project, start=1):
+        label = f"Project {index}"
+        replacements[row.name] = label
+        if row.path:
+            replacements[row.path] = "project path hidden"
+        safe_projects.append(dataclasses.replace(row, name=label, path=None))
+
+    safe_sessions: list[SessionRow] = []
+    for index, row in enumerate(d.top_sessions, start=1):
+        session_label = f"Session {index}"
+        replacements[row.label] = session_label
+        project = replacements.get(row.project, "Project hidden")
+        safe_sessions.append(dataclasses.replace(row, label=session_label, project=project))
+
+    def redact_dataclass(item):
+        changes = {
+            field.name: _redact_text(getattr(item, field.name), replacements)
+            for field in dataclasses.fields(item)
+            if isinstance(getattr(item, field.name), str)
+        }
+        return dataclasses.replace(item, **changes)
+
+    safe_advisor = [
+        dataclasses.replace(
+            redact_dataclass(row),
+            action="Hidden in share-safe mode.",
+        )
+        for row in d.advisor_recommendations
+    ]
+    return dataclasses.replace(
+        d,
+        by_project=safe_projects,
+        top_sessions=safe_sessions,
+        impact_cards=[redact_dataclass(row) for row in d.impact_cards],
+        command_center=[redact_dataclass(row) for row in d.command_center],
+        advisor_recommendations=safe_advisor,
+        insights=[redact_dataclass(row) for row in d.insights],
+        evidence=[redact_dataclass(row) for row in d.evidence],
+        executive_brief=(
+            dataclasses.replace(
+                d.executive_brief,
+                title=_redact_text(d.executive_brief.title, replacements),
+                verdict=_redact_text(d.executive_brief.verdict, replacements),
+                subtitle=_redact_text(d.executive_brief.subtitle, replacements),
+                findings=[redact_dataclass(row) for row in d.executive_brief.findings],
+            )
+            if d.executive_brief
+            else None
+        ),
+        decision_queue=[redact_dataclass(row) for row in d.decision_queue],
+        comparisons=[redact_dataclass(row) for row in d.comparisons],
+        show_paths=False,
+    )
+
+
+def render_dashboard(
+    d: Dashboard,
+    *,
+    theme: str = "dark",
+    density: str = "comfortable",
+    default_lens: str | None = None,
+    share_safe: bool = False,
+) -> str:
     """
     Produce the entire dashboard as one self-contained HTML string.
 
     theme:    "dark" | "light" | "print"
     density:  "comfortable" | "compact"
     """
+    if share_safe:
+        d = _share_safe_dashboard(d)
     css = INLINE_STYLES
     is_empty = d.totals.events == 0
     title = f"Caliper Dashboard — {d.window.start} → {d.window.end}"
+    lens = default_lens or d.default_lens
+    if lens not in {key for key, _label in LENSES}:
+        lens = "executive"
 
     body = "".join(
         [
             render_header(d),
             render_banner(d.banner) if not is_empty else "",
             render_dashboard_nav(d),
+            render_lens_controls(lens),
+            render_executive_brief(
+                d.executive_brief, d.decision_queue, d.comparisons, empty=is_empty
+            ),
             render_cards(d.totals, is_empty, d.window),
             render_metric_glossary(),
+            render_empty_report_guide() if is_empty else "",
             render_command_center(d.command_center),
             render_usage_windows(d.usage_windows),
             render_impact_cards(d.impact_cards),
@@ -4701,7 +5369,8 @@ def render_dashboard(d: Dashboard, *, theme: str = "dark", density: str = "comfo
     return (
         f"<!doctype html>\n"
         f'<html lang="en" data-theme="{esc(theme)}" '
-        f'data-density="{esc(density)}">\n'
+        f'data-density="{esc(density)}" data-lens="{esc(lens)}" '
+        f'data-share-safe="{str(share_safe).lower()}">\n'
         f"<head>\n"
         f'<meta charset="utf-8">\n'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">\n'

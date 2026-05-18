@@ -23,6 +23,7 @@ SessionShapeName = Literal["exploration", "execution", "diagnostic", "mixed", "n
 Severity = Literal["info", "warn", "critical"]
 EvidenceStatus = Literal["exact", "estimated", "partial", "unsupported"]
 ImpactTone = Literal["neutral", "good", "warn", "critical"]
+DashboardLens = Literal["executive", "engineer", "finance", "audit"]
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +138,48 @@ class AdvisorRecommendation:
     sessions: int
     tone: ImpactTone = "neutral"
     savings_usd: float = 0.0
+
+
+@dataclass(frozen=True)
+class BriefFinding:
+    title: str
+    detail: str
+    impact: str
+    tone: ImpactTone = "neutral"
+    anchor: str = ""
+    lens: DashboardLens | Literal["all"] = "all"
+
+
+@dataclass(frozen=True)
+class ExecutiveBrief:
+    title: str
+    verdict: str
+    subtitle: str
+    tone: ImpactTone = "neutral"
+    findings: list[BriefFinding] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DecisionQueueItem:
+    rank: int
+    title: str
+    detail: str
+    action: str
+    evidence: str
+    tone: ImpactTone = "neutral"
+    anchor: str = ""
+    lens: DashboardLens | Literal["all"] = "all"
+
+
+@dataclass(frozen=True)
+class ComparisonSignal:
+    label: str
+    value: str
+    detail: str
+    tone: ImpactTone = "neutral"
+    delta_pct: float | None = None
+    anchor: str = ""
+    lens: DashboardLens | Literal["all"] = "all"
 
 
 @dataclass(frozen=True)
@@ -410,6 +453,10 @@ class Dashboard:
     usage_mix: list[MixRow] = field(default_factory=list)
     rate_limit_pressure: RateLimitPressure | None = None
     quality_score: QualityScore | None = None
+    executive_brief: ExecutiveBrief | None = None
+    decision_queue: list[DecisionQueueItem] = field(default_factory=list)
+    comparisons: list[ComparisonSignal] = field(default_factory=list)
+    default_lens: DashboardLens = "executive"
 
     # New visual hero sections (yearly heatmap + recap card).
     # Optional so older fixtures continue to render.

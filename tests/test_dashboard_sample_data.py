@@ -38,15 +38,26 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
         "Dedupe",
         "Estimated cache savings",
     }
+    assert dashboard.executive_brief is not None
+    assert dashboard.decision_queue
+    assert dashboard.comparisons
 
     html = render_dashboard(dashboard)
     assert "Caliper Dashboard" in html
+    assert 'data-lens="executive"' in html
+    assert 'data-share-safe="false"' in html
     assert "api-server" in html
+    assert "Executive brief" in html
+    assert "Decision queue" in html
+    assert "View as" in html
     assert "Command center" in html
+    assert "Metric glossary" in html
     assert "Usage windows" in html
     assert "Impact" in html
     assert "Savings advisor" in html
     assert "Highest-cost sessions" in html
+    assert "comparison-card" in html
+    assert "trace-link" in html
     assert dashboard.command_center
     assert dashboard.advisor_recommendations
     assert dashboard.top_sessions
@@ -65,6 +76,7 @@ def test_empty_sample_dashboard_renders_empty_state() -> None:
     html = render_dashboard(dashboard, theme="print")
     assert 'data-theme="print"' in html
     assert "no data for this window" in html
+    assert "Report readiness" in html
     _assert_private_static_html(html)
 
 
@@ -96,7 +108,29 @@ def test_sample_dashboard_banner_variants_render() -> None:
     _assert_private_static_html(stale)
 
 
-def test_sample_data_module_writes_six_static_variants(monkeypatch, tmp_path) -> None:
+def test_sample_dashboard_supports_lenses_and_share_safe_redaction() -> None:
+    lens_html = render_dashboard(sample_dashboard(), default_lens="finance")
+    assert 'data-lens="finance"' in lens_html
+    assert 'class="lens-button is-active" type="button" data-lens="finance"' in lens_html
+    _assert_private_static_html(lens_html)
+
+    share_html = render_dashboard(sample_dashboard(show_paths=True), share_safe=True)
+    assert 'data-share-safe="true"' in share_html
+    assert "Project 1" in share_html
+    assert "Session 1" in share_html
+    assert "Hidden in share-safe mode." in share_html
+    for needle in (
+        "api-server",
+        "frontend-app",
+        "~/work/api-server",
+        "session-018",
+        "caliper advise --rule fast-tier-low-output",
+    ):
+        assert needle not in share_html
+    _assert_private_static_html(share_html)
+
+
+def test_sample_data_module_writes_seven_static_variants(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
 
     runpy.run_path(str(Path(sample_data.__file__)), run_name="__main__")
@@ -108,6 +142,7 @@ def test_sample_data_module_writes_six_static_variants(monkeypatch, tmp_path) ->
         "light.html",
         "print.html",
         "rich.html",
+        "share-safe.html",
         "stale-banner.html",
         "vendor-banner.html",
     ]

@@ -75,7 +75,15 @@ def _options(tmp_path):
     )
 
 
-def _render(monkeypatch, tmp_path, *, theme: str = "dark", density: str = "comfortable") -> str:
+def _render(
+    monkeypatch,
+    tmp_path,
+    *,
+    theme: str = "dark",
+    density: str = "comfortable",
+    default_lens: str | None = None,
+    share_safe: bool = False,
+) -> str:
     _write_session(tmp_path)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     options = _options(tmp_path)
@@ -86,7 +94,13 @@ def _render(monkeypatch, tmp_path, *, theme: str = "dark", density: str = "comfo
         with_deltas=False,
         generated_at=dt.datetime(2026, 5, 17, tzinfo=dt.UTC),
     )
-    return render_dashboard(payload, theme=theme, density=density)
+    return render_dashboard(
+        payload,
+        theme=theme,
+        density=density,
+        default_lens=default_lens,
+        share_safe=share_safe,
+    )
 
 
 def test_dashboard_privacy_gate(monkeypatch, tmp_path) -> None:
@@ -128,6 +142,20 @@ def test_dashboard_renders_print_theme(monkeypatch, tmp_path) -> None:
 def test_dashboard_renders_compact_density(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path, density="compact")
     assert 'data-density="compact"' in html
+
+
+def test_dashboard_renders_premium_decision_layer(monkeypatch, tmp_path) -> None:
+    html = _render(monkeypatch, tmp_path, default_lens="audit")
+    assert 'data-lens="audit"' in html
+    assert "Executive brief" in html
+    assert "Decision queue" in html
+    assert "View as" in html
+    assert "Rate-limit signal" in html
+    assert "Evidence quality" in html
+    assert 'data-lens-scope="audit"' in html
+    assert 'href="#executive-brief"' in html
+    assert 'data-trace-target="evidence"' in html
+    _assert_private_html(html)
 
 
 def test_dashboard_renders_when_no_events(tmp_path) -> None:

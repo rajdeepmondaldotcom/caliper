@@ -18,12 +18,16 @@ from caliper import __version__
 from caliper.dashboards.data_models import (
     AdvisorRecommendation,
     Banner,
+    BriefFinding,
     CaliperMeta,
     CategoryCount,
     CommandCenterCard,
+    ComparisonSignal,
     DailyPoint,
     Dashboard,
+    DecisionQueueItem,
     EvidenceRow,
+    ExecutiveBrief,
     Forecast,
     HeatCell,
     HourCell,
@@ -527,6 +531,111 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             ),
             CommandCenterCard("Data quality", "82/100", "Good", "neutral", "trust"),
         ],
+        executive_brief=ExecutiveBrief(
+            title="AI usage needs review",
+            verdict="3 priority items before the report is clean.",
+            subtitle=(
+                "$1,243 selected-window cost · 480 deduped events · 32 sessions · Last 7 days $799"
+            ),
+            tone="warn",
+            findings=[
+                BriefFinding(
+                    "Spend velocity changed",
+                    "The last 7 days are running materially hotter than the 30-day baseline.",
+                    "$114/day",
+                    "warn",
+                    "usage-windows",
+                    "executive",
+                ),
+                BriefFinding(
+                    "Review estimated savings",
+                    "Caliper found routing changes worth review before the next heavy session.",
+                    "est. $184",
+                    "good",
+                    "advisor",
+                    "executive",
+                ),
+                BriefFinding(
+                    "Check rate-limit pressure",
+                    "Recorded limit samples show elevated pressure.",
+                    "82% peak",
+                    "warn",
+                    "rate-limits",
+                    "audit",
+                ),
+            ],
+        ),
+        decision_queue=[
+            DecisionQueueItem(
+                1,
+                "Spend velocity changed",
+                "The last 7 days are running materially hotter than the 30-day baseline.",
+                "Review rolling windows and daily cost to find the date that moved the trend.",
+                "$114/day",
+                "warn",
+                "usage-windows",
+                "executive",
+            ),
+            DecisionQueueItem(
+                2,
+                "Review budget posture",
+                "monthly cost: $1,754 of $2,250",
+                "Open the Impact section and decide whether the configured budget needs action.",
+                "78%",
+                "warn",
+                "impact",
+                "finance",
+            ),
+            DecisionQueueItem(
+                3,
+                "Review estimated savings",
+                "Caliper found $184.20 of estimated avoidable spend.",
+                "Validate quality and latency before changing model or tier routing.",
+                "3 recommendations",
+                "good",
+                "advisor",
+                "executive",
+            ),
+            DecisionQueueItem(
+                4,
+                "Inspect the highest-cost session",
+                "The top session is $84.10 and long context.",
+                "Inspect tokens, tools, models, and project attribution.",
+                "7% of selected-window cost",
+                "neutral",
+                "top-sessions",
+                "engineer",
+            ),
+        ],
+        comparisons=[
+            ComparisonSignal(
+                "7d spend velocity",
+                "$114.14/day",
+                "30d baseline $58.44/day",
+                "warn",
+                0.953,
+                "usage-windows",
+                "finance",
+            ),
+            ComparisonSignal(
+                "Top project concentration",
+                "33%",
+                "api-server is $412 of selected-window cost",
+                "neutral",
+                None,
+                "projects",
+                "finance",
+            ),
+            ComparisonSignal(
+                "Evidence quality",
+                "82/100",
+                "Good",
+                "neutral",
+                None,
+                "evidence",
+                "audit",
+            ),
+        ],
         advisor_recommendations=[
             AdvisorRecommendation(
                 "Move low-output fast tier calls to standard",
@@ -788,4 +897,7 @@ if __name__ == "__main__":
     )
     (out / "light.html").write_text(render_dashboard(sample_dashboard(), theme="light"))
     (out / "print.html").write_text(render_dashboard(sample_dashboard(), theme="print"))
-    print(f"Wrote 6 variants to {out}/")
+    (out / "share-safe.html").write_text(
+        render_dashboard(sample_dashboard(show_paths=True), share_safe=True)
+    )
+    print(f"Wrote 7 variants to {out}/")

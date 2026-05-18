@@ -1871,6 +1871,20 @@ def dashboard(
             help="Row density: comfortable or compact.",
         ),
     ] = "comfortable",
+    lens: Annotated[
+        str,
+        typer.Option(
+            "--lens",
+            help="Dashboard audience lens: executive, engineer, finance, or audit.",
+        ),
+    ] = "executive",
+    share_safe: Annotated[
+        bool,
+        typer.Option(
+            "--share-safe",
+            help="Redact project paths, project names, session labels, and action commands.",
+        ),
+    ] = False,
     no_deltas: Annotated[
         bool,
         typer.Option(
@@ -1914,6 +1928,8 @@ def dashboard(
         raise _exit_error("--theme must be one of: dark, light, print")
     if density not in {"comfortable", "compact"}:
         raise _exit_error("--density must be one of: comfortable, compact")
+    if lens not in {"executive", "engineer", "finance", "audit"}:
+        raise _exit_error("--lens must be one of: executive, engineer, finance, audit")
     if stdout_html and (output is not None or open_in_browser):
         raise _exit_error("--stdout cannot be combined with --output or --open")
     if demo:
@@ -1927,6 +1943,8 @@ def dashboard(
             "stdout_html",
             "theme",
             "density",
+            "lens",
+            "share_safe",
             "no_deltas",
             "demo",
         )
@@ -1951,7 +1969,9 @@ def dashboard(
             rolling_options=rolling_options,
             budget_config=budget_config,
         )
-    text = render_dashboard(payload, theme=theme, density=density)
+    text = render_dashboard(
+        payload, theme=theme, density=density, default_lens=lens, share_safe=share_safe
+    )
     should_open = open_in_browser or (
         output is None and not stdout_html and _dashboard_stdout_is_interactive()
     )

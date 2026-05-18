@@ -57,12 +57,16 @@ from caliper.budgets import (
 from caliper.dashboards.data_models import (
     AdvisorRecommendation,
     Banner,
+    BriefFinding,
     CaliperMeta,
     CategoryCount,
     CommandCenterCard,
+    ComparisonSignal,
     DailyPoint,
     Dashboard,
+    DecisionQueueItem,
     EvidenceRow,
+    ExecutiveBrief,
     Forecast,
     HeatCell,
     HourCell,
@@ -219,6 +223,32 @@ def build_handoff_dashboard(
         rate_limit_pressure=rate_limit_pressure,
         quality_score=quality_score,
     )
+    comparisons = _build_comparisons(
+        totals=totals,
+        usage_windows=usage_windows,
+        by_project=by_project,
+        by_model=by_model,
+        top_sessions=top_sessions,
+        rate_limit_pressure=rate_limit_pressure,
+        quality_score=quality_score,
+    )
+    decision_queue = _build_decision_queue(
+        total=total,
+        impact_cards=impact_cards,
+        advisor_recommendations=advisor_recommendations,
+        top_sessions=top_sessions,
+        by_project=by_project,
+        by_model=by_model,
+        rate_limit_pressure=rate_limit_pressure,
+        quality_score=quality_score,
+        comparisons=comparisons,
+    )
+    executive_brief = _build_executive_brief(
+        totals=totals,
+        usage_windows=usage_windows,
+        decision_queue=decision_queue,
+        comparisons=comparisons,
+    )
 
     return Dashboard(
         caliper=CaliperMeta(version=__version__, schema_version=2),
@@ -240,6 +270,9 @@ def build_handoff_dashboard(
         usage_mix=usage_mix,
         rate_limit_pressure=rate_limit_pressure,
         quality_score=quality_score,
+        executive_brief=executive_brief,
+        decision_queue=decision_queue,
+        comparisons=comparisons,
         heatmap=heatmap,
         recap=recap,
         banner=banner,
@@ -1345,6 +1378,471 @@ def _build_command_center(
             metric="trust",
         ),
     ]
+
+
+def _build_comparisons(
+    *,
+    totals: Totals,
+    usage_windows: list[UsageWindow],
+    by_project: list[ProjectRow],
+    by_model: list[ModelRow],
+    top_sessions: list[SessionRow],
+    rate_limit_pressure: RateLimitPressure,
+    quality_score: QualityScore,
+) -> list[ComparisonSignal]:
+    windows = {window.days: window for window in usage_windows}
+    out: list[ComparisonSignal] = []
+
+    seven = windows.get(7)
+    thirty = windows.get(30)
+    ninety = windows.get(90)
+    if seven and thirty and thirty.cost_usd > 0:
+        seven_daily = seven.cost_usd / seven.days
+        thirty_daily = thirty.cost_usd / thirty.days
+        delta = (seven_daily - thirty_daily) / thirty_daily
+        out.append(
+            ComparisonSignal(
+                label="7d spend velocity",
+                value=f"{_format_money(seven_daily)}/day",
+                detail=f"30d baseline {_format_money(thirty_daily)}/day",
+                delta_pct=delta,
+                tone=_delta_tone(delta, high_bad=True),
+                anchor="usage-windows",
+                lens="finance",
+            )
+        )
+    if thirty and ninety and ninety.cost_usd > 0:
+        thirty_daily = thirty.cost_usd / thirty.days
+        ninety_daily = ninety.cost_usd / ninety.days
+        delta = (thirty_daily - ninety_daily) / ninety_daily
+        out.append(
+            ComparisonSignal(
+                label="30d baseline",
+                value=f"{_format_money(thirty_daily)}/day",
+                detail=f"90d baseline {_format_money(ninety_daily)}/day",
+                delta_pct=delta,
+                tone=_delta_tone(delta, high_bad=True),
+                anchor="usage-windows",
+                lens="executive",
+            )
+        )
+
+    delta_specs = (
+        (
+            "Previous cost",
+            totals.delta_cost_pct,
+            "Cost vs previous equal window",
+            "cost-over-time",
+            True,
+        ),
+        (
+            "Previous tokens",
+            totals.delta_tokens_pct,
+            "Tokens vs previous equal window",
+            "usage-mix",
+            True,
+        ),
+        (
+            "Previous sessions",
+            totals.delta_sessions_pct,
+            "Sessions vs previous equal window",
+            "top-sessions",
+            True,
+        ),
+        (
+            "Cache movement",
+            totals.delta_cache_pct,
+            "Cache hit rate vs previous equal window",
+            "usage-mix",
+            False,
+        ),
+    )
+    for label, delta, detail, anchor, high_bad in delta_specs:
+        if delta is None:
+            continue
+        out.append(
+            ComparisonSignal(
+                label=label,
+                value=_format_signed_pct(delta),
+                detail=detail,
+                delta_pct=delta,
+                tone=_delta_tone(delta, high_bad=high_bad),
+                anchor=anchor,
+                lens="engineer" if label == "Cache movement" else "executive",
+            )
+        )
+
+    total_cost = totals.cost_usd
+    if total_cost > 0 and by_project:
+        top = max(by_project, key=lambda row: row.cost_usd)
+        share = top.cost_usd / total_cost
+        out.append(
+            ComparisonSignal(
+                label="Top project concentration",
+                value=_format_pct_round(share),
+                detail=f"{top.name} is {_format_money(top.cost_usd)} of selected-window cost",
+                delta_pct=None,
+                tone="warn" if share >= 0.5 else "neutral",
+                anchor="projects",
+                lens="finance",
+            )
+        )
+    if total_cost > 0 and by_model:
+        top_model = max(by_model, key=lambda row: row.cost_usd)
+        share = top_model.cost_usd / total_cost
+        out.append(
+            ComparisonSignal(
+                label="Top model concentration",
+                value=_format_pct_round(share),
+                detail=(
+                    f"{_humanize_model(top_model.model)} is "
+                    f"{_format_money(top_model.cost_usd)} of cost"
+                ),
+                delta_pct=None,
+                tone="warn" if share >= 0.5 else "neutral",
+                anchor="models",
+                lens="engineer",
+            )
+        )
+    if total_cost > 0 and top_sessions:
+        top_session = top_sessions[0]
+        share = top_session.cost_usd / total_cost
+        out.append(
+            ComparisonSignal(
+                label="Highest session share",
+                value=_format_pct_round(share),
+                detail=f"{_format_money(top_session.cost_usd)} · {top_session.reason}",
+                delta_pct=None,
+                tone="warn" if share >= 0.10 else "neutral",
+                anchor="top-sessions",
+                lens="engineer",
+            )
+        )
+
+    peak_limit = max(
+        [
+            value
+            for value in (
+                rate_limit_pressure.peak_primary_pct,
+                rate_limit_pressure.peak_secondary_pct,
+            )
+            if value is not None
+        ],
+        default=None,
+    )
+    out.append(
+        ComparisonSignal(
+            label="Rate-limit signal",
+            value=_format_pct_round(peak_limit) if peak_limit is not None else "Unknown",
+            detail=(
+                f"{rate_limit_pressure.sample_count:,} samples"
+                if rate_limit_pressure.sample_count
+                else "No rate-limit samples recorded"
+            ),
+            delta_pct=None,
+            tone=rate_limit_pressure.tone if peak_limit is not None else "neutral",
+            anchor="rate-limits",
+            lens="audit",
+        )
+    )
+    out.append(
+        ComparisonSignal(
+            label="Evidence quality",
+            value=f"{quality_score.score}/100",
+            detail=quality_score.grade,
+            delta_pct=None,
+            tone=quality_score.tone,
+            anchor="evidence",
+            lens="audit",
+        )
+    )
+    return out
+
+
+def _build_decision_queue(
+    *,
+    total: Aggregate,
+    impact_cards: list[ImpactCard],
+    advisor_recommendations: list[AdvisorRecommendation],
+    top_sessions: list[SessionRow],
+    by_project: list[ProjectRow],
+    by_model: list[ModelRow],
+    rate_limit_pressure: RateLimitPressure,
+    quality_score: QualityScore,
+    comparisons: list[ComparisonSignal],
+) -> list[DecisionQueueItem]:
+    total_cost = float(total.costs.cost_usd)
+    raw: list[DecisionQueueItem] = []
+
+    def add(
+        title: str,
+        detail: str,
+        action: str,
+        evidence: str,
+        *,
+        tone: str = "neutral",
+        anchor: str = "",
+        lens: str = "all",
+    ) -> None:
+        if title in {item.title for item in raw}:
+            return
+        raw.append(
+            DecisionQueueItem(
+                rank=0,
+                title=title,
+                detail=detail,
+                action=action,
+                evidence=evidence,
+                tone=tone,  # type: ignore[arg-type]
+                anchor=anchor,
+                lens=lens,  # type: ignore[arg-type]
+            )
+        )
+
+    if not total.totals.events:
+        add(
+            "Connect usage data",
+            "No deduped usage events landed in the selected dashboard window.",
+            "Run caliper doctor and verify vendor log locations.",
+            "0 events in selected window",
+            tone="warn",
+            anchor="metric-glossary",
+            lens="executive",
+        )
+
+    budget = next((card for card in impact_cards if card.label == "Budget risk"), None)
+    if budget and budget.tone in {"critical", "warn"}:
+        add(
+            "Review budget posture",
+            budget.detail,
+            "Open the Impact section and decide whether the configured budget needs action.",
+            budget.value,
+            tone=budget.tone,
+            anchor="impact",
+            lens="finance",
+        )
+
+    velocity = next((item for item in comparisons if item.label == "7d spend velocity"), None)
+    if velocity and velocity.tone in {"critical", "warn"}:
+        add(
+            "Spend velocity changed",
+            velocity.detail,
+            "Review rolling windows and daily cost to find the date that moved the trend.",
+            velocity.value,
+            tone=velocity.tone,
+            anchor=velocity.anchor,
+            lens="executive",
+        )
+
+    if total_cost > 0 and by_project:
+        top_project = max(by_project, key=lambda row: row.cost_usd)
+        share = top_project.cost_usd / total_cost
+        if share >= 0.45:
+            add(
+                "Project concentration is high",
+                (
+                    f"{top_project.name} accounts for {_format_pct_round(share)} "
+                    "of selected-window cost."
+                ),
+                "Check the Projects table before treating the spend trend as broad usage.",
+                f"{_format_money(top_project.cost_usd)} in {top_project.events:,} events",
+                tone="warn",
+                anchor="projects",
+                lens="finance",
+            )
+
+    if total_cost > 0 and by_model:
+        top_model = max(by_model, key=lambda row: row.cost_usd)
+        share = top_model.cost_usd / total_cost
+        if share >= 0.45:
+            add(
+                "Model concentration is high",
+                (
+                    f"{_humanize_model(top_model.model)} accounts for "
+                    f"{_format_pct_round(share)} of cost."
+                ),
+                "Inspect model/tier mix before changing routing or budgets.",
+                f"{_format_money(top_model.cost_usd)} across {top_model.events:,} events",
+                tone="warn",
+                anchor="models",
+                lens="engineer",
+            )
+
+    savings = sum(row.savings_usd for row in advisor_recommendations)
+    if savings > 0:
+        add(
+            "Review estimated savings",
+            f"Caliper found {_format_money(savings)} of estimated avoidable spend.",
+            "Review recommendations, then validate quality and latency before changing routing.",
+            f"{len(advisor_recommendations):,} recommendations",
+            tone="good",
+            anchor="advisor",
+            lens="executive",
+        )
+
+    if total_cost > 0 and top_sessions:
+        top_session = top_sessions[0]
+        share = top_session.cost_usd / total_cost
+        add(
+            "Inspect the highest-cost session",
+            f"The top session is {_format_money(top_session.cost_usd)} and {top_session.reason}.",
+            "Open the session table and inspect tokens, tools, models, and project attribution.",
+            f"{_format_pct_round(share)} of selected-window cost",
+            tone="warn" if share >= 0.10 else "neutral",
+            anchor="top-sessions",
+            lens="engineer",
+        )
+
+    if rate_limit_pressure.tone in {"critical", "warn"}:
+        add(
+            "Check rate-limit pressure",
+            "Recorded limit samples show elevated usage pressure.",
+            "Review latest primary and secondary pressure before planning another heavy session.",
+            f"{rate_limit_pressure.sample_count:,} samples",
+            tone=rate_limit_pressure.tone,
+            anchor="rate-limits",
+            lens="audit",
+        )
+    elif rate_limit_pressure.sample_count == 0:
+        add(
+            "Rate-limit pressure is unknown",
+            "No rate-limit samples were recorded in this window.",
+            "Treat missing pressure as unknown, not zero.",
+            "0 samples",
+            tone="neutral",
+            anchor="rate-limits",
+            lens="audit",
+        )
+
+    if quality_score.score < 75:
+        add(
+            "Review data quality",
+            f"Evidence quality is {quality_score.score}/100 ({quality_score.grade}).",
+            "Check pricing, parser, and attribution notes before acting on exact dollar values.",
+            quality_score.grade,
+            tone=quality_score.tone,
+            anchor="evidence",
+            lens="audit",
+        )
+
+    if not raw:
+        add(
+            "Keep monitoring",
+            "No urgent cost, usage, reliability, or evidence issues stand out in this window.",
+            "Use the rolling windows and forecast as the next periodic check.",
+            f"{total.totals.events:,} deduped events",
+            tone="good",
+            anchor="command-center",
+            lens="executive",
+        )
+
+    ordered = sorted(
+        raw,
+        key=lambda item: (_tone_rank(item.tone), item.lens != "executive", item.title),
+    )[:7]
+    return [dataclasses.replace(item, rank=index) for index, item in enumerate(ordered, start=1)]
+
+
+def _build_executive_brief(
+    *,
+    totals: Totals,
+    usage_windows: list[UsageWindow],
+    decision_queue: list[DecisionQueueItem],
+    comparisons: list[ComparisonSignal],
+) -> ExecutiveBrief:
+    if totals.events == 0:
+        return ExecutiveBrief(
+            title="No AI usage detected",
+            verdict="Setup or date range needs review",
+            subtitle=(
+                "The selected window has no deduped usage events, so premium analysis is limited."
+            ),
+            tone="warn",
+            findings=[
+                BriefFinding(
+                    title="Verify data sources",
+                    detail=(
+                        "Run caliper doctor and confirm that vendor logs exist for this date range."
+                    ),
+                    impact="No reportable usage",
+                    tone="warn",
+                    anchor="metric-glossary",
+                    lens="executive",
+                )
+            ],
+        )
+
+    top_tone = min((item.tone for item in decision_queue), key=_tone_rank, default="neutral")
+    warn_count = sum(1 for item in decision_queue if item.tone in {"critical", "warn"})
+    good_count = sum(1 for item in decision_queue if item.tone == "good")
+    seven = next((window for window in usage_windows if window.days == 7), None)
+    seven_text = (
+        f"Last 7 days {_format_money(seven.cost_usd)}"
+        if seven is not None
+        else "7-day trend unavailable"
+    )
+    subtitle = (
+        f"{_format_money(totals.cost_usd)} selected-window cost · "
+        f"{totals.events:,} deduped events · {totals.sessions:,} sessions · {seven_text}"
+    )
+    if warn_count:
+        title = "AI usage needs review"
+        verdict = (
+            f"{warn_count} priority item{'s' if warn_count != 1 else ''} "
+            "before the report is clean."
+        )
+    elif good_count:
+        title = "AI usage is healthy with optimization upside"
+        verdict = "No urgent issues; review the savings queue when convenient."
+    else:
+        title = "AI usage is under control"
+        verdict = "No material cost, reliability, or evidence issue stands out."
+
+    findings = [
+        BriefFinding(
+            title=item.title,
+            detail=item.detail,
+            impact=item.evidence,
+            tone=item.tone,
+            anchor=item.anchor,
+            lens=item.lens,
+        )
+        for item in decision_queue[:5]
+    ]
+    if not findings:
+        findings = [
+            BriefFinding(
+                title="Stable report",
+                detail="No decision-queue item was generated for this window.",
+                impact=f"{len(comparisons):,} comparisons checked",
+                tone="good",
+                anchor="command-center",
+                lens="executive",
+            )
+        ]
+    return ExecutiveBrief(
+        title=title, verdict=verdict, subtitle=subtitle, tone=top_tone, findings=findings
+    )  # type: ignore[arg-type]
+
+
+def _delta_tone(delta: float | None, *, high_bad: bool) -> str:
+    if delta is None:
+        return "neutral"
+    if high_bad:
+        if delta >= 0.25:
+            return "warn"
+        if delta <= -0.15:
+            return "good"
+    else:
+        if delta <= -0.10:
+            return "warn"
+        if delta >= 0.10:
+            return "good"
+    return "neutral"
+
+
+def _tone_rank(tone: str) -> int:
+    return {"critical": 0, "warn": 1, "good": 2, "neutral": 3}.get(tone, 3)
 
 
 def _format_signed_pct(value: float | None) -> str:
