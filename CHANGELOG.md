@@ -2,6 +2,29 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.35 - 2026-05-18
+
+### Changed
+
+- Made usage-event deduplication always-on for normal Caliper data loading.
+  The deprecated `--no-dedupe` flag is now hidden and ignored so user-facing
+  analytics cannot accidentally inflate cost, token, session, dashboard,
+  receipt, TUI, export, insight, or forecast totals.
+- Tightened dedupe identity matching to avoid collapsing real usage: strong
+  vendor identities are scoped by vendor and session, `message_id +
+  request_id` can dedupe when wrapper event IDs differ, lone request IDs only
+  dedupe with an exact matching usage payload, and semantic matching only
+  applies when vendor-level IDs are absent.
+
+### Fixed
+
+- Copied or re-read local usage records no longer double-count cost and token
+  totals when they represent the same underlying event.
+- Duplicate rate-limit samples are now removed before limits, statusline,
+  live, JSON, dashboard, and export outputs consume them.
+- Dedupe metadata now reports skipped usage-event duplicates and rate-limit
+  sample duplicates separately in JSON output.
+
 ## 0.0.34 - 2026-05-18
 
 ### Changed

@@ -294,7 +294,8 @@ NoDedupeOpt = Annotated[
     typer.Option(
         "--no-dedupe",
         "--disable-deduplication",
-        help="Keep duplicate events. Honest, not preferred.",
+        help="Deprecated and ignored. Caliper always deduplicates usage data.",
+        hidden=True,
     ),
 ]
 NoParseCacheOpt = Annotated[
@@ -2248,7 +2249,6 @@ def init(
         "# top_threads = 10\n"
         "# rate_limit_sample_limit = 100\n"
         "# include_all_rate_limit_samples = false\n"
-        "# no_dedupe = false\n"
         "# no_parse_cache = false\n"
         "\n"
         "# Budgets. Used by `caliper budgets check` to gate CI.\n"

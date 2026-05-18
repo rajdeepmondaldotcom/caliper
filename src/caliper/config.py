@@ -227,7 +227,6 @@ def build_options(
         "--rate-limit-sample-limit",
     )
     width_value = _positive_optional_int(cfg(loaded, "width", width, None), "--width")
-    no_dedupe_value = cfg_bool(loaded, "no_dedupe", no_dedupe, False)
     no_parse_cache_value = cfg_bool(loaded, "no_parse_cache", no_parse_cache, False)
     project_raw = cfg(loaded, "project", project, None)
     project_value = str(project_raw).strip() if project_raw else None
@@ -246,7 +245,7 @@ def build_options(
         unknown_service_tier=unknown_service_tier_value,
         tier_overrides=cfg_optional_path(loaded, "tier_overrides", tier_overrides),
         rates_file=cfg_optional_path(loaded, "rates_file", rates_file),
-        dedupe=not no_dedupe_value,
+        dedupe=True,
         parse_cache=not no_parse_cache_value,
         default_model=str(cfg(loaded, "default_model", default_model, "gpt-5.5")),
         show_prompts=cfg_bool(loaded, "show_prompts", show_prompts, False),

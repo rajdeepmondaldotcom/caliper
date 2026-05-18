@@ -412,7 +412,10 @@ def report_payload(
             "vendor_event_counts": vendor_event_counts(result),
             "dedupe": {
                 "duplicates": result.duplicates,
+                "usage_event_duplicates": result.duplicates,
                 "by_strategy": dict(result.dedupe_stats),
+                "rate_limit_sample_duplicates": result.rate_limit_sample_duplicates,
+                "rate_limit_samples_by_strategy": dict(result.rate_limit_sample_dedupe_stats),
             },
             "evidence": evidence_metadata(result, total),
             "row_count": len(rows),
@@ -785,7 +788,12 @@ def _rank_models(row: Aggregate) -> list[str]:
 def _print_report_footer(console: Console, result: LoadResult, total: Aggregate) -> None:
     events_text = format_int(total.totals.events)
     duplicates_text = format_int(result.duplicates)
-    console.print(f"Events: {events_text} | Duplicates skipped: {duplicates_text}")
+    line = f"Events: {events_text} | Duplicates skipped: {duplicates_text}"
+    if result.rate_limit_sample_duplicates:
+        line += (
+            f" | Rate-limit duplicates skipped: {format_int(result.rate_limit_sample_duplicates)}"
+        )
+    console.print(line)
     if total.costs.vendor_reported_events:
         console.print(
             "Reported vs calculated: "

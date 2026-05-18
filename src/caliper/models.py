@@ -666,3 +666,5 @@ class LoadResult:
     parser_issues: list[ParserIssue] = field(default_factory=list)
     vendor_stats: dict[str, VendorParseStats] = field(default_factory=dict)
     dedupe_stats: dict[str, int] = field(default_factory=dict)
+    rate_limit_sample_duplicates: int = 0
+    rate_limit_sample_dedupe_stats: dict[str, int] = field(default_factory=dict)

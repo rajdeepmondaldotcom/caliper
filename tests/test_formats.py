@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from caliper.cli import app
 
-from .conftest import make_state_db, token_event, turn_context, write_session
+from .conftest import make_state_db, rate_limit_only_event, token_event, turn_context, write_session
 
 runner = CliRunner()
 
@@ -243,6 +243,45 @@ def test_grouped_json_bounds_rate_limit_samples_by_default(tmp_path) -> None:
     assert len(exhaustive_payload["rate_limit_samples"]) == 3
     assert exhaustive_payload["metadata"]["rate_limit_sample_limit"] is None
     assert exhaustive_payload["metadata"]["rate_limit_samples_truncated"] is False
+
+
+def test_grouped_json_reports_rate_limit_sample_dedupe(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    sample = rate_limit_only_event(now)
+    write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-dupe-samples.jsonl",
+        [sample, sample],
+    )
+    result = _invoke(
+        [
+            "daily",
+            "--days",
+            "1",
+            "--until",
+            (now + dt.timedelta(minutes=1)).isoformat(),
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(tmp_path / "missing.sqlite"),
+            "--codex-config",
+            str(tmp_path / "missing.toml"),
+            "--format",
+            "json",
+            "--vendor",
+            "openai-codex",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+
+    assert len(payload["rate_limit_samples"]) == 1
+    assert payload["metadata"]["rate_limit_sample_count"] == 1
+    assert payload["metadata"]["dedupe"]["rate_limit_sample_duplicates"] == 1
+    assert payload["metadata"]["dedupe"]["rate_limit_samples_by_strategy"] == {
+        "rate_limit_sample": 1
+    }
 
 
 def test_table_warns_when_model_has_unpriced_costs(tmp_path) -> None:

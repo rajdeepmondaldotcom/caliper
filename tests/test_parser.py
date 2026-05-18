@@ -288,6 +288,92 @@ def test_dedupe_keeps_identical_usage_from_different_sessions(tmp_path) -> None:
     assert result.duplicates == 0
 
 
+def test_dedupe_keeps_identical_usage_from_same_session_at_different_times(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    usage = {
+        "input_tokens": 1000,
+        "cached_input_tokens": 0,
+        "output_tokens": 100,
+        "total_tokens": 1100,
+    }
+    write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-real-usage.jsonl",
+        [
+            turn_context(cwd="/tmp/project-alpha"),
+            token_event(now, usage),
+            token_event(now + dt.timedelta(seconds=1), usage),
+        ],
+    )
+
+    options = build_options(
+        days=1,
+        until=(now + dt.timedelta(seconds=2)).isoformat(),
+        session_root=session_root,
+        state_db=tmp_path / "missing.sqlite",
+        codex_config=tmp_path / "missing.toml",
+    )
+    result = load_usage(options)
+
+    assert len(result.events) == 2
+    assert result.duplicates == 0
+
+
+def test_dedupe_collapses_copied_codex_records_with_same_session_identity(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    usage = {
+        "input_tokens": 1000,
+        "cached_input_tokens": 0,
+        "output_tokens": 100,
+        "total_tokens": 1100,
+    }
+    session_name = "rollout-2026-05-12T00-00-00-copy.jsonl"
+    events = [turn_context(cwd="/tmp/project-alpha"), token_event(now, usage)]
+    first = write_session(session_root, session_name, events)
+    copied = session_root / "2026" / "05" / "13" / session_name
+    copied.parent.mkdir(parents=True)
+    copied.write_text(first.read_text())
+
+    options = build_options(
+        days=1,
+        until=(now + dt.timedelta(seconds=1)).isoformat(),
+        session_root=session_root,
+        state_db=tmp_path / "missing.sqlite",
+        codex_config=tmp_path / "missing.toml",
+    )
+    result = load_usage(options)
+
+    assert len(result.events) == 1
+    assert result.duplicates == 1
+    assert result.dedupe_stats == {"semantic_usage": 1}
+
+
+def test_rate_limit_samples_are_deduped(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime.now(tz=dt.UTC)
+    sample = rate_limit_only_event(now)
+    write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-limits-dupe.jsonl",
+        [sample, sample],
+    )
+
+    options = build_options(
+        days=1,
+        until=(now + dt.timedelta(seconds=1)).isoformat(),
+        session_root=session_root,
+        state_db=tmp_path / "missing.sqlite",
+        codex_config=tmp_path / "missing.toml",
+    )
+    result = load_usage(options)
+
+    assert len(result.rate_limit_samples) == 1
+    assert result.rate_limit_sample_duplicates == 1
+    assert result.rate_limit_sample_dedupe_stats == {"rate_limit_sample": 1}
+
+
 def test_state_db_loader_tolerates_missing_optional_columns(tmp_path) -> None:
     session_root = tmp_path / "sessions"
     now = dt.datetime.now(tz=dt.UTC)

@@ -91,7 +91,7 @@ class ClaudeCodeParser:
         finally:
             if cache is not None:
                 cache.close()
-        events, dedupe_stats = dedupe_usage_events(events, enabled=options.dedupe)
+        events, dedupe_stats = dedupe_usage_events(events)
         events.sort(key=lambda event: event.timestamp)
         return LoadResult(
             events=events,

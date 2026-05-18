@@ -96,3 +96,12 @@ def test_pricing_source_is_case_insensitive(tmp_path) -> None:
     )
 
     assert options.pricing_source == "litellm"
+
+
+def test_no_dedupe_option_is_ignored(tmp_path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text("no_dedupe = true\n")
+
+    options = build_options(days=1, no_dedupe=True, config=config)
+
+    assert options.dedupe is True

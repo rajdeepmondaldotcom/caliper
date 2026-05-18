@@ -6,13 +6,14 @@ import datetime as dt
 import json
 import sqlite3
 import tomllib
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from contextlib import closing
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from caliper.dedupe import DedupeStats, dedupe_usage_events
+from caliper.dedupe import DedupeStats, dedupe_rate_limit_samples, dedupe_usage_events
 from caliper.models import (
     VENDOR_OPENAI_CODEX,
     LoadResult,
@@ -35,18 +36,12 @@ PARSER_CACHE_VERSION = 6
 
 @dataclass
 class UsageLoadAccumulator:
-    options: RuntimeOptions
     start_utc: dt.datetime
     end_utc: dt.datetime
     events: list[UsageEvent] = field(default_factory=list)
-    duplicates: int = 0
-    seen: set[tuple] = field(default_factory=set)
-    tier_sources: dict[str, int] = field(default_factory=dict)
-    plan_types: set[str] = field(default_factory=set)
     rate_limit_samples: list[RateLimitSample] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     reset_warnings: set[Path] = field(default_factory=set)
-    event_paths: set[Path] = field(default_factory=set)
 
     def add_record(self, path: Path, record: ParsedSessionRecord) -> None:
         self._add_sample(record.sample)
@@ -58,24 +53,27 @@ class UsageLoadAccumulator:
         self._add_usage_event(path, record.event)
 
     def result(self, vendor_stats: dict[str, VendorParseStats] | None = None) -> LoadResult:
-        self.rate_limit_samples.sort(key=lambda sample: sample.timestamp)
-        self.events.sort(key=lambda event: event.timestamp)
+        events, event_stats = dedupe_usage_events(self.events)
+        samples, sample_stats = dedupe_rate_limit_samples(self.rate_limit_samples)
+        samples.sort(key=lambda sample: sample.timestamp)
+        events.sort(key=lambda event: event.timestamp)
         return LoadResult(
-            events=self.events,
-            duplicates=self.duplicates,
-            tier_sources=self.tier_sources,
-            plan_types=self.plan_types,
-            rate_limit_samples=self.rate_limit_samples,
+            events=events,
+            duplicates=event_stats.duplicates,
+            tier_sources=_tier_sources_from_events(events),
+            plan_types=_plan_types_from_records(events, samples),
+            rate_limit_samples=samples,
             warnings=self.warnings,
             vendor_stats=vendor_stats or {},
+            dedupe_stats=event_stats.by_strategy,
+            rate_limit_sample_duplicates=sample_stats.duplicates,
+            rate_limit_sample_dedupe_stats=sample_stats.by_strategy,
         )
 
     def _add_sample(self, sample: RateLimitSample | None) -> None:
         if sample is None or not (self.start_utc <= sample.timestamp < self.end_utc):
             return
         self.rate_limit_samples.append(sample)
-        if sample.plan_type:
-            self.plan_types.add(sample.plan_type)
 
     def _event_in_window(self, event: UsageEvent) -> bool:
         return self.start_utc <= event.timestamp < self.end_utc
@@ -87,13 +85,7 @@ class UsageLoadAccumulator:
         self.reset_warnings.add(path)
 
     def _add_usage_event(self, path: Path, event: UsageEvent) -> None:
-        key = usage_key(path, event.timestamp.isoformat(), event.usage)
-        if self.options.dedupe and key in self.seen:
-            self.duplicates += 1
-            return
-        self.seen.add(key)
-        self.tier_sources[event.tier_source] = self.tier_sources.get(event.tier_source, 0) + 1
-        self.event_paths.add(path)
+        del path
         self.events.append(event)
 
 
@@ -112,20 +104,6 @@ def _safe_int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
-
-
-def usage_key(path: Path, timestamp: str, usage: Usage) -> tuple:
-    return (
-        str(path),
-        timestamp,
-        usage.input_tokens,
-        usage.cache_creation_input_tokens,
-        usage.cache_read_input_tokens,
-        usage.cache_creation_input_1h_tokens,
-        usage.output_tokens,
-        usage.reasoning_output_tokens,
-        usage.total_tokens,
-    )
 
 
 def _usage_delta(current: Usage, previous: Usage | None) -> Usage:
@@ -509,7 +487,7 @@ def load_codex_usage(
     config_tier = current_config_service_tier(options.config_path)
     overrides = load_tier_overrides(options.tier_overrides)
     metadata = load_thread_metadata(options.state_db)
-    accumulator = UsageLoadAccumulator(options, start_utc, end_utc)
+    accumulator = UsageLoadAccumulator(start_utc, end_utc)
     cache = ParseCache.default() if options.parse_cache else None
 
     if not options.session_root.exists():
@@ -559,17 +537,19 @@ def load_codex_usage(
         if cache is not None:
             cache.close()
 
-    return accumulator.result(
+    result = accumulator.result()
+    return replace(
+        result,
         vendor_stats={
             VENDOR_OPENAI_CODEX: VendorParseStats(
                 vendor=VENDOR_OPENAI_CODEX,
                 discovered_files=len(paths),
-                files_with_events=len(accumulator.event_paths),
+                files_with_events=len({event.path for event in result.events}),
                 unsupported_files=0,
-                event_count=len(accumulator.events),
-                warning_count=len(accumulator.warnings),
+                event_count=len(result.events),
+                warning_count=len(result.warnings),
             )
-        }
+        },
     )
 
 
@@ -617,6 +597,8 @@ def load_usage(
     parser_issues = []
     vendor_stats: dict[str, VendorParseStats] = {}
     dedupe_stats = DedupeStats()
+    rate_limit_sample_duplicates = 0
+    rate_limit_sample_dedupe_stats = DedupeStats()
     vendors = enabled_vendors(options)
     total_files = 0
     for vendor in vendors:
@@ -633,6 +615,7 @@ def load_usage(
             tier_sources[key] = tier_sources.get(key, 0) + value
         plan_types.update(result.plan_types)
         rate_limit_samples.extend(result.rate_limit_samples)
+        rate_limit_sample_duplicates += result.rate_limit_sample_duplicates
         warnings.extend(result.warnings)
         parser_issues.extend(result.parser_issues)
         vendor_stats.update(result.vendor_stats)
@@ -642,13 +625,25 @@ def load_usage(
                 by_strategy=result.dedupe_stats,
             )
         )
+        rate_limit_sample_dedupe_stats = rate_limit_sample_dedupe_stats.merged(
+            DedupeStats(
+                duplicates=result.rate_limit_sample_duplicates,
+                by_strategy=result.rate_limit_sample_dedupe_stats,
+            )
+        )
     if options.project:
         events = [event for event in events if _event_matches_project(event, options.project)]
     events, loaded_stats = _dedupe_loaded_events(events, options)
     duplicates += loaded_stats.duplicates
     dedupe_stats = dedupe_stats.merged(loaded_stats)
+    rate_limit_samples, loaded_sample_stats = dedupe_rate_limit_samples(rate_limit_samples)
+    rate_limit_sample_duplicates += loaded_sample_stats.duplicates
+    rate_limit_sample_dedupe_stats = rate_limit_sample_dedupe_stats.merged(loaded_sample_stats)
     events.sort(key=lambda event: event.timestamp)
     rate_limit_samples.sort(key=lambda sample: sample.timestamp)
+    tier_sources = _tier_sources_from_events(events)
+    plan_types = _plan_types_from_records(events, rate_limit_samples)
+    vendor_stats = _recount_vendor_stats(vendor_stats, events)
     warnings.extend(warnings_from_parser_issues(parser_issues))
     progress.finished()
     return LoadResult(
@@ -661,6 +656,8 @@ def load_usage(
         parser_issues=parser_issues,
         vendor_stats=vendor_stats,
         dedupe_stats=dedupe_stats.by_strategy,
+        rate_limit_sample_duplicates=rate_limit_sample_duplicates,
+        rate_limit_sample_dedupe_stats=rate_limit_sample_dedupe_stats.by_strategy,
     )
 
 
@@ -678,10 +675,44 @@ def _event_matches_project(event: UsageEvent, project: str) -> bool:
     return target in candidates
 
 
+def _tier_sources_from_events(events: list[UsageEvent]) -> dict[str, int]:
+    return dict(Counter(event.tier_source for event in events if event.tier_source))
+
+
+def _plan_types_from_records(
+    events: list[UsageEvent],
+    samples: list[RateLimitSample],
+) -> set[str]:
+    values = {event.plan_type for event in events if event.plan_type}
+    values.update(sample.plan_type for sample in samples if sample.plan_type)
+    return values
+
+
+def _recount_vendor_stats(
+    vendor_stats: dict[str, VendorParseStats],
+    events: list[UsageEvent],
+) -> dict[str, VendorParseStats]:
+    event_counts: Counter[str] = Counter()
+    paths_by_vendor: defaultdict[str, set[Path]] = defaultdict(set)
+    for event in events:
+        vendor = event.vendor or "unknown"
+        event_counts[vendor] += 1
+        paths_by_vendor[vendor].add(event.path)
+    return {
+        vendor: replace(
+            stats,
+            files_with_events=len(paths_by_vendor.get(vendor, set())),
+            event_count=event_counts.get(vendor, 0),
+        )
+        for vendor, stats in vendor_stats.items()
+    }
+
+
 def _dedupe_loaded_events(
     events: list[UsageEvent], options: RuntimeOptions
 ) -> tuple[list[UsageEvent], DedupeStats]:
-    return dedupe_usage_events(events, enabled=options.dedupe)
+    del options
+    return dedupe_usage_events(events)
 
 
 def _parse_session(

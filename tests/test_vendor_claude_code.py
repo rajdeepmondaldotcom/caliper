@@ -160,7 +160,46 @@ def test_claude_code_dedupes_message_request_pairs(monkeypatch, tmp_path) -> Non
     assert event.usage.cache_read_input_tokens == 200
 
 
-def test_claude_code_no_dedupe_keeps_duplicate_events(monkeypatch, tmp_path) -> None:
+def test_claude_code_dedupes_message_request_even_when_event_ids_differ(
+    monkeypatch, tmp_path
+) -> None:
+    projects = tmp_path / "claude" / "projects" / "-tmp-project-alpha"
+    projects.mkdir(parents=True)
+    row = {
+        "sessionId": "claude-session-1",
+        "timestamp": "2026-05-12T10:00:00.000Z",
+        "requestId": "req-1",
+        "message": {
+            "id": "msg-1",
+            "model": "claude-sonnet-4-6-20260501",
+            "usage": {"input_tokens": 100, "output_tokens": 25},
+        },
+    }
+    first = {"uuid": "assistant-event-1", **row}
+    second = {"uuid": "assistant-event-2", **row}
+    (projects / "claude-session-1.jsonl").write_text(
+        "\n".join(json.dumps(item) for item in [first, second]) + "\n"
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+
+    options = build_options(
+        since="2026-05-12",
+        until="2026-05-12",
+        timezone="UTC",
+        session_root=tmp_path / "missing-codex",
+        state_db=tmp_path / "missing-state.sqlite",
+        codex_config=tmp_path / "missing-config.toml",
+        vendors=[VENDOR_CLAUDE_CODE],
+        no_parse_cache=True,
+    )
+    result = load_usage(options)
+
+    assert len(result.events) == 1
+    assert result.duplicates == 1
+    assert result.dedupe_stats == {"message_request": 1}
+
+
+def test_claude_code_no_dedupe_is_ignored(monkeypatch, tmp_path) -> None:
     projects = tmp_path / "claude" / "projects" / "-tmp-project-alpha"
     projects.mkdir(parents=True)
     row = {
@@ -191,5 +230,6 @@ def test_claude_code_no_dedupe_keeps_duplicate_events(monkeypatch, tmp_path) -> 
     )
     result = load_usage(options)
 
-    assert len(result.events) == 2
-    assert result.duplicates == 0
+    assert options.dedupe is True
+    assert len(result.events) == 1
+    assert result.duplicates == 1
