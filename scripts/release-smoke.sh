@@ -66,11 +66,16 @@ text_ok receipt_md uv run caliper export receipt --receipt-month 2026-05 --recei
 text_ok receipt_html uv run caliper export receipt --receipt-month 2026-05 --receipt-format html --receipt-row-limit 2
 text_ok dashboard uv run caliper dashboard --lookback-days 1 --no-deltas --output "$OUT/caliper.html"
 test -s "$OUT/caliper.html"
-if grep -E '://|<script|<link' "$OUT/caliper.html" >/dev/null; then
-  echo "dashboard privacy grep failed"
-  grep -En '://|<script|<link' "$OUT/caliper.html" | head
-  exit 1
-fi
+python - "$OUT/caliper.html" <<'PY'
+from pathlib import Path
+import sys
+
+html = Path(sys.argv[1]).read_text(encoding="utf-8")
+assert html.count("<script>") == 1, "expected exactly one inline dashboard script"
+assert html.count("</script>") == 1, "expected exactly one inline dashboard script close"
+for needle in ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import("):
+    assert needle not in html, f"dashboard privacy gate found {needle!r}"
+PY
 printf 'dashboard ok html bytes=%s\n' "$(wc -c < "$OUT/caliper.html" | tr -d ' ')"
 json_ok budgets uv run caliper budgets check --config "$ROOT/.caliper.toml" --output-format json
 text_ok live uv run caliper live --refresh-max-ticks 1 --refresh-interval 0.5

@@ -2,6 +2,30 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.36 - 2026-05-18
+
+### Added
+
+- Expanded the static dashboard into a richer AI-usage analysis report with a
+  command center, savings advisor, usage-mix drilldowns, top session outliers,
+  rate-limit pressure, and evidence-quality scoring.
+- Added inline-only dashboard controls for table sorting, usage-mix filtering,
+  and sticky section navigation while keeping the HTML self-contained.
+- Dashboard payloads now expose richer analytics contracts for advisor
+  recommendations, session outliers, usage mix, rate-limit pressure, and
+  quality signals.
+
+### Changed
+
+- `caliper dashboard` now loads a deduped 90-day rolling source alongside the
+  selected report window so 7, 30, and 90 day usage cards stay visible and
+  comparable even when the main window is shorter.
+- Token display now scales to billions with a `B` suffix while cost formatting
+  keeps dollar amounts numeric.
+- Release smoke gates now allow exactly one inline dashboard script and still
+  reject external resources, script sources, fetches, imports, and protocol
+  URLs.
+
 ## 0.0.35 - 2026-05-18
 
 ### Changed

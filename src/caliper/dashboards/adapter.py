@@ -7,7 +7,7 @@ insights / forecasts / evidence helpers and that contract.
 
 Public entrypoint:
 
-    build_handoff_dashboard(result, options, *, with_deltas=True) -> Dashboard
+    build_handoff_dashboard(result, options, *, with_deltas=True, ...) -> Dashboard
 
 Everything below is internal and named `_build_*` for grep-ability.
 """
@@ -16,13 +16,18 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+from decimal import Decimal
 from typing import Any
 
 from caliper.aggregation import (
     aggregate_daily,
+    aggregate_events,
     aggregate_model_mode,
     aggregate_projects,
+    aggregate_sessions,
     aggregate_total,
+    aggregate_vendors,
+    event_cost,
 )
 from caliper.analysis.session_shape import (
     CATEGORY_DIAGNOSTIC,
@@ -37,24 +42,45 @@ from caliper.analysis.session_shape import (
     category_label,
     compute_session_shape,
 )
+from caliper.arbitrage import recommend as recommend_arbitrage
+from caliper.budgets import (
+    SEVERITY_BREACH,
+    SEVERITY_WARN,
+    current_period_intervals,
+    max_severity,
+    parse_budgets_table,
+    usage_for_periods,
+)
+from caliper.budgets import (
+    evaluate as evaluate_budgets,
+)
 from caliper.dashboards.data_models import (
+    AdvisorRecommendation,
     Banner,
     CaliperMeta,
     CategoryCount,
+    CommandCenterCard,
     DailyPoint,
     Dashboard,
     EvidenceRow,
     Forecast,
     HeatCell,
     HourCell,
+    ImpactCard,
     Insight,
+    MixRow,
     ModelRow,
     ProjectRow,
+    QualityScore,
+    QualitySignal,
+    RateLimitPressure,
     Recap,
     RecapStat,
+    SessionRow,
     SessionShape,
     ToolCount,
     Totals,
+    UsageWindow,
     WindowMeta,
     YearlyHeatmap,
 )
@@ -64,7 +90,7 @@ from caliper.health import rate_card_age_days
 from caliper.insights import build_insights
 from caliper.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions
 from caliper.parser import load_usage
-from caliper.pricing import load_rate_card, model_vendor
+from caliper.pricing import RateCard, load_rate_card, model_vendor
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -97,6 +123,7 @@ _SEVERITY_MAP = {
 # banner copy. Bump together when adding a new vendor.
 KNOWN_VENDOR_COUNT = 4
 _KNOWN_VENDOR_LABELS = ("Codex", "Claude Code", "Cursor", "Aider")
+ROLLING_USAGE_DAYS = (7, 30, 90)
 
 
 def tool_category(name: str) -> str:
@@ -121,11 +148,16 @@ def build_handoff_dashboard(
     *,
     with_deltas: bool = True,
     generated_at: dt.datetime | None = None,
+    rolling_result: LoadResult | None = None,
+    rolling_options: RuntimeOptions | None = None,
+    budget_config: dict[str, Any] | None = None,
 ) -> Dashboard:
     """Assemble the handoff `Dashboard` payload for `render_dashboard`."""
     from caliper import __version__
 
     rate_card = load_rate_card(options)
+    rolling_source = rolling_result or result
+    rolling_runtime = rolling_options or options
     total = aggregate_total(result, options, rate_card=rate_card)
     daily_aggregates = aggregate_daily(result, options, rate_card=rate_card)
     shape_report = compute_session_shape(result)
@@ -161,6 +193,32 @@ def build_handoff_dashboard(
     banner = _build_banner(result, options)
     heatmap = _build_yearly_heatmap(result, options)
     recap = _build_recap(result, options, total, by_model)
+    usage_windows = _build_usage_windows(rolling_source, rolling_runtime, rate_card)
+    impact_cards = _build_impact_cards(
+        result=result,
+        rolling_result=rolling_source,
+        options=options,
+        rolling_options=rolling_runtime,
+        total=total,
+        by_model=by_model,
+        by_project=by_project,
+        rate_card=rate_card,
+        budget_config=budget_config,
+    )
+    advisor_recommendations = _build_advisor_recommendations(result, rate_card)
+    top_sessions = _build_top_sessions(result, options, rate_card)
+    usage_mix = _build_usage_mix(result, options, rate_card)
+    rate_limit_pressure = _build_rate_limit_pressure(result)
+    quality_score = _build_quality_score(result, total, evidence)
+    command_center = _build_command_center(
+        total=total,
+        usage_windows=usage_windows,
+        impact_cards=impact_cards,
+        advisor_recommendations=advisor_recommendations,
+        top_sessions=top_sessions,
+        rate_limit_pressure=rate_limit_pressure,
+        quality_score=quality_score,
+    )
 
     return Dashboard(
         caliper=CaliperMeta(version=__version__, schema_version=2),
@@ -174,6 +232,14 @@ def build_handoff_dashboard(
         insights=insights,
         forecast=forecast,
         evidence=evidence,
+        usage_windows=usage_windows,
+        impact_cards=impact_cards,
+        command_center=command_center,
+        advisor_recommendations=advisor_recommendations,
+        top_sessions=top_sessions,
+        usage_mix=usage_mix,
+        rate_limit_pressure=rate_limit_pressure,
+        quality_score=quality_score,
         heatmap=heatmap,
         recap=recap,
         banner=banner,
@@ -397,6 +463,90 @@ def _build_daily(
 
 
 # ---------------------------------------------------------------------------
+# Rolling 7 / 30 / 90 day usage windows
+# ---------------------------------------------------------------------------
+
+
+def _build_usage_windows(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+) -> list[UsageWindow]:
+    out: list[UsageWindow] = []
+    end = options.end
+    for days in ROLLING_USAGE_DAYS:
+        start = end - dt.timedelta(days=days)
+        window_options = dataclasses.replace(options, start=start, end=end)
+        scoped = _scoped_result(result, start=start, end=end)
+        total = aggregate_total(
+            scoped,
+            window_options,
+            label=f"Last {days} days",
+            rate_card=rate_card,
+        )
+        daily_cost, daily_tokens = _daily_window_sparklines(scoped, window_options, rate_card)
+        input_tokens = total.totals.input_tokens
+        cache_hit_rate = total.totals.cached_input_tokens / input_tokens if input_tokens else 0.0
+        out.append(
+            UsageWindow(
+                label=f"Last {days} days",
+                days=days,
+                start=start.astimezone(dt.UTC).date().isoformat(),
+                end=end.astimezone(dt.UTC).date().isoformat(),
+                range=(
+                    f"{start.astimezone(dt.UTC).date().isoformat()} → "
+                    f"{end.astimezone(dt.UTC).date().isoformat()}"
+                ),
+                cost_usd=float(total.costs.cost_usd),
+                total_tokens=total.totals.total_tokens,
+                events=total.totals.events,
+                sessions=len(total.session_ids),
+                cache_hit_rate=cache_hit_rate,
+                active_days=_active_day_count(scoped.events, window_options),
+                daily_cost_sparkline=daily_cost,
+                daily_token_sparkline=daily_tokens,
+            )
+        )
+    return out
+
+
+def _scoped_result(result: LoadResult, *, start: dt.datetime, end: dt.datetime) -> LoadResult:
+    events = [event for event in result.events if start <= event.timestamp < end]
+    samples = [sample for sample in result.rate_limit_samples if start <= sample.timestamp < end]
+    return dataclasses.replace(result, events=events, rate_limit_samples=samples)
+
+
+def _daily_window_sparklines(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+) -> tuple[list[float], list[float]]:
+    from caliper.timeutil import load_timezone
+
+    daily = aggregate_daily(result, options, rate_card=rate_card)
+    by_day = {agg.label: agg for agg in daily}
+    tz = load_timezone(options.timezone)
+    day = options.start.astimezone(tz).date()
+    end = options.end.astimezone(tz).date()
+    cost: list[float] = []
+    tokens: list[float] = []
+    while day < end:
+        key = day.isoformat()
+        agg = by_day.get(key)
+        cost.append(float(agg.costs.cost_usd) if agg else 0.0)
+        tokens.append(float(agg.totals.total_tokens) if agg else 0.0)
+        day = day + dt.timedelta(days=1)
+    return cost, tokens
+
+
+def _active_day_count(events, options: RuntimeOptions) -> int:
+    from caliper.timeutil import load_timezone
+
+    tz = load_timezone(options.timezone)
+    return len({event.timestamp.astimezone(tz).date().isoformat() for event in events})
+
+
+# ---------------------------------------------------------------------------
 # Session shape (handoff version)
 # ---------------------------------------------------------------------------
 
@@ -454,7 +604,10 @@ def _build_model_rows(aggregates: list[Aggregate]) -> list[ModelRow]:
                 cache_hit_rate=cache_hit_rate,
             )
         )
-    return rows[:12]
+    return sorted(
+        rows,
+        key=lambda row: (-row.cost_usd, -row.tokens, -row.events, row.vendor, row.model, row.tier),
+    )[:12]
 
 
 # ---------------------------------------------------------------------------
@@ -494,7 +647,10 @@ def _build_project_rows(
             continue
         path_str = agg.label
         name = project_name_from_path(path_str) if path_str else UNKNOWN_PROJECT
-        top_tools_raw = tools_by_path.get(path_str, Counter()).most_common(3)
+        top_tools_raw = sorted(
+            tools_by_path.get(path_str, Counter()).items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:3]
         top_tools = [
             ToolCount(name=tname, count=count, category=tool_category(tname))  # type: ignore[arg-type]
             for tname, count in top_tools_raw
@@ -509,7 +665,10 @@ def _build_project_rows(
                 top_tools=top_tools,
             )
         )
-    return rows[:15]
+    return sorted(
+        rows,
+        key=lambda row: (-row.cost_usd, -row.events, -row.sessions, row.name, row.path or ""),
+    )[:15]
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +691,687 @@ def _build_insights(
         )
         for item in raw
     ]
+
+
+# ---------------------------------------------------------------------------
+# Impact cards
+# ---------------------------------------------------------------------------
+
+
+def _build_impact_cards(
+    *,
+    result: LoadResult,
+    rolling_result: LoadResult,
+    options: RuntimeOptions,
+    rolling_options: RuntimeOptions,
+    total: Aggregate,
+    by_model: list[ModelRow],
+    by_project: list[ProjectRow],
+    rate_card: RateCard,
+    budget_config: dict[str, Any] | None,
+) -> list[ImpactCard]:
+    cards = [
+        _cost_driver_card(total, by_project, by_model),
+        _budget_risk_card(rolling_result, rolling_options, rate_card, budget_config),
+        _cache_leverage_card(total),
+        _usage_behavior_card(result, options, total),
+        _dedupe_card(rolling_result),
+    ]
+    return sorted(cards, key=_impact_card_sort_key)
+
+
+_IMPACT_LABEL_ORDER = {
+    "Budget risk": 0,
+    "Cost driver": 1,
+    "Cache leverage": 2,
+    "Usage rhythm": 3,
+    "Dedupe": 4,
+}
+_IMPACT_TONE_ORDER = {"critical": 0, "warn": 1, "good": 2, "neutral": 3}
+
+
+def _impact_card_sort_key(card: ImpactCard) -> tuple[int, int, str]:
+    return (
+        _IMPACT_LABEL_ORDER.get(card.label, 99),
+        _IMPACT_TONE_ORDER.get(card.tone, 3),
+        card.label,
+    )
+
+
+def _cost_driver_card(
+    total: Aggregate,
+    by_project: list[ProjectRow],
+    by_model: list[ModelRow],
+) -> ImpactCard:
+    if not total.totals.events:
+        return ImpactCard(
+            label="Cost driver",
+            value="No selected usage",
+            detail="The selected dashboard window has no events.",
+        )
+    total_cost = float(total.costs.cost_usd)
+    if by_project:
+        top_project = max(by_project, key=lambda row: row.cost_usd)
+        share = top_project.cost_usd / total_cost if total_cost else 0.0
+        return ImpactCard(
+            label="Cost driver",
+            value=top_project.name,
+            detail=f"{_format_money(top_project.cost_usd)} · {_format_pct_round(share)} of cost",
+            tone="warn" if share >= 0.5 else "neutral",
+        )
+    if by_model:
+        top_model = max(by_model, key=lambda row: row.cost_usd)
+        share = top_model.cost_usd / total_cost if total_cost else 0.0
+        return ImpactCard(
+            label="Cost driver",
+            value=_humanize_model(top_model.model),
+            detail=f"{_format_money(top_model.cost_usd)} · {_format_pct_round(share)} of cost",
+            tone="warn" if share >= 0.5 else "neutral",
+        )
+    return ImpactCard(
+        label="Cost driver",
+        value="Unattributed",
+        detail=f"{_format_money(total_cost)} selected-window cost.",
+    )
+
+
+def _budget_risk_card(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    budget_config: dict[str, Any] | None,
+) -> ImpactCard:
+    try:
+        raw = (budget_config or {}).get("budgets") or {}
+        budgets = parse_budgets_table(raw if isinstance(raw, dict) else {})
+    except ValueError as exc:
+        return ImpactCard(
+            label="Budget risk",
+            value="Check config",
+            detail=str(exc),
+            tone="warn",
+        )
+    if not budgets:
+        return ImpactCard(
+            label="Budget risk",
+            value="No budgets",
+            detail="Add a [budgets] table to show daily, weekly, or monthly risk.",
+        )
+
+    from caliper.timeutil import load_timezone
+
+    now = options.end.astimezone(load_timezone(options.timezone))
+    windows = current_period_intervals(now)
+    usage = usage_for_periods(result.events, options, rate_card, now, windows=windows)
+    alerts = evaluate_budgets(budgets, usage)
+    if not alerts:
+        return ImpactCard(
+            label="Budget risk",
+            value="No budgets",
+            detail="Add a [budgets] table to show daily, weekly, or monthly risk.",
+        )
+    worst = max_severity(alerts)
+    top = max(alerts, key=lambda alert: alert.used_percent)
+    used = (
+        _format_money(top.used)
+        if top.budget.metric == "cost_usd"
+        else _format_tokens(int(top.used))
+    )
+    limit = (
+        _format_money(top.budget.limit)
+        if top.budget.metric == "cost_usd"
+        else _format_tokens(int(top.budget.limit))
+    )
+    tone = "critical" if worst == SEVERITY_BREACH else "warn" if worst == SEVERITY_WARN else "good"
+    metric = "cost" if top.budget.metric == "cost_usd" else "tokens"
+    return ImpactCard(
+        label="Budget risk",
+        value=f"{top.used_percent:.0f}%",
+        detail=f"{top.budget.period} {metric}: {used} of {limit}",
+        tone=tone,
+    )
+
+
+def _cache_leverage_card(total: Aggregate) -> ImpactCard:
+    input_tokens = total.totals.input_tokens
+    cache_hit = total.totals.cached_input_tokens / input_tokens if input_tokens else 0.0
+    savings = float(total.cache_savings.cost_usd)
+    if savings > 0:
+        return ImpactCard(
+            label="Cache leverage",
+            value=_format_money(savings),
+            detail=f"{_format_pct(cache_hit)} input cache hit rate.",
+            tone="good",
+        )
+    return ImpactCard(
+        label="Cache leverage",
+        value="No savings",
+        detail=f"{_format_pct(cache_hit)} input cache hit rate in the selected window.",
+    )
+
+
+def _usage_behavior_card(
+    result: LoadResult,
+    options: RuntimeOptions,
+    total: Aggregate,
+) -> ImpactCard:
+    active_days = _active_day_count(result.events, options)
+    if not result.events:
+        return ImpactCard(
+            label="Usage rhythm",
+            value="No activity",
+            detail="No events landed in the selected dashboard window.",
+        )
+    peak = _peak_hour(result, options)
+    day_word = "day" if active_days == 1 else "days"
+    return ImpactCard(
+        label="Usage rhythm",
+        value=f"{active_days} active {day_word}",
+        detail=(
+            f"Peak hour {peak}; {len(total.session_ids):,} sessions; "
+            f"{_format_tokens(total.totals.total_tokens)} tokens."
+        ),
+    )
+
+
+def _dedupe_card(result: LoadResult) -> ImpactCard:
+    duplicates = result.duplicates + result.rate_limit_sample_duplicates
+    return ImpactCard(
+        label="Dedupe",
+        value=f"{duplicates:,} skipped",
+        detail="Rolling windows use parser-deduped usage events.",
+        tone="good" if duplicates else "neutral",
+    )
+
+
+def _peak_hour(result: LoadResult, options: RuntimeOptions) -> str:
+    from caliper.timeutil import load_timezone
+
+    tz = load_timezone(options.timezone)
+    by_hour: dict[int, int] = {}
+    for event in result.events:
+        hour = event.timestamp.astimezone(tz).hour
+        by_hour[hour] = by_hour.get(hour, 0) + 1
+    if not by_hour:
+        return "—"
+    return _format_hour_12(max(by_hour.items(), key=lambda kv: kv[1])[0])
+
+
+def _format_money(n: float | int) -> str:
+    amount = float(n)
+    if amount == 0:
+        return "$0"
+    if abs(amount) >= 1000:
+        return f"${round(amount):,}"
+    return f"${amount:.2f}"
+
+
+def _format_pct(p: float) -> str:
+    return f"{p * 100:.1f}%"
+
+
+def _format_pct_round(p: float) -> str:
+    return f"{round(p * 100)}%"
+
+
+# ---------------------------------------------------------------------------
+# Command center + drilldown analytics
+# ---------------------------------------------------------------------------
+
+
+def _build_advisor_recommendations(
+    result: LoadResult,
+    rate_card: RateCard,
+) -> list[AdvisorRecommendation]:
+    """Surface the highest-value arbitrage recommendations for the dashboard."""
+    if not result.events:
+        return []
+    rows: list[AdvisorRecommendation] = []
+    for rec in recommend_arbitrage(result.events, rate_card, threshold=0.6, limit=5):
+        savings = float(Decimal(rec.estimated_savings_usd_exact or "0"))
+        tone = "good" if savings > 0 else "neutral"
+        rows.append(
+            AdvisorRecommendation(
+                title=rec.title,
+                value=_format_money(savings),
+                detail=rec.detail,
+                action=rec.next_command or rec.action,
+                confidence=rec.confidence,
+                events=rec.events,
+                sessions=rec.sessions,
+                tone=tone,
+                savings_usd=savings,
+            )
+        )
+    return sorted(rows, key=lambda row: (-row.savings_usd, -row.confidence, -row.events))
+
+
+def _build_top_sessions(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+) -> list[SessionRow]:
+    """Cost/token/tool outliers, deduped by parser session id."""
+    if not result.events:
+        return []
+    from caliper.models import project_name_from_path
+
+    tool_calls_by_session: dict[str, int] = {}
+    for event in result.events:
+        if event.turn_facts is None:
+            continue
+        tool_calls_by_session[event.session_id] = (
+            tool_calls_by_session.get(event.session_id, 0) + event.turn_facts.tool_use_count
+        )
+
+    rows: list[SessionRow] = []
+    for agg in aggregate_sessions(result, options, rate_card=rate_card)[:10]:
+        label = _session_label(agg.label, agg.key)
+        started = (
+            agg.first_seen.astimezone(dt.UTC).strftime("%Y-%m-%d %H:%M") if agg.first_seen else ""
+        )
+        project = " · ".join(sorted(agg.project_names)) if agg.project_names else UNKNOWN_PROJECT
+        if project == UNKNOWN_PROJECT and agg.project_paths:
+            project = project_name_from_path(sorted(agg.project_paths)[0])
+        tools = tool_calls_by_session.get(agg.key, 0)
+        rows.append(
+            SessionRow(
+                label=label,
+                started_at=started,
+                project=project,
+                cost_usd=float(agg.costs.cost_usd),
+                total_tokens=agg.totals.total_tokens,
+                events=agg.totals.events,
+                tool_calls=tools,
+                models=sorted(agg.models)[:3],
+                reason=_session_outlier_reason(agg, tools),
+            )
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            -row.cost_usd,
+            -row.total_tokens,
+            -row.tool_calls,
+            -row.events,
+            row.started_at,
+            row.label,
+        ),
+    )[:8]
+
+
+def _session_label(label: str, key: str) -> str:
+    if " | " in label:
+        label = label.split(" | ", 1)[1]
+    label = label.strip() or key
+    if len(label) > 72:
+        return f"{label[:69]}..."
+    return label
+
+
+def _session_outlier_reason(agg: Aggregate, tool_calls: int) -> str:
+    if agg.long_context_events:
+        return "long context"
+    if tool_calls >= 25:
+        return "tool-heavy"
+    if agg.unknown_model_events or agg.unknown_tier_events:
+        return "needs attribution"
+    if agg.costs.cost_usd > 0:
+        return "cost outlier"
+    if agg.totals.total_tokens:
+        return "token-heavy"
+    return "high activity"
+
+
+def _build_usage_mix(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+) -> list[MixRow]:
+    if not result.events:
+        return []
+
+    def tier_key(event) -> tuple[str, str]:
+        tier = event.service_tier or "unknown"
+        return tier, tier
+
+    def source_key(event) -> tuple[str, str]:
+        source = event.thread.source or event.thread.thread_source or event.vendor or "unknown"
+        return source, source
+
+    def vendor_key(event) -> tuple[str, str]:
+        vendor = event.vendor or "unknown"
+        return vendor, vendor
+
+    def model_tier_key(event) -> tuple[str, str]:
+        model = event.model or "unknown model"
+        tier = event.service_tier or "unknown tier"
+        return f"{model}\0{tier}", f"{model} / {tier}"
+
+    dimensions = [
+        ("vendor", aggregate_vendors(result, options, rate_card=rate_card), vendor_key),
+        ("model/tier", aggregate_model_mode(result, options, rate_card=rate_card), model_tier_key),
+        (
+            "tier",
+            aggregate_events(result.events, tier_key, options, rate_card=rate_card),
+            tier_key,
+        ),
+        (
+            "source",
+            aggregate_events(result.events, source_key, options, rate_card=rate_card),
+            source_key,
+        ),
+    ]
+    total_cost = sum(float(agg.costs.cost_usd) for _, aggs, _ in dimensions[:1] for agg in aggs)
+    if total_cost <= 0:
+        total_cost = float(aggregate_total(result, options, rate_card=rate_card).costs.cost_usd)
+
+    rows: list[MixRow] = []
+    for dimension, aggregates, key_fn in dimensions:
+        daily_by_key = _daily_cost_sparkline_by_key(result, options, rate_card, key_fn)
+        ordered = sorted(
+            [agg for agg in aggregates if agg.totals.events],
+            key=lambda agg: (
+                -float(agg.costs.cost_usd),
+                -agg.totals.total_tokens,
+                -agg.totals.events,
+                agg.label,
+            ),
+        )[:5]
+        for agg in ordered:
+            cost = float(agg.costs.cost_usd)
+            rows.append(
+                MixRow(
+                    dimension=dimension,
+                    label=agg.label.replace(" / ", " · "),
+                    cost_usd=cost,
+                    total_tokens=agg.totals.total_tokens,
+                    events=agg.totals.events,
+                    share=(cost / total_cost) if total_cost > 0 else 0.0,
+                    daily_cost_sparkline=daily_by_key.get(agg.key, []),
+                )
+            )
+    return rows
+
+
+def _daily_cost_sparkline_by_key(result, options, rate_card, key_fn) -> dict[str, list[float]]:
+    from caliper.timeutil import load_timezone
+
+    tz = load_timezone(options.timezone)
+    days: list[str] = []
+    day = options.start.astimezone(tz).date()
+    end = options.end.astimezone(tz).date()
+    while day < end:
+        days.append(day.isoformat())
+        day = day + dt.timedelta(days=1)
+    index = {key: i for i, key in enumerate(days)}
+    out: dict[str, list[float]] = {}
+    for event in result.events:
+        event_day = event.timestamp.astimezone(tz).date().isoformat()
+        pos = index.get(event_day)
+        if pos is None:
+            continue
+        key, _label = key_fn(event)
+        costs, _long_context, _unknown_model = event_cost(rate_card, event)
+        out.setdefault(key, [0.0] * len(days))[pos] += float(costs.cost_usd)
+    return out
+
+
+def _build_rate_limit_pressure(result: LoadResult) -> RateLimitPressure:
+    records = list(result.rate_limit_samples)
+    for event in result.events:
+        if (
+            event.primary_used_percent is not None
+            or event.secondary_used_percent is not None
+            or event.rate_limit_reached_type
+        ):
+            records.append(event)
+    if not records:
+        return RateLimitPressure(
+            sample_count=0,
+            peak_primary_pct=None,
+            peak_secondary_pct=None,
+            latest_primary_pct=None,
+            latest_secondary_pct=None,
+            latest_limit_name="",
+            latest_plan_type="",
+            latest_resets_at="",
+            reached_count=0,
+        )
+
+    latest = max(records, key=lambda item: item.timestamp)
+    primary_values = [_percent_fraction(item.primary_used_percent) for item in records]
+    secondary_values = [_percent_fraction(item.secondary_used_percent) for item in records]
+    primary_values = [value for value in primary_values if value is not None]
+    secondary_values = [value for value in secondary_values if value is not None]
+    peak = max(primary_values + secondary_values, default=0.0)
+    reached = sum(1 for item in records if getattr(item, "rate_limit_reached_type", ""))
+    tone: str = "neutral"
+    if reached or peak >= 0.95:
+        tone = "critical"
+    elif peak >= 0.75:
+        tone = "warn"
+    latest_reset = latest.primary_resets_at or latest.secondary_resets_at or ""
+    return RateLimitPressure(
+        sample_count=len(records),
+        peak_primary_pct=max(primary_values) if primary_values else None,
+        peak_secondary_pct=max(secondary_values) if secondary_values else None,
+        latest_primary_pct=_percent_fraction(latest.primary_used_percent),
+        latest_secondary_pct=_percent_fraction(latest.secondary_used_percent),
+        latest_limit_name=latest.limit_name or latest.limit_id or "",
+        latest_plan_type=latest.plan_type or "",
+        latest_resets_at=_stringify_reset(latest_reset),
+        reached_count=reached,
+        tone=tone,  # type: ignore[arg-type]
+    )
+
+
+def _build_quality_score(
+    result: LoadResult,
+    total: Aggregate,
+    evidence: list[EvidenceRow],
+) -> QualityScore:
+    status_scores = {"exact": 100, "estimated": 78, "partial": 55, "unsupported": 30}
+    tone_by_status = {
+        "exact": "good",
+        "estimated": "neutral",
+        "partial": "warn",
+        "unsupported": "critical",
+    }
+    scores = [status_scores.get(row.status, 60) for row in evidence] or [75]
+    score = sum(scores) / len(scores)
+
+    penalty = 0
+    parser_issue_count = sum(issue.count for issue in result.parser_issues)
+    if parser_issue_count:
+        penalty += min(18, parser_issue_count * 2)
+    if result.warnings:
+        penalty += min(10, len(result.warnings) * 2)
+    if total.costs.unpriced_events:
+        penalty += min(20, total.costs.unpriced_events * 3)
+    if total.unknown_model_events:
+        penalty += min(15, total.unknown_model_events * 2)
+    if total.unknown_tier_events:
+        penalty += min(12, total.unknown_tier_events)
+    score = max(0, min(100, round(score - penalty)))
+    if score >= 90:
+        grade = "Excellent"
+        tone = "good"
+    elif score >= 75:
+        grade = "Good"
+        tone = "neutral"
+    elif score >= 55:
+        grade = "Needs review"
+        tone = "warn"
+    else:
+        grade = "Weak"
+        tone = "critical"
+
+    signals = [
+        QualitySignal(
+            label=row.label,
+            status=row.status,
+            note=row.note,
+            tone=tone_by_status.get(row.status, "neutral"),  # type: ignore[arg-type]
+        )
+        for row in evidence[:6]
+    ]
+    if parser_issue_count or result.warnings:
+        signals.append(
+            QualitySignal(
+                label="Parser health",
+                status="warn" if parser_issue_count or result.warnings else "exact",
+                note=f"{parser_issue_count:,} parser issues · {len(result.warnings):,} warnings",
+                tone="warn" if parser_issue_count or result.warnings else "good",
+            )
+        )
+    if total.costs.unpriced_events or total.costs.estimated_events:
+        signals.append(
+            QualitySignal(
+                label="Pricing coverage",
+                status="partial" if total.costs.unpriced_events else "estimated",
+                note=(
+                    f"{total.costs.unpriced_events:,} unpriced events · "
+                    f"{total.costs.estimated_events:,} estimated events"
+                ),
+                tone="critical" if total.costs.unpriced_events else "warn",
+            )
+        )
+    if total.unknown_model_events or total.unknown_tier_events:
+        signals.append(
+            QualitySignal(
+                label="Attribution gaps",
+                status="partial",
+                note=(
+                    f"{total.unknown_model_events:,} unknown model · "
+                    f"{total.unknown_tier_events:,} unknown tier"
+                ),
+                tone="warn",
+            )
+        )
+    return QualityScore(score=score, grade=grade, signals=signals, tone=tone)  # type: ignore[arg-type]
+
+
+def _build_command_center(
+    *,
+    total: Aggregate,
+    usage_windows: list[UsageWindow],
+    impact_cards: list[ImpactCard],
+    advisor_recommendations: list[AdvisorRecommendation],
+    top_sessions: list[SessionRow],
+    rate_limit_pressure: RateLimitPressure,
+    quality_score: QualityScore,
+) -> list[CommandCenterCard]:
+    windows_by_days = {window.days: window for window in usage_windows}
+    seven = windows_by_days.get(7)
+    thirty = windows_by_days.get(30)
+    velocity = (seven.cost_usd / seven.days) if seven else 0.0
+    thirty_velocity = (thirty.cost_usd / thirty.days) if thirty else 0.0
+    velocity_delta = (
+        ((velocity - thirty_velocity) / thirty_velocity) if thirty_velocity > 0 else None
+    )
+    velocity_tone = "warn" if velocity_delta is not None and velocity_delta >= 0.25 else "neutral"
+    budget = next((card for card in impact_cards if card.label == "Budget risk"), None)
+    advisor_savings = sum(row.savings_usd for row in advisor_recommendations)
+    top_session = top_sessions[0] if top_sessions else None
+    peak_limit = max(
+        [
+            value
+            for value in (
+                rate_limit_pressure.peak_primary_pct,
+                rate_limit_pressure.peak_secondary_pct,
+            )
+            if value is not None
+        ],
+        default=None,
+    )
+    return [
+        CommandCenterCard(
+            label="Budget posture",
+            value=budget.value if budget else "No budgets",
+            detail=budget.detail if budget else "Add budgets to track spend risk.",
+            tone=budget.tone if budget else "neutral",
+            metric="control",
+        ),
+        CommandCenterCard(
+            label="Spend velocity",
+            value=f"{_format_money(velocity)}/day" if seven else "No 7d usage",
+            detail=(
+                f"{_format_signed_pct(velocity_delta)} vs 30d/day"
+                if velocity_delta is not None
+                else "Needs 30d history for trend."
+            ),
+            tone=velocity_tone,  # type: ignore[arg-type]
+            metric="trend",
+        ),
+        CommandCenterCard(
+            label="Optimization",
+            value=_format_money(advisor_savings),
+            detail=(
+                f"{len(advisor_recommendations):,} recommendations ready"
+                if advisor_recommendations
+                else "No high-confidence swaps found."
+            ),
+            tone="good" if advisor_savings > 0 else "neutral",
+            metric="savings",
+        ),
+        CommandCenterCard(
+            label="Session outlier",
+            value=_format_money(top_session.cost_usd) if top_session else "None",
+            detail=(
+                f"{top_session.reason} · {_format_tokens(top_session.total_tokens)} tokens"
+                if top_session
+                else "No selected usage sessions."
+            ),
+            tone="warn" if top_session and top_session.cost_usd > 0 else "neutral",
+            metric="drilldown",
+        ),
+        CommandCenterCard(
+            label="Limit pressure",
+            value=_format_pct_round(peak_limit) if peak_limit is not None else "No samples",
+            detail=(
+                f"{rate_limit_pressure.reached_count:,} reached events"
+                if rate_limit_pressure.reached_count
+                else f"{rate_limit_pressure.sample_count:,} limit samples"
+            ),
+            tone=rate_limit_pressure.tone,
+            metric="reliability",
+        ),
+        CommandCenterCard(
+            label="Data quality",
+            value=f"{quality_score.score}/100",
+            detail=quality_score.grade,
+            tone=quality_score.tone,
+            metric="trust",
+        ),
+    ]
+
+
+def _format_signed_pct(value: float | None) -> str:
+    if value is None:
+        return "—"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value * 100:.1f}%"
+
+
+def _percent_fraction(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number < 0:
+        return None
+    return number / 100 if number > 1 else number
+
+
+def _stringify_reset(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dt.datetime):
+        return value.astimezone(dt.UTC).isoformat(timespec="minutes")
+    return str(value)
 
 
 # ---------------------------------------------------------------------------
@@ -913,6 +1753,8 @@ def _format_hour_12(hour: int) -> str:
 
 
 def _format_tokens(n: int) -> str:
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f}B"
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f}M"
     if n >= 10_000:

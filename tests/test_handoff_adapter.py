@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 
 from caliper.config import build_options
@@ -9,12 +10,22 @@ from caliper.dashboards.adapter import (
     _SHAPE_NAME_MAP,
     _build_banner,
     _build_evidence,
+    _build_model_rows,
+    _build_project_rows,
+    _build_rate_limit_pressure,
     _build_session_shape,
     build_handoff_dashboard,
     tool_category,
 )
 from caliper.dashboards.data_models import Banner
-from caliper.models import VENDOR_CLAUDE_CODE
+from caliper.models import (
+    VENDOR_CLAUDE_CODE,
+    Aggregate,
+    CostTotals,
+    LoadResult,
+    RateLimitSample,
+    TokenTotals,
+)
 from caliper.parser import load_usage
 
 # ----- Tiny fixture infrastructure -----
@@ -26,13 +37,19 @@ def _write_session(tmp_path, rows, slug: str = "-tmp-project"):
     (projects / "session.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n")
 
 
-def _row(*, i: int, cwd: str = "/tmp/project-alpha", tools=("Read", "Edit")):
+def _row(
+    *,
+    i: int,
+    cwd: str = "/tmp/project-alpha",
+    tools=("Read", "Edit"),
+    timestamp: str | None = None,
+):
     return {
         "type": "assistant",
         "sessionId": "s1",
         "uuid": f"e-{i}",
         "parentUuid": f"p-{i}",
-        "timestamp": f"2026-05-12T10:{i:02d}:00.000Z",
+        "timestamp": timestamp or f"2026-05-12T10:{i:02d}:00.000Z",
         "cwd": cwd,
         "requestId": f"r-{i}",
         "message": {
@@ -55,6 +72,38 @@ def _options(tmp_path):
         codex_config=tmp_path / "missing-config.toml",
         vendors=[VENDOR_CLAUDE_CODE],
         no_parse_cache=True,
+    )
+
+
+def _aggregate(
+    label: str,
+    *,
+    cost: float,
+    events: int,
+    tokens: int,
+    model: str = "claude-sonnet-4-6",
+    model_vendor: str = "anthropic",
+    tier: str = "standard",
+    sessions: int = 1,
+) -> Aggregate:
+    agg = Aggregate(key=label, label=label)
+    agg.costs = CostTotals(cost_usd=cost)
+    agg.totals = TokenTotals(events=events, input_tokens=tokens, total_tokens=tokens)
+    agg.models.add(model)
+    agg.model_vendors.add(model_vendor)
+    agg.service_tiers.add(tier)
+    agg.session_ids = {f"s{i}" for i in range(sessions)}
+    return agg
+
+
+def _empty_load_result() -> LoadResult:
+    return LoadResult(
+        events=[],
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[],
+        warnings=[],
     )
 
 
@@ -125,6 +174,12 @@ def test_build_handoff_dashboard_decimal_to_float(monkeypatch, tmp_path) -> None
     assert len(d.totals.daily_cost_sparkline) == len(d.daily)
     assert len(d.totals.daily_token_sparkline) == len(d.daily)
     assert len(d.totals.daily_session_sparkline) == len(d.daily)
+    assert d.command_center
+    assert d.top_sessions
+    assert d.usage_mix
+    assert d.rate_limit_pressure is not None
+    assert d.quality_score is not None
+    assert {row.dimension for row in d.usage_mix} >= {"vendor", "model/tier", "tier", "source"}
 
 
 def test_build_handoff_dashboard_zero_fills_daily(monkeypatch, tmp_path) -> None:
@@ -159,6 +214,107 @@ def test_build_handoff_dashboard_no_deltas_when_disabled(monkeypatch, tmp_path) 
     assert d.totals.delta_tokens_pct is None
 
 
+def test_build_model_rows_are_sorted_by_cost_then_usage() -> None:
+    rows = _build_model_rows(
+        [
+            _aggregate("mid-events", cost=2.0, events=20, tokens=300, model="model-b"),
+            _aggregate("top", cost=4.0, events=1, tokens=100, model="model-a"),
+            _aggregate("mid-tokens", cost=2.0, events=5, tokens=900, model="model-c"),
+        ]
+    )
+
+    assert [row.model for row in rows] == ["model-a", "model-c", "model-b"]
+
+
+def test_build_project_rows_are_sorted_by_cost_then_activity() -> None:
+    rows = _build_project_rows(
+        [
+            _aggregate("/tmp/project-b", cost=3.0, events=10, tokens=100, sessions=1),
+            _aggregate("/tmp/project-a", cost=5.0, events=1, tokens=100, sessions=1),
+            _aggregate("/tmp/project-c", cost=3.0, events=12, tokens=100, sessions=1),
+        ],
+        _empty_load_result(),
+        show_paths=True,
+    )
+
+    assert [row.name for row in rows] == ["project-a", "project-c", "project-b"]
+
+
+def test_build_handoff_dashboard_adds_rolling_usage_windows(monkeypatch, tmp_path) -> None:
+    rows = [
+        _row(i=1, timestamp="2026-05-12T10:01:00.000Z"),
+        _row(i=2, timestamp="2026-04-20T10:02:00.000Z"),
+    ]
+    _write_session(tmp_path, rows)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    selected_options = _options(tmp_path)
+    rolling_options = build_options(
+        since="2026-02-12",
+        until="2026-05-13",
+        timezone="UTC",
+        session_root=tmp_path / "missing-codex",
+        state_db=tmp_path / "missing-state.sqlite",
+        codex_config=tmp_path / "missing-config.toml",
+        vendors=[VENDOR_CLAUDE_CODE],
+        no_parse_cache=True,
+    )
+    selected = load_usage(selected_options)
+    rolling = load_usage(rolling_options)
+
+    d = build_handoff_dashboard(
+        selected,
+        selected_options,
+        with_deltas=False,
+        rolling_result=rolling,
+        rolling_options=rolling_options,
+        budget_config={},
+    )
+
+    assert d.totals.events == 1
+    by_label = {window.label: window for window in d.usage_windows}
+    assert list(by_label) == ["Last 7 days", "Last 30 days", "Last 90 days"]
+    assert by_label["Last 7 days"].events == 1
+    assert by_label["Last 30 days"].events == 2
+    assert by_label["Last 90 days"].events == 2
+
+
+def test_build_handoff_dashboard_rolling_windows_are_deduped(monkeypatch, tmp_path) -> None:
+    duplicate = _row(i=1)
+    _write_session(tmp_path, [duplicate, duplicate])
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    options = _options(tmp_path)
+    result = load_usage(options)
+
+    d = build_handoff_dashboard(result, options, with_deltas=False, budget_config={})
+
+    assert result.duplicates == 1
+    assert d.usage_windows[0].events == 1
+    dedupe = next(card for card in d.impact_cards if card.label == "Dedupe")
+    assert dedupe.value == "1 skipped"
+
+
+def test_build_handoff_dashboard_impact_cards_include_budget_states(monkeypatch, tmp_path) -> None:
+    _write_session(tmp_path, [_row(i=1)])
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    options = _options(tmp_path)
+    result = load_usage(options)
+
+    no_budget = build_handoff_dashboard(result, options, with_deltas=False, budget_config={})
+    assert next(card for card in no_budget.impact_cards if card.label == "Budget risk").value == (
+        "No budgets"
+    )
+
+    with_budget = build_handoff_dashboard(
+        result,
+        options,
+        with_deltas=False,
+        budget_config={"budgets": {"monthly_tokens": 10}},
+    )
+    budget = next(card for card in with_budget.impact_cards if card.label == "Budget risk")
+    assert budget.tone == "critical"
+    assert budget.value.endswith("%")
+
+
 def test_build_handoff_dashboard_severity_mapping(monkeypatch, tmp_path) -> None:
     """`fail` severity from internal insights maps to handoff `critical`."""
     _write_session(tmp_path, [_row(i=i) for i in range(1, 5)])
@@ -168,6 +324,44 @@ def test_build_handoff_dashboard_severity_mapping(monkeypatch, tmp_path) -> None
     d = build_handoff_dashboard(result, options, with_deltas=False)
     for ins in d.insights:
         assert ins.severity in {"info", "warn", "critical"}
+
+
+def test_build_rate_limit_pressure_scores_peak_and_reached(tmp_path) -> None:
+    result = LoadResult(
+        events=[],
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[
+            RateLimitSample(
+                timestamp=dt.datetime(2026, 5, 12, 10, tzinfo=dt.UTC),
+                path=tmp_path / "a.jsonl",
+                session_id="s1",
+                plan_type="max",
+                limit_name="5-hour usage",
+                primary_used_percent=81.0,
+                secondary_used_percent=42.0,
+            ),
+            RateLimitSample(
+                timestamp=dt.datetime(2026, 5, 12, 11, tzinfo=dt.UTC),
+                path=tmp_path / "b.jsonl",
+                session_id="s2",
+                plan_type="max",
+                limit_name="5-hour usage",
+                primary_used_percent=97.0,
+                secondary_used_percent=50.0,
+                rate_limit_reached_type="primary",
+            ),
+        ],
+        warnings=[],
+    )
+
+    pressure = _build_rate_limit_pressure(result)
+
+    assert pressure.tone == "critical"
+    assert pressure.peak_primary_pct == 0.97
+    assert pressure.reached_count == 1
+    assert pressure.latest_limit_name == "5-hour usage"
 
 
 # ----- _build_evidence -----

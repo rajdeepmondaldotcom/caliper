@@ -16,16 +16,18 @@ Render plan (top to bottom):
     2. Page header (wordmark, window badge, meta, serial)
     3. Optional banner (vendor coverage or stale pricing)
     4. Summary cards row (Cost / Cache / Tokens / Sessions)
-    5. § 01 Cost over time          (chart + dominant-shape strip)
-    6. § 02 Activity                (yearly heatmap)
-    7. § 03 Recap                   (hour-of-week heatmap + stats)
-    8. § 04 Session shape           (top tools + category distribution)
-    9. § 05 Models & tiers          (table)
-   10. § 06 Projects                (table with mini-bars)
-   11. § 07 Insights                (severity rails)
-   12. § 08 Forecast                (linear + EWMA cards with band)
-   13. § 09 Evidence                (status table)
-   14. Page footer
+    5. § 01 Usage windows           (7 / 30 / 90 day rollups)
+    6. § 02 Impact                  (risk and leverage cards)
+    7. § 03 Cost over time          (chart + dominant-shape strip)
+    8. § 04 Activity                (yearly heatmap)
+    9. § 05 Recap                   (hour-of-week heatmap + stats)
+   10. § 06 Session shape           (top tools + category distribution)
+   11. § 07 Models & tiers          (table)
+   12. § 08 Projects                (table with mini-bars)
+   13. § 09 Insights                (severity rails)
+   14. § 10 Forecast                (linear + EWMA cards with band)
+   15. § 11 Evidence                (status table)
+   16. Page footer
 
 Every section degrades to a per-section empty placeholder. The 14-day "rich"
 state and the "empty window" state share this same renderer; the data is
@@ -41,17 +43,25 @@ import json
 from datetime import datetime
 
 from caliper.dashboards.data_models import (
+    AdvisorRecommendation,
     Banner,
+    CommandCenterCard,
     DailyPoint,
     Dashboard,
     EvidenceRow,
     Forecast,
+    ImpactCard,
     Insight,
+    MixRow,
     ModelRow,
     ProjectRow,
+    QualityScore,
+    RateLimitPressure,
     Recap,
+    SessionRow,
     SessionShape,
     Totals,
+    UsageWindow,
     YearlyHeatmap,
 )
 
@@ -76,17 +86,24 @@ SHAPE_TO_CAT = {
     "no-tools": "mixed",
 }
 
-# Sections labelled "§ 01" through "§ 07". Order is binding.
+# Sections labelled "§ 01" through "§ 16". Order is binding.
 SECTION_NUMBERS = {
-    "cost-over-time": "01",
-    "activity-heatmap": "02",
-    "recap": "03",
-    "session-shape": "04",
-    "models": "05",
-    "projects": "06",
-    "insights": "07",
-    "forecast": "08",
-    "evidence": "09",
+    "command-center": "01",
+    "usage-windows": "02",
+    "impact": "03",
+    "cost-over-time": "04",
+    "activity-heatmap": "05",
+    "recap": "06",
+    "session-shape": "07",
+    "usage-mix": "08",
+    "advisor": "09",
+    "top-sessions": "10",
+    "models": "11",
+    "projects": "12",
+    "rate-limits": "13",
+    "insights": "14",
+    "forecast": "15",
+    "evidence": "16",
 }
 
 
@@ -107,9 +124,11 @@ def fmt_money(n: float | None) -> str:
 
 
 def fmt_tokens(n: int | None) -> str:
-    """`8,400` / `12.4K` / `1.2M`."""
+    """`8,400` / `12.4K` / `1.2M` / `1.2B`."""
     if n is None:
         return "—"
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f}B"
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f}M"
     if n >= 10_000:
@@ -371,6 +390,8 @@ def render_header(d: Dashboard) -> str:
         f"</span>"
         f'<span class="dot-sep">·</span>'
         f"<span>{len(w.vendors_active)} of {w.vendor_count_total} vendors</span>"
+        f'<span class="dot-sep">·</span>'
+        f"<span>Installed v{esc(d.caliper.version)}</span>"
         f"</div>"
         f'<div class="serial">{esc(serial)}</div>'
         f"</div>"
@@ -512,7 +533,144 @@ def render_cards(t: Totals, empty: bool) -> str:
     )
 
 
-# 4. Cost over time -----------------------------------------------------------
+# 4. Dashboard nav ------------------------------------------------------------
+
+
+def render_dashboard_nav(d: Dashboard) -> str:
+    links = [
+        ("command-center", "Command", bool(d.command_center)),
+        ("usage-windows", "Windows", bool(d.usage_windows)),
+        ("impact", "Impact", bool(d.impact_cards)),
+        ("cost-over-time", "Cost", bool(d.daily)),
+        ("usage-mix", "Mix", bool(d.usage_mix)),
+        ("advisor", "Advisor", True),
+        ("top-sessions", "Sessions", bool(d.top_sessions)),
+        ("rate-limits", "Limits", d.rate_limit_pressure is not None),
+        ("evidence", "Evidence", bool(d.evidence or d.quality_score)),
+    ]
+    body = "".join(
+        f'<a class="dash-nav-link{" is-muted" if not enabled else ""}" href="#{esc(anchor)}">'
+        f"{esc(label)}</a>"
+        for anchor, label, enabled in links
+    )
+    return f'<nav class="dash-nav" aria-label="Dashboard sections">{body}</nav>'
+
+
+# 5. Command center -----------------------------------------------------------
+
+
+def render_command_center(cards: list[CommandCenterCard]) -> str:
+    sec_id = "command-center"
+    if not cards:
+        return ""
+    body = "".join(
+        f'<article class="command-card command-card-{esc(card.tone)}">'
+        f'<div class="command-top">'
+        f'<span class="command-label">{esc(card.label)}</span>'
+        f'<span class="command-metric">{esc(card.metric)}</span>'
+        f"</div>"
+        f'<div class="command-value">{esc(card.value)}</div>'
+        f'<div class="command-detail">{esc(card.detail)}</div>'
+        f"</article>"
+        for card in cards
+    )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Command center', 'what needs attention first')}"
+        f'<div class="sec-body">'
+        f'<div class="command-grid">{body}</div>'
+        f"</div></section>"
+    )
+
+
+# 6. Rolling usage windows ----------------------------------------------------
+
+
+def render_usage_windows(windows: list[UsageWindow]) -> str:
+    sec_id = "usage-windows"
+    if not windows:
+        return ""
+    cards: list[str] = []
+    for window in sorted(windows, key=lambda item: (item.days, item.label)):
+        has_events = window.events > 0
+        meta = (
+            f"{fmt_tokens(window.total_tokens)} tokens · "
+            f"{fmt_int(window.events)} events · {fmt_int(window.sessions)} sessions"
+            if has_events
+            else "no usage in this rolling window"
+        )
+        tip = (
+            f"{window.label} · {window.range} · "
+            f"{fmt_money(window.cost_usd)} · {fmt_tokens(window.total_tokens)} tokens"
+        )
+        cards.append(
+            f'<article class="usage-window-card" data-tip="{esc(tip)}" data-tip-pos="bottom">'
+            f'<div class="usage-window-top">'
+            f'<div class="usage-window-label">{esc(window.label)}</div>'
+            f'<div class="usage-window-range">{esc(window.range)}</div>'
+            f"</div>"
+            f'<div class="usage-window-value">{fmt_money(window.cost_usd)}</div>'
+            f'<div class="usage-window-meta">{esc(meta)}</div>'
+            f'<div class="usage-window-stats">'
+            f"<span>{fmt_pct_round(window.cache_hit_rate)} cache</span>"
+            f"<span>{fmt_int(window.active_days)} active days</span>"
+            f"</div>"
+            f'<div class="usage-window-foot">'
+            f"{sparkline(window.daily_cost_sparkline, 'var(--accent)', window.label + ' cost')}"
+            f"{sparkline(window.daily_token_sparkline, 'var(--mute)', window.label + ' tokens')}"
+            f"</div>"
+            f"</article>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Usage windows', '7d → 30d → 90d · deduped')}"
+        f'<div class="sec-body">'
+        f'<div class="usage-window-grid">{"".join(cards)}</div>'
+        f"</div></section>"
+    )
+
+
+# 5. Impact cards -------------------------------------------------------------
+
+
+def render_impact_cards(cards: list[ImpactCard]) -> str:
+    sec_id = "impact"
+    if not cards:
+        return ""
+    tone_order = {"critical": 0, "warn": 1, "good": 2, "neutral": 3}
+    label_order = {
+        "Budget risk": 0,
+        "Cost driver": 1,
+        "Cache leverage": 2,
+        "Usage rhythm": 3,
+        "Dedupe": 4,
+    }
+    ordered_cards = sorted(
+        cards,
+        key=lambda card: (
+            label_order.get(card.label, 99),
+            tone_order.get(card.tone, 3),
+            card.label,
+        ),
+    )
+    body = "".join(
+        f'<article class="impact-card impact-card-{esc(card.tone)}">'
+        f'<div class="impact-label">{esc(card.label)}</div>'
+        f'<div class="impact-value">{esc(card.value)}</div>'
+        f'<div class="impact-detail">{esc(card.detail)}</div>'
+        f"</article>"
+        for card in ordered_cards
+    )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Impact', 'risk, drivers, leverage')}"
+        f'<div class="sec-body">'
+        f'<div class="impact-grid">{body}</div>'
+        f"</div></section>"
+    )
+
+
+# 6. Cost over time -----------------------------------------------------------
 
 
 def _nice_max(v: float) -> float:
@@ -640,10 +798,12 @@ def render_cost_over_time(daily: list[DailyPoint], empty: bool) -> str:
         f'<line x1="{PAD_L}" y1="{mean_y:.2f}" x2="{W - PAD_R}" '
         f'y2="{mean_y:.2f}" stroke="var(--accent)" stroke-dasharray="3 4" '
         f'stroke-width="1.25" opacity="0.7"/>'
-        f'<rect x="{W - PAD_R - 138:.0f}" y="{mean_y - 16:.2f}" width="134" '
+        f'<rect class="mean-label-bg" x="{W - PAD_R - 138:.0f}" '
+        f'y="{mean_y - 16:.2f}" width="134" '
         f'height="14" fill="var(--panel)" stroke="var(--border-strong)" '
         f'stroke-width="0.5" rx="3"/>'
-        f'<text x="{W - PAD_R - 6}" y="{mean_y - 5:.2f}" text-anchor="end" '
+        f'<text class="mean-label-text" x="{W - PAD_R - 6}" '
+        f'y="{mean_y - 5:.2f}" text-anchor="end" '
         f'fill="var(--accent)" font-size="10" font-weight="600" '
         f'font-family="ui-monospace, SF Mono, Menlo, Consolas, monospace">'
         f"mean&nbsp;{fmt_money(mean)}&nbsp;/&nbsp;day</text>"
@@ -900,17 +1060,9 @@ def render_recap(recap: Recap | None) -> str:
         f"</div>"
     )
 
-    # The recap card has its own large headline — bypass section_head so the
-    # title isn't squashed into the 12px uppercase accent label.
-    sec_num = SECTION_NUMBERS.get(sec_id, "")
-    sec_anchor = (
-        f'<header class="sec-head sec-head--bare">'
-        f'<span class="sec-num">§&nbsp;{sec_num}</span>'
-        f'<h2 class="sec-title">Recap</h2>'
-        f"</header>"
-        if sec_num
-        else ""
-    )
+    # The card carries the larger recap title; the section header keeps the
+    # dashboard's scan pattern consistent with the surrounding sections.
+    sec_anchor = section_head(sec_id, "Recap")
     panel_header = (
         '<div class="recap-header">'
         f'<h3 class="recap-headline">{esc(recap.title)}</h3>'
@@ -1005,7 +1157,215 @@ def render_session_shape(shape: SessionShape | None, empty: bool) -> str:
     )
 
 
-# 6. Models & tiers -----------------------------------------------------------
+# 8. Usage mix ----------------------------------------------------------------
+
+
+_MIX_DIMENSION_LABELS = {
+    "vendor": "Vendor",
+    "model/tier": "Model / tier",
+    "tier": "Tier",
+    "source": "Source",
+}
+
+
+def render_usage_mix(rows: list[MixRow]) -> str:
+    sec_id = "usage-mix"
+    if not rows:
+        return ""
+    dimension_order = ["vendor", "model/tier", "tier", "source"]
+    filters = [
+        '<button class="mix-filter is-active" type="button" data-mix-filter="all">All</button>'
+    ]
+    for dim in dimension_order:
+        if any(row.dimension == dim for row in rows):
+            filters.append(
+                f'<button class="mix-filter" type="button" data-mix-filter="{esc(dim)}">'
+                f"{esc(_MIX_DIMENSION_LABELS.get(dim, dim.title()))}</button>"
+            )
+
+    panels: list[str] = []
+    for dim in dimension_order:
+        group = sorted(
+            [row for row in rows if row.dimension == dim],
+            key=lambda row: (-row.cost_usd, -row.total_tokens, -row.events, row.label),
+        )
+        if not group:
+            continue
+        items = []
+        for row in group:
+            items.append(
+                f'<div class="mix-row" data-mix-dimension="{esc(dim)}">'
+                f'<div class="mix-main">'
+                f'<div class="mix-label">{esc(row.label)}</div>'
+                f'<div class="mix-meta">{fmt_money(row.cost_usd)} · '
+                f"{fmt_tokens(row.total_tokens)} tokens · {fmt_int(row.events)} events</div>"
+                f"</div>"
+                f'<div class="mix-spark">'
+                f"{sparkline(row.daily_cost_sparkline, 'var(--accent)', row.label + ' cost')}"
+                f"</div>"
+                f'<div class="mix-share">'
+                f"{inline_share_bar(row.share)}"
+                f"</div>"
+                f"</div>"
+            )
+        panels.append(
+            f'<article class="mix-panel" data-mix-panel="{esc(dim)}">'
+            f'<header class="mix-panel-head">'
+            f'<h3 class="panel-title">{esc(_MIX_DIMENSION_LABELS.get(dim, dim.title()))}</h3>'
+            f'<span class="mix-count">{len(group)} rows</span>'
+            f"</header>"
+            f'<div class="mix-list">{"".join(items)}</div>'
+            f"</article>"
+        )
+
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Usage mix', 'model, tier, vendor, source')}"
+        f'<div class="sec-body">'
+        f'<div class="mix-controls" role="group" aria-label="Usage mix filter">'
+        f"{''.join(filters)}</div>"
+        f'<div class="mix-grid">{"".join(panels)}</div>'
+        f"</div></section>"
+    )
+
+
+# 9. Savings advisor ----------------------------------------------------------
+
+
+def render_advisor(rows: list[AdvisorRecommendation]) -> str:
+    sec_id = "advisor"
+    if not rows:
+        return (
+            f'<section class="sec" id="{sec_id}">'
+            f"{section_head(sec_id, 'Savings advisor', 'model and tier swap checks')}"
+            f'<div class="sec-body">'
+            f'<div class="panel empty-panel">No high-confidence savings recommendations.</div>'
+            f"</div></section>"
+        )
+    cards = []
+    for row in sorted(rows, key=lambda item: (-item.savings_usd, -item.confidence, -item.events)):
+        cards.append(
+            f'<article class="advisor-card advisor-card-{esc(row.tone)}">'
+            f'<div class="advisor-card-top">'
+            f'<h3 class="advisor-title">{esc(row.title)}</h3>'
+            f'<span class="advisor-value">{esc(row.value)}</span>'
+            f"</div>"
+            f'<p class="advisor-detail">{esc(row.detail)}</p>'
+            f'<div class="advisor-meta">'
+            f"<span>{fmt_pct_round(row.confidence)} confidence</span>"
+            f"<span>{fmt_int(row.events)} events</span>"
+            f"<span>{fmt_int(row.sessions)} sessions</span>"
+            f"</div>"
+            f'<code class="advisor-command">{esc(row.action)}</code>'
+            f"</article>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Savings advisor', 'estimated avoidable spend')}"
+        f'<div class="sec-body">'
+        f'<div class="advisor-grid">{"".join(cards)}</div>'
+        f"</div></section>"
+    )
+
+
+# 10. Session outliers --------------------------------------------------------
+
+
+def render_top_sessions(rows: list[SessionRow]) -> str:
+    sec_id = "top-sessions"
+    if not rows:
+        return ""
+    body = []
+    ordered = sorted(
+        rows,
+        key=lambda row: (-row.cost_usd, -row.total_tokens, -row.tool_calls, -row.events, row.label),
+    )
+    for row in ordered:
+        body.append(
+            f"<tr>"
+            f'<td><span class="session-label">{esc(row.label)}</span>'
+            f'<div class="mono mute">{esc(row.started_at)}</div></td>'
+            f'<td class="num strong" data-value="{row.cost_usd:.8f}">{fmt_money(row.cost_usd)}</td>'
+            f'<td class="num" data-value="{row.total_tokens}">{fmt_tokens(row.total_tokens)}</td>'
+            f'<td class="num" data-value="{row.events}">{fmt_int(row.events)}</td>'
+            f'<td class="num" data-value="{row.tool_calls}">{fmt_int(row.tool_calls)}</td>'
+            f"<td>{esc(row.project)}</td>"
+            f'<td><span class="reason-chip">{esc(row.reason)}</span></td>'
+            f'<td class="mono mute">{esc(", ".join(row.models) or "—")}</td>'
+            f"</tr>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Session outliers', 'sorted by spend impact')}"
+        f'<div class="sec-body">'
+        f'<div class="panel pad-0 table-scroll">'
+        f'<table class="data data-sortable session-table">'
+        f"<thead><tr>"
+        f'<th data-sort="text">Session</th>'
+        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
+        f'<th class="num" data-sort="number">Tokens</th>'
+        f'<th class="num" data-sort="number">Events</th>'
+        f'<th class="num" data-sort="number">Tools</th>'
+        f'<th data-sort="text">Project</th>'
+        f'<th data-sort="text">Reason</th>'
+        f'<th data-sort="text">Models</th>'
+        f"</tr></thead>"
+        f"<tbody>{''.join(body)}</tbody>"
+        f"</table></div></div></section>"
+    )
+
+
+# 13. Rate limits -------------------------------------------------------------
+
+
+def render_rate_limits(pressure: RateLimitPressure | None) -> str:
+    sec_id = "rate-limits"
+    if pressure is None:
+        return ""
+    peak = max(
+        [
+            value
+            for value in (pressure.peak_primary_pct, pressure.peak_secondary_pct)
+            if value is not None
+        ],
+        default=None,
+    )
+    stats = [
+        ("Peak pressure", fmt_pct_round(peak) if peak is not None else "No samples"),
+        ("Latest primary", fmt_pct_round(pressure.latest_primary_pct)),
+        ("Latest secondary", fmt_pct_round(pressure.latest_secondary_pct)),
+        ("Reached", fmt_int(pressure.reached_count)),
+    ]
+    stat_html = "".join(
+        f'<div class="limit-stat"><div class="limit-label">{esc(label)}</div>'
+        f'<div class="limit-value">{esc(value)}</div></div>'
+        for label, value in stats
+    )
+    meta = " · ".join(
+        part
+        for part in (
+            pressure.latest_limit_name,
+            pressure.latest_plan_type,
+            f"resets {pressure.latest_resets_at}" if pressure.latest_resets_at else "",
+        )
+        if part
+    )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Rate limits', 'pressure and reset signal')}"
+        f'<div class="sec-body">'
+        f'<div class="panel limit-panel limit-panel-{esc(pressure.tone)}">'
+        f'<div class="limit-panel-head">'
+        f'<div><h3 class="panel-title">Limit pressure</h3>'
+        f'<div class="limit-sub">{esc(meta or "No rate-limit samples in this window.")}</div></div>'
+        f'<span class="limit-samples">{fmt_int(pressure.sample_count)} samples</span>'
+        f"</div>"
+        f'<div class="limit-stats">{stat_html}</div>'
+        f"</div></div></section>"
+    )
+
+
+# 11. Models & tiers -----------------------------------------------------------
 
 
 def render_models(rows: list[ModelRow], total_cost: float) -> str:
@@ -1013,33 +1373,37 @@ def render_models(rows: list[ModelRow], total_cost: float) -> str:
     if not rows:
         return ""  # section hidden when empty (per spec)
     body = []
-    for r in rows:
+    ordered_rows = sorted(
+        rows,
+        key=lambda row: (-row.cost_usd, -row.tokens, -row.events, row.vendor, row.model, row.tier),
+    )
+    for r in ordered_rows:
         share = r.cost_usd / total_cost if total_cost > 0 else 0
         body.append(
             f"<tr>"
             f"<td>{vendor_badge(r.vendor)}</td>"
             f'<td><span class="mono">{esc(r.model)}</span>'
             f'<span class="mute"> · {esc(r.tier)}</span></td>'
-            f'<td class="num strong">{fmt_money(r.cost_usd)}</td>'
+            f'<td class="num strong" data-value="{r.cost_usd:.8f}">{fmt_money(r.cost_usd)}</td>'
             f'<td class="num">{inline_share_bar(share)}</td>'
-            f'<td class="num">{r.events}</td>'
-            f'<td class="num">{fmt_tokens(r.tokens)}</td>'
-            f'<td class="num">{fmt_pct_round(r.cache_hit_rate)}</td>'
+            f'<td class="num" data-value="{r.events}">{r.events}</td>'
+            f'<td class="num" data-value="{r.tokens}">{fmt_tokens(r.tokens)}</td>'
+            f'<td class="num" data-value="{r.cache_hit_rate:.8f}">{fmt_pct_round(r.cache_hit_rate)}</td>'
             f"</tr>"
         )
     return (
         f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Models & tiers')}"
+        f"{section_head(sec_id, 'Models & tiers', 'sorted by cost')}"
         f'<div class="sec-body">'
-        f'<div class="panel pad-0"><table class="data">'
+        f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
         f"<thead><tr>"
-        f'<th class="th-vendor">Vendor</th>'
-        f'<th class="th-model">Model · tier</th>'
-        f'<th class="num th-cost">Cost <span class="sort-glyph">⌄</span></th>'
+        f'<th class="th-vendor" data-sort="text">Vendor</th>'
+        f'<th class="th-model" data-sort="text">Model · tier</th>'
+        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
         f'<th class="num">Share</th>'
-        f'<th class="num">Events</th>'
-        f'<th class="num">Tokens</th>'
-        f'<th class="num th-cache">Cache</th>'
+        f'<th class="num" data-sort="number">Events</th>'
+        f'<th class="num" data-sort="number">Tokens</th>'
+        f'<th class="num th-cache" data-sort="number">Cache</th>'
         f"</tr></thead>"
         f"<tbody>{''.join(body)}</tbody>"
         f"</table></div></div></section>"
@@ -1053,12 +1417,16 @@ def render_projects(rows: list[ProjectRow], show_paths: bool) -> str:
     sec_id = "projects"
     if not rows:
         return ""
+    ordered_rows = sorted(
+        rows,
+        key=lambda row: (-row.cost_usd, -row.events, -row.sessions, row.name, row.path or ""),
+    )
     # Global tool max so mini-bars are comparable across rows
-    max_tool = max((t.count for r in rows for t in r.top_tools), default=1)
-    total = sum(r.cost_usd for r in rows)
+    max_tool = max((t.count for r in ordered_rows for t in r.top_tools), default=1)
+    total = sum(r.cost_usd for r in ordered_rows)
 
     body = []
-    for r in rows:
+    for r in ordered_rows:
         share = r.cost_usd / total if total > 0 else 0
         path_html = (
             f'<div class="mono mute proj-path">{esc(r.path)}</div>' if show_paths and r.path else ""
@@ -1067,24 +1435,24 @@ def render_projects(rows: list[ProjectRow], show_paths: bool) -> str:
         body.append(
             f"<tr>"
             f'<td><span class="proj-name">{esc(r.name)}</span>{path_html}</td>'
-            f'<td class="num strong">{fmt_money(r.cost_usd)}</td>'
+            f'<td class="num strong" data-value="{r.cost_usd:.8f}">{fmt_money(r.cost_usd)}</td>'
             f'<td class="num">{inline_share_bar(share)}</td>'
-            f'<td class="num">{r.events}</td>'
-            f'<td class="num">{r.sessions}</td>'
+            f'<td class="num" data-value="{r.events}">{r.events}</td>'
+            f'<td class="num" data-value="{r.sessions}">{r.sessions}</td>'
             f'<td class="col-tools">{tools_html}</td>'
             f"</tr>"
         )
     return (
         f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Projects')}"
+        f"{section_head(sec_id, 'Projects', 'sorted by cost')}"
         f'<div class="sec-body">'
-        f'<div class="panel pad-0"><table class="data">'
+        f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
         f"<thead><tr>"
-        f"<th>Project</th>"
-        f'<th class="num th-cost">Cost <span class="sort-glyph">⌄</span></th>'
+        f'<th data-sort="text">Project</th>'
+        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
         f'<th class="num">Share</th>'
-        f'<th class="num">Events</th>'
-        f'<th class="num">Sessions</th>'
+        f'<th class="num" data-sort="number">Events</th>'
+        f'<th class="num" data-sort="number">Sessions</th>'
         f'<th class="th-tools">Top tools</th>'
         f"</tr></thead>"
         f"<tbody>{''.join(body)}</tbody>"
@@ -1323,10 +1691,31 @@ def render_forecast(f: Forecast | None) -> str:
 # 10. Evidence ----------------------------------------------------------------
 
 
-def render_evidence(rows: list[EvidenceRow]) -> str:
+def render_evidence(rows: list[EvidenceRow], quality: QualityScore | None = None) -> str:
     sec_id = "evidence"
-    if not rows:
+    if not rows and quality is None:
         return ""
+    quality_html = ""
+    if quality is not None:
+        signals = "".join(
+            f'<li class="quality-signal quality-signal-{esc(signal.tone)}">'
+            f'<span class="quality-signal-label">{esc(signal.label)}</span>'
+            f'<span class="quality-signal-status">{esc(signal.status)}</span>'
+            f'<span class="quality-signal-note">{esc(signal.note)}</span>'
+            f"</li>"
+            for signal in quality.signals
+        )
+        quality_html = (
+            f'<div class="quality-panel quality-panel-{esc(quality.tone)}">'
+            f'<div class="quality-score">'
+            f'<span class="quality-number">{quality.score}</span>'
+            f'<span class="quality-denom">/100</span>'
+            f"</div>"
+            f'<div class="quality-copy">'
+            f'<h3 class="panel-title">Evidence quality · {esc(quality.grade)}</h3>'
+            f'<ul class="quality-list">{signals}</ul>'
+            f"</div></div>"
+        )
     body = "".join(
         f"<tr>"
         f'<td class="evidence-dim">{esc(r.label)}</td>'
@@ -1339,6 +1728,7 @@ def render_evidence(rows: list[EvidenceRow]) -> str:
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Evidence', 'how trustworthy each number is')}"
         f'<div class="sec-body">'
+        f"{quality_html}"
         f'<div class="panel pad-0">'
         f'<table class="data evidence"><tbody>{body}</tbody></table>'
         f"</div></div></section>"
@@ -1364,6 +1754,8 @@ def render_footer(d: Dashboard) -> str:
         f'<span class="page-foot-sep">·</span>'
         f'<span class="page-foot-fact">No telemetry</span>'
         f'<span class="page-foot-sep">·</span>'
+        f'<span class="page-foot-fact">Inline controls only</span>'
+        f'<span class="page-foot-sep">·</span>'
         f'<span class="page-foot-fact">Parsed locally from your AI coding logs</span>'
         f"</div>"
         f'<div class="page-foot-right">'
@@ -1385,6 +1777,83 @@ def render_footer(d: Dashboard) -> str:
 # Inlining preserves the offline invariant: no external resources, no file
 # I/O at render time, and ``pip install caliper-ai`` ships the styles even
 # when ``styles.css`` is not bundled as package_data.
+INLINE_SCRIPT = r"""
+(() => {
+  const toNumber = (cell) => {
+    const raw = cell ? (cell.dataset.value || cell.textContent || "") : "";
+    const cleaned = raw.replace(/[$,%\s]/g, "").replace(/[KMB]$/i, "");
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  document.querySelectorAll(".data-sortable th[data-sort]").forEach((th) => {
+    th.tabIndex = 0;
+    th.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        th.click();
+      }
+    });
+    th.addEventListener("click", () => {
+      const table = th.closest("table");
+      const tbody = table ? table.tBodies[0] : null;
+      if (!table || !tbody) return;
+      const headers = Array.from(th.parentElement.children);
+      const index = headers.indexOf(th);
+      const numeric = th.dataset.sort === "number";
+      const current = th.getAttribute("aria-sort") === "ascending" ? "ascending" : "descending";
+      const next = current === "ascending" ? "descending" : "ascending";
+      headers.forEach((header) => {
+        header.removeAttribute("aria-sort");
+        const glyph = header.querySelector(".sort-glyph");
+        if (glyph) glyph.textContent = "";
+      });
+      th.setAttribute("aria-sort", next);
+      const glyph = th.querySelector(".sort-glyph");
+      if (glyph) glyph.textContent = next === "ascending" ? "↑" : "↓";
+      const rows = Array.from(tbody.rows);
+      rows.sort((a, b) => {
+        const av = numeric ? toNumber(a.cells[index]) : (a.cells[index]?.textContent || "");
+        const bv = numeric ? toNumber(b.cells[index]) : (b.cells[index]?.textContent || "");
+        const result = numeric ? av - bv : String(av).localeCompare(String(bv));
+        return next === "ascending" ? result : -result;
+      });
+      rows.forEach((row) => tbody.appendChild(row));
+    });
+  });
+
+  const filterButtons = Array.from(document.querySelectorAll(".mix-filter"));
+  filterButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const filter = button.dataset.mixFilter || "all";
+      filterButtons.forEach((item) => {
+        item.classList.toggle("is-active", item === button);
+      });
+      document.querySelectorAll("[data-mix-panel]").forEach((panel) => {
+        const show = filter === "all" || panel.dataset.mixPanel === filter;
+        panel.hidden = !show;
+      });
+    });
+  });
+
+  const navLinks = Array.from(document.querySelectorAll(".dash-nav-link[href^='#']"));
+  const sections = navLinks
+    .map((link) => document.getElementById(link.getAttribute("href").slice(1)))
+    .filter(Boolean);
+  if ("IntersectionObserver" in window && sections.length) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        navLinks.forEach((link) => {
+          link.classList.toggle("is-current", link.getAttribute("href") === `#${entry.target.id}`);
+        });
+      });
+    }, { rootMargin: "-35% 0px -60% 0px", threshold: 0.01 });
+    sections.forEach((section) => observer.observe(section));
+  }
+})();
+"""
+
 INLINE_STYLES = r"""
 /* ============================================================================
    Caliper Dashboard — visual system v2 (premium)
@@ -1978,6 +2447,129 @@ code { color: var(--accent); font-size: 0.92em; }
 .delta-bad { color: var(--bad);  background: var(--bad-tint); }
 .delta-flat { color: var(--ghost); }
 
+/* — Rolling usage windows --------------------------------------------- */
+
+.usage-window-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s3);
+}
+.usage-window-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--s4) var(--s5);
+  min-width: 0;
+  overflow: visible;
+  position: relative;
+}
+.usage-window-card::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--accent-tint-2), transparent);
+}
+.usage-window-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  min-width: 0;
+}
+.usage-window-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.usage-window-range {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ghost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.usage-window-value {
+  margin-top: var(--s3);
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: var(--otf-num);
+  color: var(--ink);
+}
+.usage-window-meta {
+  margin-top: var(--s1);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.usage-window-stats {
+  display: flex;
+  gap: var(--s3);
+  margin-top: var(--s3);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.usage-window-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-top: var(--s4);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--hairline);
+}
+
+/* — Impact cards ------------------------------------------------------- */
+
+.impact-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--s3);
+}
+.impact-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: var(--s4);
+  min-width: 0;
+}
+.impact-card-good { border-left-color: var(--ok); }
+.impact-card-warn { border-left-color: var(--warn); }
+.impact-card-critical { border-left-color: var(--bad); }
+.impact-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.impact-value {
+  margin-top: var(--s2);
+  color: var(--ink);
+  font-weight: 650;
+  font-size: 19px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.impact-detail {
+  margin-top: var(--s2);
+  color: var(--mute);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* — Cost chart ---------------------------------------------------------- */
 
 .chart-panel {
@@ -2202,7 +2794,14 @@ code { color: var(--accent); font-size: 0.92em; }
 .data .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .data .strong { color: var(--ink); font-weight: 600; font-size: 13.5px; }
 
-.sort-glyph { color: var(--accent); margin-left: 4px; }
+.sort-glyph {
+  color: var(--accent);
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  margin-left: 4px;
+  transform: translateY(-1px);
+}
 
 .th-cost { width: 110px; }
 .th-cache { width: 80px; }
@@ -3015,10 +3614,407 @@ code { color: var(--accent); font-size: 0.92em; }
   filter: brightness(1.12);
 }
 
+.dash-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: calc(var(--s2) * -1) 0 var(--s5);
+  padding: var(--s2);
+  overflow-x: auto;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  backdrop-filter: blur(14px);
+}
+
+.dash-nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 var(--s3);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+.dash-nav-link:hover,
+.dash-nav-link.is-current {
+  color: var(--ink);
+  background: var(--panel-hover);
+  border-color: var(--border);
+}
+.dash-nav-link.is-muted { opacity: 0.55; }
+
+.command-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s4);
+}
+.command-card {
+  position: relative;
+  min-height: 142px;
+  padding: var(--s4);
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.command-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--mute);
+}
+.command-card-good::before { background: var(--ok); }
+.command-card-warn::before { background: var(--warn); }
+.command-card-critical::before { background: var(--danger); }
+.command-top {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  align-items: center;
+  min-width: 0;
+}
+.command-label {
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.command-metric {
+  max-width: 42%;
+  overflow: hidden;
+  color: var(--ghost);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-value {
+  margin-top: var(--s4);
+  color: var(--ink);
+  font-size: clamp(24px, 3vw, 36px);
+  font-weight: 780;
+  line-height: 0.95;
+  overflow-wrap: anywhere;
+}
+.command-detail {
+  margin-top: var(--s3);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mix-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+}
+.mix-filter {
+  min-height: 30px;
+  padding: 0 var(--s3);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mix-filter:hover,
+.mix-filter.is-active {
+  color: var(--ink);
+  background: var(--panel-hover);
+  border-color: var(--border-strong);
+}
+.mix-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s4);
+}
+.mix-panel {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.mix-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  align-items: center;
+  padding: var(--s4);
+  border-bottom: 1px solid var(--hairline);
+}
+.mix-count {
+  color: var(--ghost);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.mix-list { display: grid; }
+.mix-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 92px;
+  gap: var(--s3);
+  align-items: center;
+  min-height: 64px;
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--hairline);
+}
+.mix-row:last-child { border-bottom: 0; }
+.mix-label {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.mix-meta {
+  margin-top: 3px;
+  color: var(--mute);
+  font-size: 11px;
+}
+.mix-spark {
+  justify-self: end;
+  width: 92px;
+}
+.mix-share { justify-self: end; }
+
+.advisor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s4);
+}
+.advisor-card {
+  position: relative;
+  min-width: 0;
+  padding: var(--s4);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.advisor-card::before {
+  content: "";
+  position: absolute;
+  inset: var(--s4) auto var(--s4) 0;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--mute);
+}
+.advisor-card-good::before { background: var(--ok); }
+.advisor-card-warn::before { background: var(--warn); }
+.advisor-card-critical::before { background: var(--danger); }
+.advisor-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  align-items: baseline;
+}
+.advisor-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.25;
+}
+.advisor-value {
+  color: var(--ok);
+  font-family: ui-monospace, SF Mono, Menlo, Consolas, monospace;
+  font-size: 16px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+.advisor-detail {
+  margin: var(--s3) 0 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.advisor-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+.advisor-meta span,
+.reason-chip,
+.limit-samples {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 var(--s2);
+  color: var(--ink-2);
+  font-size: 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+}
+.advisor-command {
+  display: block;
+  margin-top: var(--s3);
+  padding: var(--s2) var(--s3);
+  color: var(--accent-soft);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+.data-sortable th[data-sort] {
+  cursor: pointer;
+  user-select: none;
+}
+.data-sortable th[data-sort]:hover {
+  color: var(--ink);
+  background: var(--panel-hover);
+}
+.data-sortable th[data-sort]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.session-label {
+  display: inline-block;
+  max-width: 260px;
+  color: var(--ink);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.session-table td:nth-child(6) {
+  max-width: 180px;
+  overflow-wrap: anywhere;
+}
+
+.limit-panel {
+  position: relative;
+  overflow: hidden;
+}
+.limit-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--mute);
+}
+.limit-panel-good::before { background: var(--ok); }
+.limit-panel-warn::before { background: var(--warn); }
+.limit-panel-critical::before { background: var(--danger); }
+.limit-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  align-items: flex-start;
+  padding: var(--s4);
+  border-bottom: 1px solid var(--hairline);
+}
+.limit-sub {
+  margin-top: 4px;
+  color: var(--mute);
+  font-size: 12px;
+}
+.limit-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.limit-stat {
+  padding: var(--s4);
+  border-right: 1px solid var(--hairline);
+}
+.limit-stat:last-child { border-right: 0; }
+.limit-label {
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.limit-value {
+  margin-top: var(--s2);
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 760;
+}
+
+.quality-panel {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: var(--s5);
+  align-items: start;
+  margin-bottom: var(--s4);
+  padding: var(--s4);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.quality-score {
+  display: flex;
+  align-items: baseline;
+  color: var(--ink);
+}
+.quality-number {
+  font-size: 52px;
+  font-weight: 780;
+  line-height: 0.95;
+}
+.quality-denom {
+  color: var(--mute);
+  font-size: 15px;
+}
+.quality-list {
+  display: grid;
+  gap: var(--s2);
+  margin: var(--s3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.quality-signal {
+  display: grid;
+  grid-template-columns: 160px 88px minmax(0, 1fr);
+  gap: var(--s3);
+  align-items: center;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.quality-signal-label { color: var(--ink); font-weight: 650; }
+.quality-signal-status {
+  justify-self: start;
+  padding: 2px 7px;
+  color: var(--ink-2);
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+}
+.quality-signal-note {
+  color: var(--mute);
+  overflow-wrap: anywhere;
+}
+
 /* — Responsive --------------------------------------------------------- */
 
 @media (max-width: 920px) {
   .cards { grid-template-columns: repeat(2, 1fr); }
+  .command-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mix-grid,
+  .advisor-grid { grid-template-columns: 1fr; }
+  .limit-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .limit-stat:nth-child(2n) { border-right: 0; }
+  .quality-panel { grid-template-columns: 1fr; gap: var(--s4); }
+  .usage-window-grid { grid-template-columns: 1fr; }
+  .impact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .shape-grid { grid-template-columns: 1fr; }
   .th-tools, .col-tools { display: none; }
   .page { padding: var(--s6) var(--s4) var(--s6); }
@@ -3032,8 +4028,21 @@ code { color: var(--accent); font-size: 0.92em; }
 }
 @media (max-width: 640px) {
   .cards { grid-template-columns: 1fr; }
+  .dash-nav {
+    position: static;
+    margin-top: 0;
+  }
+  .command-grid { grid-template-columns: 1fr; }
+  .impact-grid { grid-template-columns: 1fr; }
   .forecast-cards { grid-template-columns: 1fr; }
   .page { padding: var(--s5) var(--s4) var(--s5); }
+  [data-theme="print"] .page-wrap {
+    padding: var(--s5) 0 var(--s6);
+  }
+  [data-theme="print"] .page {
+    max-width: none;
+    padding: var(--s5) var(--s4) var(--s5);
+  }
   .page-head { grid-template-columns: 1fr; }
   .page-head-right { text-align: left; align-items: flex-start; }
   .window-badge,
@@ -3079,8 +4088,103 @@ code { color: var(--accent); font-size: 0.92em; }
     column-gap: 4px;
   }
   .heat-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .data:not(.evidence) { min-width: 560px; }
-  .th-cache { display: none; }
+  .mix-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .mix-spark {
+    display: none;
+  }
+  .advisor-card-top {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--s2);
+  }
+  .limit-panel-head {
+    flex-direction: column;
+    gap: var(--s3);
+  }
+  .limit-stats { grid-template-columns: 1fr; }
+  .limit-stat,
+  .limit-stat:nth-child(2n) {
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .limit-stat:last-child { border-bottom: 0; }
+  .quality-signal {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .quality-signal-note {
+    grid-column: 1 / -1;
+  }
+  .data:not(.evidence) { min-width: 0; }
+  #models .data th:nth-child(n+4),
+  #models .data td:nth-child(n+4),
+  #projects .data th:nth-child(n+3),
+  #projects .data td:nth-child(n+3) {
+    display: none;
+  }
+  #models .th-vendor { width: 72px; }
+  #models .th-cost,
+  #projects .th-cost { width: 86px; }
+  #models .data thead th,
+  #projects .data thead th,
+  #models .data tbody td,
+  #projects .data tbody td {
+    padding-left: var(--s3);
+    padding-right: var(--s3);
+  }
+  #models .data thead th:first-child,
+  #projects .data thead th:first-child,
+  #models .data tbody td:first-child,
+  #projects .data tbody td:first-child { padding-left: var(--s4); }
+  #models .data thead th:last-child,
+  #projects .data thead th:last-child,
+  #models .data tbody td:last-child,
+  #projects .data tbody td:last-child { padding-right: var(--s4); }
+  #models .vendor-badge {
+    padding: 2px 6px;
+    font-size: 9.5px;
+  }
+  #models .th-model { width: auto; }
+  #models .data td:nth-child(2) {
+    max-width: 118px;
+    overflow-wrap: anywhere;
+  }
+  #projects .proj-name {
+    display: inline-block;
+    max-width: 150px;
+    overflow-wrap: anywhere;
+  }
+  .data.evidence tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--s2) var(--s3);
+    padding: var(--s4);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .data.evidence tbody tr:last-child { border-bottom: 0; }
+  .data.evidence tbody td,
+  .data.evidence tbody td:first-child,
+  .data.evidence tbody td:last-child {
+    padding: 0;
+    border-bottom: 0;
+  }
+  .data.evidence tbody td:nth-child(2) {
+    justify-self: end;
+  }
+  .data.evidence .evidence-dim {
+    width: auto;
+    min-width: 0;
+  }
+  .data.evidence .evidence-note {
+    grid-column: 1 / -1;
+    line-height: 1.5;
+    max-width: 32ch;
+  }
+  .mean-label-bg,
+  .mean-label-text {
+    display: none;
+  }
   .recap-header { gap: var(--s2); }
   .page-foot-left { flex-wrap: wrap; }
   .page-foot-right { align-items: flex-start; }
@@ -3114,16 +4218,24 @@ def render_dashboard(d: Dashboard, *, theme: str = "dark", density: str = "comfo
         [
             render_header(d),
             render_banner(d.banner) if not is_empty else "",
+            render_dashboard_nav(d),
             render_cards(d.totals, is_empty),
+            render_command_center(d.command_center),
+            render_usage_windows(d.usage_windows),
+            render_impact_cards(d.impact_cards),
             render_cost_over_time(d.daily, is_empty),
             render_yearly_heatmap(d.heatmap) if not is_empty else "",
             render_recap(d.recap) if not is_empty else "",
             render_session_shape(d.shape, is_empty),
+            render_usage_mix(d.usage_mix) if not is_empty else "",
+            render_advisor(d.advisor_recommendations) if not is_empty else "",
+            render_top_sessions(d.top_sessions) if not is_empty else "",
             render_models(d.by_model, d.totals.cost_usd) if not is_empty else "",
             render_projects(d.by_project, d.show_paths) if not is_empty else "",
+            render_rate_limits(d.rate_limit_pressure) if not is_empty else "",
             render_insights(d.insights),
             render_forecast(d.forecast) if not is_empty else "",
-            render_evidence(d.evidence) if not is_empty else "",
+            render_evidence(d.evidence, d.quality_score) if not is_empty else "",
             render_footer(d),
         ]
     )
@@ -3142,6 +4254,7 @@ def render_dashboard(d: Dashboard, *, theme: str = "dark", density: str = "comfo
         f'<div class="page-wrap">'
         f'<main class="page">{body}</main>'
         f"</div>\n"
+        f"<script>\n{INLINE_SCRIPT}\n</script>\n"
         f"</body>\n"
         f"</html>\n"
     )

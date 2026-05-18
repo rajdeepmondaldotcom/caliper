@@ -9,10 +9,12 @@ from caliper.dashboards import render_dashboard
 from caliper.dashboards.data_models import Banner
 from caliper.dashboards.sample_data import empty_dashboard, sample_dashboard
 
-FORBIDDEN = ("://", "<script", "<link")
+FORBIDDEN = ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import(")
 
 
 def _assert_private_static_html(html: str) -> None:
+    assert html.count("<script>") == 1
+    assert html.count("</script>") == 1
     for needle in FORBIDDEN:
         assert needle not in html
 
@@ -26,10 +28,27 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
     assert len(dashboard.heatmap.cells) == 365
     assert dashboard.recap is not None
     assert len(dashboard.recap.hours) == 168
+    assert [window.label for window in dashboard.usage_windows] == [
+        "Last 7 days",
+        "Last 30 days",
+        "Last 90 days",
+    ]
+    assert {card.label for card in dashboard.impact_cards} >= {"Budget risk", "Dedupe"}
 
     html = render_dashboard(dashboard)
     assert "Caliper Dashboard" in html
     assert "api-server" in html
+    assert "Command center" in html
+    assert "Usage windows" in html
+    assert "Impact" in html
+    assert "Savings advisor" in html
+    assert "Session outliers" in html
+    assert dashboard.command_center
+    assert dashboard.advisor_recommendations
+    assert dashboard.top_sessions
+    assert dashboard.usage_mix
+    assert dashboard.rate_limit_pressure is not None
+    assert dashboard.quality_score is not None
     _assert_private_static_html(html)
 
 

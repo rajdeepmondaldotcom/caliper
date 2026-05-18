@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import calendar
 import csv
+import dataclasses
 import datetime as dt
 import io
 import json
@@ -1934,7 +1935,22 @@ def dashboard(
         values["output_format"] = "table"
         options = _options(values)
         result = _safe_load_usage(options)
-        payload = build_handoff_dashboard(result, options, with_deltas=not no_deltas)
+        rolling_start = options.end - dt.timedelta(days=90)
+        if options.start == rolling_start:
+            rolling_options = options
+            rolling_result = result
+        else:
+            rolling_options = dataclasses.replace(options, start=rolling_start)
+            rolling_result = _safe_load_usage(rolling_options)
+        budget_config = load_config(config) if config else load_config()
+        payload = build_handoff_dashboard(
+            result,
+            options,
+            with_deltas=not no_deltas,
+            rolling_result=rolling_result,
+            rolling_options=rolling_options,
+            budget_config=budget_config,
+        )
     text = render_dashboard(payload, theme=theme, density=density)
     should_open = open_in_browser or (
         output is None and not stdout_html and _dashboard_stdout_is_interactive()

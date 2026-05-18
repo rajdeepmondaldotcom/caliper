@@ -22,6 +22,7 @@ ToolCategory = Literal["explore", "execute", "diagnose", "mixed"]
 SessionShapeName = Literal["exploration", "execution", "diagnostic", "mixed", "no-tools"]
 Severity = Literal["info", "warn", "critical"]
 EvidenceStatus = Literal["exact", "estimated", "partial", "unsupported"]
+ImpactTone = Literal["neutral", "good", "warn", "critical"]
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +78,107 @@ class Totals:
     daily_cache_sparkline: list[float] = field(default_factory=list)
     daily_token_sparkline: list[float] = field(default_factory=list)
     daily_session_sparkline: list[float] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class UsageWindow:
+    label: str  # "Last 7 days"
+    days: int
+    start: str  # ISO date, inclusive
+    end: str  # ISO date, exclusive
+    range: str
+    cost_usd: float
+    total_tokens: int
+    events: int
+    sessions: int
+    cache_hit_rate: float
+    active_days: int
+    daily_cost_sparkline: list[float] = field(default_factory=list)
+    daily_token_sparkline: list[float] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ImpactCard:
+    label: str
+    value: str
+    detail: str
+    tone: ImpactTone = "neutral"
+
+
+@dataclass(frozen=True)
+class CommandCenterCard:
+    label: str
+    value: str
+    detail: str
+    tone: ImpactTone = "neutral"
+    metric: str = ""
+
+
+@dataclass(frozen=True)
+class AdvisorRecommendation:
+    title: str
+    value: str
+    detail: str
+    action: str
+    confidence: float
+    events: int
+    sessions: int
+    tone: ImpactTone = "neutral"
+    savings_usd: float = 0.0
+
+
+@dataclass(frozen=True)
+class SessionRow:
+    label: str
+    started_at: str
+    project: str
+    cost_usd: float
+    total_tokens: int
+    events: int
+    tool_calls: int
+    models: list[str]
+    reason: str
+
+
+@dataclass(frozen=True)
+class MixRow:
+    dimension: str
+    label: str
+    cost_usd: float
+    total_tokens: int
+    events: int
+    share: float
+    daily_cost_sparkline: list[float] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RateLimitPressure:
+    sample_count: int
+    peak_primary_pct: float | None
+    peak_secondary_pct: float | None
+    latest_primary_pct: float | None
+    latest_secondary_pct: float | None
+    latest_limit_name: str
+    latest_plan_type: str
+    latest_resets_at: str
+    reached_count: int
+    tone: ImpactTone = "neutral"
+
+
+@dataclass(frozen=True)
+class QualitySignal:
+    label: str
+    status: str
+    note: str
+    tone: ImpactTone = "neutral"
+
+
+@dataclass(frozen=True)
+class QualityScore:
+    score: int
+    grade: str
+    signals: list[QualitySignal]
+    tone: ImpactTone = "neutral"
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +384,20 @@ class Dashboard:
     insights: list[Insight]
     forecast: Forecast | None
     evidence: list[EvidenceRow]
+
+    # Rolling, overlapping usage windows. These are intentionally separate
+    # from `totals`, which remains the selected report window.
+    usage_windows: list[UsageWindow] = field(default_factory=list)
+    impact_cards: list[ImpactCard] = field(default_factory=list)
+
+    # Richer analysis report sections. The renderer treats these as optional
+    # so lean/legacy dashboard payloads still work.
+    command_center: list[CommandCenterCard] = field(default_factory=list)
+    advisor_recommendations: list[AdvisorRecommendation] = field(default_factory=list)
+    top_sessions: list[SessionRow] = field(default_factory=list)
+    usage_mix: list[MixRow] = field(default_factory=list)
+    rate_limit_pressure: RateLimitPressure | None = None
+    quality_score: QualityScore | None = None
 
     # New visual hero sections (yearly heatmap + recap card).
     # Optional so older fixtures continue to render.

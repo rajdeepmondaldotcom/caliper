@@ -77,7 +77,16 @@ jobs:
           tmp="$(mktemp -d)"
           uvx --from "$wheel" caliper dashboard --demo --output "$tmp/dashboard.html"
           test -s "$tmp/dashboard.html"
-          ! grep -E '://|<script|<link' "$tmp/dashboard.html"
+          python - "$tmp/dashboard.html" <<'PY'
+          from pathlib import Path
+          import sys
+
+          html = Path(sys.argv[1]).read_text(encoding="utf-8")
+          assert html.count("<script>") == 1, "expected exactly one inline dashboard script"
+          assert html.count("</script>") == 1, "expected exactly one inline dashboard script close"
+          for needle in ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import("):
+              assert needle not in html, f"dashboard privacy gate found {needle!r}"
+          PY
       - name: Generate SBOM (CycloneDX)
         run: |
           set -euo pipefail

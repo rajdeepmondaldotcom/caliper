@@ -200,6 +200,43 @@ def test_dashboard_themes_render(monkeypatch, tmp_path) -> None:
         assert f'data-theme="{theme}"' in html
 
 
+def test_dashboard_days_still_renders_rolling_windows(monkeypatch, tmp_path) -> None:
+    _write_session(tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    out = tmp_path / "rolling.html"
+
+    result = runner.invoke(
+        app,
+        [
+            "dashboard",
+            "--days",
+            "7",
+            "--until",
+            "2026-05-13T00:00:00Z",
+            "--tz",
+            "UTC",
+            "--session-root",
+            str(tmp_path / "missing-codex"),
+            "--state-db",
+            str(tmp_path / "missing-state.sqlite"),
+            "--codex-config",
+            str(tmp_path / "missing-config.toml"),
+            "--include-vendor",
+            "claude-code",
+            "--no-parse-cache",
+            "--no-deltas",
+            "--output",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    html = out.read_text()
+    assert "Last 7 days" in html
+    assert "Last 30 days" in html
+    assert "Last 90 days" in html
+
+
 def test_dashboard_demo_renders_without_local_logs(tmp_path) -> None:
     out = tmp_path / "demo.html"
     result = runner.invoke(app, ["dashboard", "--demo", "--output", str(out)])
@@ -207,7 +244,8 @@ def test_dashboard_demo_renders_without_local_logs(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     html = out.read_text()
     assert "Caliper" in html
-    for needle in ("://", "<script", "<link"):
+    assert html.count("<script>") == 1
+    for needle in ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import("):
         assert needle not in html
 
 

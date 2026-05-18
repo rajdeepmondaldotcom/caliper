@@ -162,11 +162,16 @@ text_ok shape_help "$VENV/bin/caliper" shape --help
 text_ok dashboard_help "$VENV/bin/caliper" dashboard --help
 text_ok dashboard "$VENV/bin/caliper" dashboard "${COMMON[@]}" --days 1 --no-deltas --output "$OUT/dashboard.html"
 test -s "$OUT/dashboard.html"
-if grep -E '://|<script|<link' "$OUT/dashboard.html" >/dev/null; then
-  echo "dashboard privacy grep failed"
-  grep -En '://|<script|<link' "$OUT/dashboard.html" | head
-  exit 1
-fi
+python - "$OUT/dashboard.html" <<'PY'
+from pathlib import Path
+import sys
+
+html = Path(sys.argv[1]).read_text(encoding="utf-8")
+assert html.count("<script>") == 1, "expected exactly one inline dashboard script"
+assert html.count("</script>") == 1, "expected exactly one inline dashboard script close"
+for needle in ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import("):
+    assert needle not in html, f"dashboard privacy gate found {needle!r}"
+PY
 text_allow_health_exit doctor "$VENV/bin/caliper" doctor "${COMMON[@]}"
 text_ok tui_help "$VENV/bin/caliper" tui --help
 
