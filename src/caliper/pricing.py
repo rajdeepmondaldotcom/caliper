@@ -9,6 +9,7 @@ from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
+from caliper import taxonomy as _taxonomy
 from caliper.models import (
     CostTotals,
     LongContextRule,
@@ -25,16 +26,6 @@ from caliper.pricing_catalog import (
     load_cached_catalog,
     load_pricing_catalog,
 )
-from caliper.taxonomy import KNOWN_MODEL_VENDORS as KNOWN_MODEL_VENDORS
-from caliper.taxonomy import VENDOR_ANTHROPIC as VENDOR_ANTHROPIC
-from caliper.taxonomy import VENDOR_ANYSPHERE as VENDOR_ANYSPHERE
-from caliper.taxonomy import VENDOR_GOOGLE as VENDOR_GOOGLE
-from caliper.taxonomy import VENDOR_META as VENDOR_META
-from caliper.taxonomy import VENDOR_MISTRAL as VENDOR_MISTRAL
-from caliper.taxonomy import VENDOR_OPENAI as VENDOR_OPENAI
-from caliper.taxonomy import VENDOR_UNKNOWN as VENDOR_UNKNOWN
-from caliper.taxonomy import model_vendor as model_vendor
-from caliper.taxonomy import model_vendor_glyph as model_vendor_glyph
 
 LONG_CONTEXT_INPUT_THRESHOLD = 272_000
 ZERO = Decimal("0")
@@ -114,6 +105,26 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
 )
 
 MODELS_BY_NAME: dict[str, ModelCard] = {card.name: card for card in MODEL_CARDS}
+
+
+KNOWN_MODEL_VENDORS = _taxonomy.KNOWN_MODEL_VENDORS
+VENDOR_ANTHROPIC = _taxonomy.VENDOR_ANTHROPIC
+VENDOR_OPENAI = _taxonomy.VENDOR_OPENAI
+VENDOR_ANYSPHERE = _taxonomy.VENDOR_ANYSPHERE
+VENDOR_GOOGLE = _taxonomy.VENDOR_GOOGLE
+VENDOR_MISTRAL = _taxonomy.VENDOR_MISTRAL
+VENDOR_META = _taxonomy.VENDOR_META
+VENDOR_UNKNOWN = _taxonomy.VENDOR_UNKNOWN
+
+
+def model_vendor(model: str | None) -> str:
+    """Return the canonical vendor label for a model id."""
+    return _taxonomy.model_vendor(model)
+
+
+def model_vendor_glyph(vendor: str) -> str:
+    """Short single-character glyph for the dense Models screen header."""
+    return _taxonomy.model_vendor_glyph(vendor)
 
 
 PRICING_SOURCES = [
