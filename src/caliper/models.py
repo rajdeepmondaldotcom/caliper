@@ -573,7 +573,7 @@ class Aggregate:
         self.cache_savings.add(cache_savings)
 
     def _add_event_identity(self, event: UsageEvent) -> None:
-        from caliper.pricing import model_vendor
+        from caliper.taxonomy import model_vendor
 
         if event.model:
             self.models.add(event.model)
@@ -640,7 +640,7 @@ class Aggregate:
         unknown_model: bool,
         unknown_tier: bool,
     ) -> None:
-        from caliper.pricing import model_vendor
+        from caliper.taxonomy import model_vendor
 
         breakdown_key = f"{event.model}\0{event.service_tier}"
         breakdown = self.model_breakdowns.setdefault(

@@ -7,7 +7,6 @@ import caliper.dashboards.sample_data as sample_data
 from caliper import __version__
 from caliper.dashboards import render_dashboard
 from caliper.dashboards.data_models import Banner
-from caliper.dashboards.sample_data import empty_dashboard, sample_dashboard
 
 FORBIDDEN = ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import(")
 
@@ -20,7 +19,7 @@ def _assert_private_static_html(html: str) -> None:
 
 
 def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
-    dashboard = sample_dashboard(show_paths=True)
+    dashboard = sample_data.sample_dashboard(show_paths=True)
 
     assert dashboard.caliper.version == __version__
     assert dashboard.show_paths is True
@@ -68,7 +67,7 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
 
 
 def test_empty_sample_dashboard_renders_empty_state() -> None:
-    dashboard = empty_dashboard()
+    dashboard = sample_data.empty_dashboard()
 
     assert dashboard.caliper.version == __version__
     assert dashboard.totals.events == 0
@@ -82,7 +81,7 @@ def test_empty_sample_dashboard_renders_empty_state() -> None:
 
 def test_sample_dashboard_banner_variants_render() -> None:
     partial = render_dashboard(
-        sample_dashboard(
+        sample_data.sample_dashboard(
             banner=Banner(
                 kind="warn",
                 label="PARTIAL",
@@ -91,7 +90,7 @@ def test_sample_dashboard_banner_variants_render() -> None:
         )
     )
     stale = render_dashboard(
-        sample_dashboard(
+        sample_data.sample_dashboard(
             banner=Banner(
                 kind="crit",
                 label="STALE",
@@ -109,12 +108,12 @@ def test_sample_dashboard_banner_variants_render() -> None:
 
 
 def test_sample_dashboard_supports_lenses_and_share_safe_redaction() -> None:
-    lens_html = render_dashboard(sample_dashboard(), default_lens="finance")
+    lens_html = render_dashboard(sample_data.sample_dashboard(), default_lens="finance")
     assert 'data-lens="finance"' in lens_html
     assert 'class="lens-button is-active" type="button" data-lens="finance"' in lens_html
     _assert_private_static_html(lens_html)
 
-    share_html = render_dashboard(sample_dashboard(show_paths=True), share_safe=True)
+    share_html = render_dashboard(sample_data.sample_dashboard(show_paths=True), share_safe=True)
     assert 'data-share-safe="true"' in share_html
     assert "Project 1" in share_html
     assert "Session 1" in share_html

@@ -4,6 +4,7 @@ import datetime as dt
 import json
 from decimal import Decimal
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 
@@ -231,7 +232,7 @@ def test_fetch_helpers_and_network_validation(monkeypatch) -> None:
     records, sources = pc._fetch_portkey_records()
     assert {record["name"] for record in records} == {"gpt-5-5", "claude-haiku-4-5"}
     assert any(source["status"] == "error" for source in sources)
-    assert any("raw.githubusercontent.com" in call for call in calls)
+    assert any(urlparse(call).netloc == "raw.githubusercontent.com" for call in calls)
 
     nullable = pc._records_from_portkey(
         "openai",

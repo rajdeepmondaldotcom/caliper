@@ -155,8 +155,8 @@ def test_metrics_handler_ignores_client_disconnect() -> None:
             del message
             self.status = code
 
-        def send_header(self, keyword: str, value: str) -> None:
-            del keyword, value
+        def send_header(self, _keyword: str, _value: str) -> None:
+            return
 
         def end_headers(self) -> None:
             return

@@ -152,6 +152,3 @@ def _with_timezone(parsed: dt.datetime, tz: dt.tzinfo | None) -> dt.datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=tz or dt.UTC)
     return parsed
-
-
-_MONTH_END_MIN = _end_of_month  # re-export keeps `end_of_month` discoverable

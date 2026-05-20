@@ -52,7 +52,7 @@ def test_validate_tag_step_exists():
 def test_pypi_publish_uses_environment_scoped_token():
     text = _workflow_text()
     assert "${{ secrets.PYPI_API_TOKEN }}" in text
-    assert "pypa/gh-action-pypi-publish@v1.14.0" in text
+    assert "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0" in text
     assert re.search(
         r"pypi:\n(?:    .*\n)*?    environment:\n(?:      .*\n)*?      name: pypi",
         text,

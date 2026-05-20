@@ -77,8 +77,7 @@ def fetch_bytes(
             last_error = exc
             if exc.code not in retryable:
                 raise
-        except OSError as exc:
-            last_error = exc
+        except OSError:
             raise
     if last_error is not None:
         raise last_error

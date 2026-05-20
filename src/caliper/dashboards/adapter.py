@@ -126,7 +126,6 @@ _SEVERITY_MAP = {
 # Aider. Surfaced as the "X of N vendors" count in the page header and the
 # banner copy. Bump together when adding a new vendor.
 KNOWN_VENDOR_COUNT = 4
-_KNOWN_VENDOR_LABELS = ("Codex", "Claude Code", "Cursor", "Aider")
 ROLLING_USAGE_DAYS = (7, 30, 90)
 
 

@@ -1307,7 +1307,6 @@ def render_cost_over_time(daily: list[DailyPoint], empty: bool) -> str:
 # 5. Activity heatmap (yearly contribution grid) ------------------------------
 
 
-_DAY_OF_WEEK_SHORT = ("M", "T", "W", "T", "F", "S", "S")
 _MONTH_LETTERS = ("J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D")
 
 

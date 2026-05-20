@@ -11,21 +11,26 @@ from caliper.progress import NULL_PROGRESS, ParseProgress
 
 class VendorParser(Protocol):
     @property
-    def id(self) -> str: ...
+    def id(self) -> str:
+        raise NotImplementedError
 
     @property
-    def label(self) -> str: ...
+    def label(self) -> str:
+        raise NotImplementedError
 
     @property
-    def schema_version(self) -> str: ...
+    def schema_version(self) -> str:
+        raise NotImplementedError
 
-    def discover(self, options: RuntimeOptions) -> Iterable[Path]: ...
+    def discover(self, options: RuntimeOptions) -> Iterable[Path]:
+        raise NotImplementedError
 
     def parse(
         self,
         options: RuntimeOptions,
         progress: ParseProgress = NULL_PROGRESS,
-    ) -> LoadResult: ...
+    ) -> LoadResult:
+        raise NotImplementedError
 
 
 VENDORS: dict[str, VendorParser] = {}

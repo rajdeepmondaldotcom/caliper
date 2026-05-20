@@ -1291,13 +1291,11 @@ def session_command(
 ) -> None:
     """Print one row per session with tokens, cost, and model breakdown."""
     if id:
-        locals_values = locals()
-        locals_values["project"] = id
         # Session id lookup is implemented by filtering grouped rows after load,
         # while project remains available to the loader for project filtering.
-        result = _run_session_id(locals_values, id)
-        return result
-    _run_grouped("session", aggregate_sessions, locals())
+        _run_session_id({**locals(), "project": id}, id)
+    else:
+        _run_grouped("session", aggregate_sessions, locals())
 
 
 @app.command()

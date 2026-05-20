@@ -25,6 +25,16 @@ from caliper.pricing_catalog import (
     load_cached_catalog,
     load_pricing_catalog,
 )
+from caliper.taxonomy import KNOWN_MODEL_VENDORS as KNOWN_MODEL_VENDORS
+from caliper.taxonomy import VENDOR_ANTHROPIC as VENDOR_ANTHROPIC
+from caliper.taxonomy import VENDOR_ANYSPHERE as VENDOR_ANYSPHERE
+from caliper.taxonomy import VENDOR_GOOGLE as VENDOR_GOOGLE
+from caliper.taxonomy import VENDOR_META as VENDOR_META
+from caliper.taxonomy import VENDOR_MISTRAL as VENDOR_MISTRAL
+from caliper.taxonomy import VENDOR_OPENAI as VENDOR_OPENAI
+from caliper.taxonomy import VENDOR_UNKNOWN as VENDOR_UNKNOWN
+from caliper.taxonomy import model_vendor as model_vendor
+from caliper.taxonomy import model_vendor_glyph as model_vendor_glyph
 
 LONG_CONTEXT_INPUT_THRESHOLD = 272_000
 ZERO = Decimal("0")
@@ -104,87 +114,6 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
 )
 
 MODELS_BY_NAME: dict[str, ModelCard] = {card.name: card for card in MODEL_CARDS}
-
-
-# Canonical labels for the entity that *makes* the model. Distinct from
-# the tool vendor that wrote the log (Cursor can route to Anthropic or
-# OpenAI; the tool is Cursor, the model vendor is Anthropic/OpenAI).
-VENDOR_ANTHROPIC = "anthropic"
-VENDOR_OPENAI = "openai"
-VENDOR_ANYSPHERE = "anysphere"
-VENDOR_GOOGLE = "google"
-VENDOR_MISTRAL = "mistral"
-VENDOR_META = "meta"
-VENDOR_UNKNOWN = "unknown"
-
-KNOWN_MODEL_VENDORS: tuple[str, ...] = (
-    VENDOR_ANTHROPIC,
-    VENDOR_OPENAI,
-    VENDOR_ANYSPHERE,
-    VENDOR_GOOGLE,
-    VENDOR_MISTRAL,
-    VENDOR_META,
-    VENDOR_UNKNOWN,
-)
-
-# Regex-style prefix mapping. The first hit wins. Lower-case match.
-_MODEL_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("claude-", VENDOR_ANTHROPIC),
-    ("claude/", VENDOR_ANTHROPIC),
-    ("anthropic/", VENDOR_ANTHROPIC),
-    ("gpt-", VENDOR_OPENAI),
-    ("o1-", VENDOR_OPENAI),
-    ("o3-", VENDOR_OPENAI),
-    ("o4-", VENDOR_OPENAI),
-    ("o5-", VENDOR_OPENAI),
-    ("openai/", VENDOR_OPENAI),
-    ("text-", VENDOR_OPENAI),
-    ("composer-", VENDOR_ANYSPHERE),
-    ("cursor-", VENDOR_ANYSPHERE),
-    ("cursor/", VENDOR_ANYSPHERE),
-    ("anysphere/", VENDOR_ANYSPHERE),
-    ("gemini-", VENDOR_GOOGLE),
-    ("google/", VENDOR_GOOGLE),
-    ("palm-", VENDOR_GOOGLE),
-    ("mistral-", VENDOR_MISTRAL),
-    ("mistral/", VENDOR_MISTRAL),
-    ("codestral", VENDOR_MISTRAL),
-    ("llama-", VENDOR_META),
-    ("meta/", VENDOR_META),
-)
-
-
-def model_vendor(model: str | None) -> str:
-    """Return the canonical vendor label for a model id.
-
-    Lookup order:
-    1. Exact match in :data:`MODELS_BY_NAME` (always derives from prefix).
-    2. Prefix match against :data:`_MODEL_VENDOR_PREFIXES`.
-    3. Fallback to :data:`VENDOR_UNKNOWN`.
-
-    Case-insensitive. Empty or ``None`` returns ``unknown``.
-    """
-    if not model:
-        return VENDOR_UNKNOWN
-    lowered = str(model).strip().lower()
-    if not lowered:
-        return VENDOR_UNKNOWN
-    for prefix, vendor in _MODEL_VENDOR_PREFIXES:
-        if lowered.startswith(prefix):
-            return vendor
-    return VENDOR_UNKNOWN
-
-
-def model_vendor_glyph(vendor: str) -> str:
-    """Short single-character glyph for the dense Models screen header."""
-    return {
-        VENDOR_ANTHROPIC: "A",
-        VENDOR_OPENAI: "O",
-        VENDOR_ANYSPHERE: "C",
-        VENDOR_GOOGLE: "G",
-        VENDOR_MISTRAL: "M",
-        VENDOR_META: "L",
-    }.get(vendor, "?")
 
 
 PRICING_SOURCES = [

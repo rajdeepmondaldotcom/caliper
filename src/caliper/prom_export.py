@@ -114,6 +114,6 @@ def serve_forever(host: str, port: int, snapshot_fn: Callable[[], MetricsSnapsho
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        return
     finally:
         server.server_close()
