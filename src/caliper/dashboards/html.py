@@ -25,15 +25,20 @@ Render plan (top to bottom):
    11. § 06 Recap                  (hour-of-week heatmap + stats)
    12. § 07 Session shape          (top tools + category distribution)
    13. § 08 Usage mix              (vendor/model/tier/source shares)
-   14. § 09 Savings advisor        (estimated optimization checks)
-   15. § 10 Highest-cost sessions  (highest-impact sessions)
-   16. § 11 Models & tiers         (table)
-   17. § 12 Projects               (table with mini-bars)
-   18. § 13 Rate limits            (pressure and reset signal)
-   19. § 14 Insights               (severity rails)
-   20. § 15 Forecast               (linear + EWMA cards with band)
-   21. § 16 Evidence               (status table)
-   22. Page footer
+   14. § 09 Agents & overhead      (direct, logged-agent, overhead rows)
+   15. § 10 Skills & workflows     (estimated structural attribution)
+   16. § 11 Inefficiencies         (evidence-labelled findings)
+   17. § 12 Forecast drivers       (independent 30-day driver projections)
+   18. § 13 Savings advisor        (estimated optimization checks)
+   19. § 14 Highest-cost sessions  (highest-impact sessions)
+   20. § 15 Models & tiers         (table)
+   21. § 16 Projects               (cost, cadence, projection)
+   22. § 17 Anomalies              (sample-size gated spike checks)
+   23. § 18 Rate limits            (pressure and reset signal)
+   24. § 19 Insights               (severity rails)
+   25. § 20 Forecast               (linear + EWMA cards with band)
+   26. § 21 Evidence               (status table)
+   27. Page footer
 
 Every section degrades to a per-section empty placeholder. Rich and empty
 states share this same renderer; the data is what differs.
@@ -50,8 +55,12 @@ from datetime import datetime
 
 from caliper.dashboards.data_models import (
     AdvisorRecommendation,
+    AgentRow,
+    AnomalyRow,
     Banner,
     BriefFinding,
+    CacheLeverageRow,
+    CohortDeltaRow,
     CommandCenterCard,
     ComparisonSignal,
     DailyPoint,
@@ -60,17 +69,26 @@ from caliper.dashboards.data_models import (
     EvidenceRow,
     ExecutiveBrief,
     Forecast,
+    ForecastDriverRow,
     ImpactCard,
+    InefficiencyRow,
     Insight,
+    LongContextHistogram,
     MetricContext,
     MixRow,
+    ModelForecastRow,
     ModelRow,
+    Outlook,
     ProjectRow,
     QualityScore,
+    RateLimitForecastBand,
     RateLimitPressure,
     Recap,
+    SeasonalitySection,
     SessionRow,
     SessionShape,
+    SkillRow,
+    TierProvenance,
     Totals,
     UsageWindow,
     WindowMeta,
@@ -98,7 +116,7 @@ SHAPE_TO_CAT = {
     "no-tools": "mixed",
 }
 
-# Sections labelled "§ 01" through "§ 16". Order is binding.
+# Sections labelled "§ 01" through "§ 21". Order is binding.
 SECTION_NUMBERS = {
     "command-center": "01",
     "usage-windows": "02",
@@ -108,14 +126,19 @@ SECTION_NUMBERS = {
     "recap": "06",
     "session-shape": "07",
     "usage-mix": "08",
-    "advisor": "09",
-    "top-sessions": "10",
-    "models": "11",
-    "projects": "12",
-    "rate-limits": "13",
-    "insights": "14",
-    "forecast": "15",
-    "evidence": "16",
+    "agents": "09",
+    "skills": "10",
+    "inefficiencies": "11",
+    "forecast-drivers": "12",
+    "advisor": "13",
+    "top-sessions": "14",
+    "models": "15",
+    "projects": "16",
+    "anomalies": "17",
+    "rate-limits": "18",
+    "insights": "19",
+    "forecast": "20",
+    "evidence": "21",
 }
 
 LENSES = (
@@ -175,11 +198,11 @@ METRIC_CONTEXTS = {
         status="estimated",
     ),
     "advisor": MetricContext(
-        label="Estimated avoidable spend",
+        label="Largest savings candidate",
         scope="Selected report window",
-        formula="Sum of high-confidence model or tier swap recommendations",
-        source="Caliper what-if pricing checks over matching usage events",
-        caveat="Recommendations are heuristics; validate quality and latency before changing workflows.",
+        formula="Largest evidence-labelled inefficiency finding or advisor recommendation",
+        source="Caliper rate-card what-if checks and quantified inefficiency finders",
+        caveat=("Candidates can overlap; treat this as a review queue, not an additive total."),
         status="estimated",
     ),
     "rate_limits": MetricContext(
@@ -196,6 +219,17 @@ METRIC_CONTEXTS = {
         formula="Daily mean projection plus EWMA recency-weighted projection",
         source="Selected-window daily costs",
         caveat="Projection is directional and assumes recent usage remains representative.",
+        status="estimated",
+    ),
+    "anomalies": MetricContext(
+        label="Anomalies",
+        scope="Selected report window",
+        formula="Positive cost deviations above robust per-scope median baseline",
+        source="Selected-window daily, session, model-day, and project-day cost aggregates",
+        caveat=(
+            "No row means no spike crossed the sample-size and sigma thresholds, "
+            "not proof that usage was risk-free."
+        ),
         status="estimated",
     ),
     "evidence": MetricContext(
@@ -225,7 +259,8 @@ COMMAND_CONTEXT_BY_LABEL = {
         caveat="Needs enough 30 day history to show a trend.",
         status="estimated",
     ),
-    "Estimated avoidable spend": METRIC_CONTEXTS["advisor"],
+    "Largest savings candidate": METRIC_CONTEXTS["advisor"],
+    "Anomaly findings": METRIC_CONTEXTS["anomalies"],
     "Highest-cost session": MetricContext(
         label="Highest-cost session",
         scope="Selected report window",
@@ -235,7 +270,7 @@ COMMAND_CONTEXT_BY_LABEL = {
         status="estimated",
     ),
     "Peak rate-limit usage": METRIC_CONTEXTS["rate_limits"],
-    "Data quality": METRIC_CONTEXTS["evidence"],
+    "Evidence quality": METRIC_CONTEXTS["evidence"],
 }
 
 
@@ -328,7 +363,7 @@ def delta_chip(value: float | None, polarity: str = "more-is-bad") -> str:
     """
     polarity:
       "more-is-bad"  — used for cost (up = bad/red)
-      "more-is-good" — used for cache hit rate (up = good/green)
+      "more-is-good" — used for cached-input share (up = good/green)
       "neutral"      — never colored
     """
     if value is None:
@@ -598,6 +633,29 @@ def wordmark_svg() -> str:
 # 2. Banner -------------------------------------------------------------------
 
 
+def render_share_safe_banner(share_safe: bool) -> str:
+    """Visible "redacted" affordance above the dashboard chrome.
+
+    Renders when ``share_safe=True`` so users understand why project
+    names show as ``Project 1`` / sessions as ``Session 1`` / agents
+    as ``Agent 1`` instead of their real identifiers.
+    """
+    if not share_safe:
+        return ""
+    return (
+        '<div class="share-safe-banner" data-section="share-safe-banner" role="note">'
+        '<span class="share-safe-icon" aria-hidden="true">🔒</span>'
+        '<div class="share-safe-copy">'
+        "<strong>Share-safe view.</strong> Project, session, agent, "
+        "and skill names are redacted (e.g. <code>Project 1</code>, "
+        "<code>Session 1</code>) so this HTML is safe to forward. "
+        '<span class="mute">Re-run with <code>--no-share-safe</code> '
+        "to see real labels locally.</span>"
+        "</div>"
+        "</div>"
+    )
+
+
 def render_banner(b: Banner | None) -> str:
     if b is None:
         return ""
@@ -679,7 +737,10 @@ def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> st
     cost_tip = (
         f"Selected-window spend after parser dedupe. Deduped usage events: {fmt_int(t.events)}."
     )
-    cache_tip = f"Estimated rate-card savings from cached input tokens. Hit rate: {fmt_pct(t.cache_hit_rate)}."
+    cache_tip = (
+        "Estimated rate-card savings from cached input tokens. "
+        f"Cached-input share: {fmt_pct(t.cache_hit_rate)}."
+    )
     tokens_tip = (
         f"Parsed total tokens. Cached input: "
         f"{fmt_tokens(t.cached_input_tokens)} · uncached: "
@@ -710,13 +771,13 @@ def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> st
             "cache",
             "Estimated cache savings",
             fmt_money(t.cache_savings_usd),
-            f"{fmt_pct(t.cache_hit_rate)} hit rate",
+            f"{fmt_pct(t.cache_hit_rate)} cached input",
             cache_tip,
             t.delta_cache_pct,
             "more-is-good",
             t.daily_cache_sparkline,
             "var(--ok)",
-            f"{spark_period} cache hit rate",
+            f"{spark_period} cached-input share",
             METRIC_CONTEXTS["summary.cache"],
             "usage-mix",
         )
@@ -772,6 +833,10 @@ def render_dashboard_nav(d: Dashboard) -> str:
             [
                 ("cost-over-time", "Cost", bool(d.daily)),
                 ("usage-mix", "Mix", bool(d.usage_mix)),
+                ("agents", "Agents", bool(d.agents)),
+                ("skills", "Skills", bool(d.skills)),
+                ("inefficiencies", "Inefficiencies", bool(d.inefficiencies)),
+                ("forecast-drivers", "Drivers", bool(d.forecast_drivers)),
                 ("advisor", "Advisor", True),
             ],
         ),
@@ -784,8 +849,9 @@ def render_dashboard_nav(d: Dashboard) -> str:
             ],
         ),
         (
-            "Trust",
+            "Audit",
             [
+                ("anomalies", "Anomalies", d.totals.events > 0),
                 ("rate-limits", "Limits", d.rate_limit_pressure is not None),
                 ("evidence", "Evidence", bool(d.evidence or d.quality_score)),
             ],
@@ -814,6 +880,7 @@ def render_metric_glossary() -> str:
         "advisor",
         "rate_limits",
         "forecast",
+        "anomalies",
         "evidence",
     ]
     rows = "".join(
@@ -952,9 +1019,9 @@ def render_empty_report_guide() -> str:
             "Widen the date range or wait for more usage history.",
         ),
         (
-            "Advisor unavailable",
+            "Savings advisor unavailable",
             "Savings checks need billable model and token events.",
-            "Once usage appears, recommendations show here automatically.",
+            "Once matching usage appears, recommendations can appear here.",
         ),
         (
             "Evidence pending",
@@ -990,10 +1057,11 @@ def render_command_center(cards: list[CommandCenterCard]) -> str:
     anchors = {
         "Budget posture": "impact",
         "Spend velocity": "usage-windows",
-        "Estimated avoidable spend": "advisor",
+        "Largest savings candidate": "inefficiencies",
+        "Anomaly findings": "anomalies",
         "Highest-cost session": "top-sessions",
         "Peak rate-limit usage": "rate-limits",
-        "Data quality": "evidence",
+        "Evidence quality": "evidence",
     }
     for card in cards:
         ctx = COMMAND_CONTEXT_BY_LABEL.get(card.label)
@@ -1050,7 +1118,7 @@ def render_usage_windows(windows: list[UsageWindow]) -> str:
             f'<div class="usage-window-value">{fmt_money(window.cost_usd)}</div>'
             f'<div class="usage-window-meta">{esc(meta)}</div>'
             f'<div class="usage-window-stats">'
-            f"<span>{fmt_pct_round(window.cache_hit_rate)} cache</span>"
+            f"<span>{fmt_pct_round(window.cache_hit_rate)} cached input</span>"
             f"<span>{fmt_int(window.active_days)} active days</span>"
             f"</div>"
             f'<div class="usage-window-foot">'
@@ -1671,6 +1739,175 @@ def render_usage_mix(rows: list[MixRow]) -> str:
     )
 
 
+def render_agents(rows: list[AgentRow]) -> str:
+    sec_id = "agents"
+    if not rows:
+        return ""
+    ordered = sorted(rows, key=lambda row: (-row.cost_usd, row.source_category, row.agent_id))
+    body = []
+    for row in ordered:
+        spark_html = sparkline(
+            list(row.daily_cost_sparkline),
+            "var(--accent)",
+            f"{row.agent_id} daily cost",
+        )
+        body.append(
+            f"<tr>"
+            f'<td><span class="session-label">{esc(row.agent_id)}</span>'
+            f'<div class="mono mute">{esc(row.kind)}</div></td>'
+            f"<td>{esc(row.source_category)}</td>"
+            f'<td><span class="reason-chip">{esc(row.evidence_status)}</span></td>'
+            f'<td class="num strong" data-value="{row.cost_usd:.8f}">{fmt_money(row.cost_usd)}</td>'
+            f'<td class="num" data-section="agent-sparkline">{spark_html}</td>'
+            f'<td class="num" data-value="{row.total_tokens}">{fmt_tokens(row.total_tokens)}</td>'
+            f'<td class="num" data-value="{row.events}">{fmt_int(row.events)}</td>'
+            f'<td class="num" data-value="{row.tool_calls}">{fmt_int(row.tool_calls)}</td>'
+            f'<td class="num" data-value="{row.sessions}">{fmt_int(row.sessions)}</td>'
+            f"<td>{esc(row.reason)}</td>"
+            f"</tr>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Agents & overhead', 'direct sessions, logged agents, and background automation')}"
+        f'<div class="sec-body">'
+        f"{section_note('Agent rows keep measured costs separate from attribution evidence. Direct rows mean the source did not expose explicit agent metadata.')}"
+        f'<div class="panel pad-0 table-scroll">'
+        f'<table class="data data-sortable agent-table">'
+        f"<thead><tr>"
+        f'<th data-sort="text">Agent</th>'
+        f'<th data-sort="text">Source</th>'
+        f'<th data-sort="text">Evidence</th>'
+        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
+        f'<th class="num">Daily trend</th>'
+        f'<th class="num" data-sort="number">Tokens</th>'
+        f'<th class="num" data-sort="number">Events</th>'
+        f'<th class="num" data-sort="number">Tools</th>'
+        f'<th class="num" data-sort="number">Sessions</th>'
+        f'<th data-sort="text">Method</th>'
+        f"</tr></thead>"
+        f"<tbody>{''.join(body)}</tbody>"
+        f"</table></div></div></section>"
+    )
+
+
+def render_skills(rows: list[SkillRow]) -> str:
+    sec_id = "skills"
+    if not rows:
+        return ""
+    ordered = sorted(rows, key=lambda row: (-row.estimated_cost_usd, row.name))
+    body = []
+    for row in ordered:
+        body.append(
+            f"<tr>"
+            f'<td><span class="session-label">{esc(row.name)}</span>'
+            f'<div class="mono mute">{esc(row.attribution_method)}</div></td>'
+            f'<td><span class="reason-chip">{esc(row.evidence_status)}</span></td>'
+            f'<td class="num strong" data-value="{row.estimated_cost_usd:.8f}">est. {fmt_money(row.estimated_cost_usd)}</td>'
+            f'<td class="num" data-value="{row.median_cost_per_invocation_usd:.8f}">est. {fmt_money(row.median_cost_per_invocation_usd)}</td>'
+            f'<td class="num" data-value="{row.invocations}">{fmt_int(row.invocations)}</td>'
+            f'<td class="num" data-value="{row.sessions}">{fmt_int(row.sessions)}</td>'
+            f'<td class="num" data-value="{row.total_tokens}">{fmt_tokens(row.total_tokens)}</td>'
+            f"</tr>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Skills & workflows', 'estimated attribution by structural signal')}"
+        f'<div class="sec-body">'
+        f"{section_note('Skill/workflow rows are estimated unless the source exposes explicit skill invocation boundaries. Unsupported events are omitted rather than guessed.')}"
+        f'<div class="panel pad-0 table-scroll">'
+        f'<table class="data data-sortable skill-table">'
+        f"<thead><tr>"
+        f'<th data-sort="text">Skill / workflow</th>'
+        f'<th data-sort="text">Evidence</th>'
+        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Est. cost <span class="sort-glyph">↓</span></th>'
+        f'<th class="num" data-sort="number">Median / invocation</th>'
+        f'<th class="num" data-sort="number">Invocations</th>'
+        f'<th class="num" data-sort="number">Sessions</th>'
+        f'<th class="num" data-sort="number">Tokens</th>'
+        f"</tr></thead>"
+        f"<tbody>{''.join(body)}</tbody>"
+        f"</table></div></div></section>"
+    )
+
+
+def render_inefficiencies(rows: list[InefficiencyRow]) -> str:
+    sec_id = "inefficiencies"
+    if not rows:
+        return (
+            f'<section class="sec" id="{sec_id}">'
+            f"{section_head(sec_id, 'Inefficiencies', 'evidence-labelled findings only')}"
+            f'<div class="sec-body">'
+            f"{section_note('No quantified inefficiency finding met the sample-size and evidence thresholds for this window.')}"
+            f'<div class="panel empty-panel">No evidence-labelled inefficiency findings.</div>'
+            f"</div></section>"
+        )
+    cards = []
+    for row in sorted(rows, key=lambda item: (-item.impact_usd, item.code)):
+        curve_html = ""
+        if row.curve:
+            curve_values = [float(v) for v in row.curve]
+            curve_html = (
+                f'<div class="rot-curve" data-section="prompt-rot-curve" '
+                f'data-finding-code="{esc(row.code)}">'
+                f'<span class="mute">median per-turn input</span>'
+                f"{sparkline(curve_values, 'var(--accent)', 'prompt rot curve', width=120, height=24)}"
+                f"</div>"
+            )
+        cards.append(
+            f'<article class="advisor-card advisor-card-{"warn" if row.severity in {"warn", "fail"} else "neutral"}">'
+            f'<div class="advisor-card-top">'
+            f'<h3 class="advisor-title">{esc(row.title)}</h3>'
+            f'<span class="advisor-value">{fmt_money(row.impact_usd)}</span>'
+            f"</div>"
+            f'<p class="advisor-detail">{esc(row.detail)}</p>'
+            f"{curve_html}"
+            f'<div class="advisor-meta">'
+            f"<span>{esc(row.evidence_status)}</span>"
+            f"<span>{esc(row.confidence)} confidence</span>"
+            f"<span>{fmt_int(row.sample_size)} samples</span>"
+            f"</div>"
+            f'<div class="advisor-detail">{esc(row.baseline)}</div>'
+            f'<code class="advisor-command">{esc(row.action)}</code>'
+            f"</article>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Inefficiencies', 'ranked by quantified impact')}"
+        f'<div class="sec-body">'
+        f"{section_note('Rows appear only when Caliper can name a measured impact and evidence status. Estimated rows are advisory, not invoice facts.')}"
+        f'<div class="advisor-grid">{"".join(cards)}</div>'
+        f"</div></section>"
+    )
+
+
+def render_forecast_drivers(rows: list[ForecastDriverRow]) -> str:
+    sec_id = "forecast-drivers"
+    if not rows:
+        return ""
+    body = []
+    for row in sorted(rows, key=lambda item: (-item.projected_30d_cost_usd, item.dimension)):
+        body.append(
+            f'<div class="mix-row" data-mix-dimension="{esc(row.dimension)}">'
+            f'<div class="mix-main">'
+            f'<div class="mix-label">{esc(row.label)}</div>'
+            f'<div class="mix-meta">{esc(row.dimension)} · {esc(row.driver)} · {esc(row.evidence_status)}</div>'
+            f"</div>"
+            f'<div class="mix-share">{inline_share_bar(row.share, "projected 30d driver mix")}</div>'
+            f'<div class="mix-main">'
+            f'<div class="mix-meta">30d {fmt_money(row.projected_30d_cost_usd)} · {fmt_money(row.daily_mean_cost_usd)}/day</div>'
+            f"</div>"
+            f"</div>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Forecast drivers', '30-day projection by dimension')}"
+        f'<div class="sec-body">'
+        f"{section_note('Each driver independently scales selected-window spend to 30 days. Dimensions overlap, so driver rows should not be summed together; estimated and partial attribution remains visibly labelled.')}"
+        f'<article class="mix-panel"><div class="mix-list">{"".join(body)}</div></article>'
+        f"</div></section>"
+    )
+
+
 # 9. Savings advisor ----------------------------------------------------------
 
 
@@ -1704,7 +1941,7 @@ def render_advisor(rows: list[AdvisorRecommendation]) -> str:
         )
     return (
         f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Savings advisor', 'estimated avoidable spend')}"
+        f"{section_head(sec_id, 'Savings advisor', 'estimated savings candidates')}"
         f'<div class="sec-body">'
         f"{section_note('Savings are estimated what-if checks over matching usage. Treat them as review candidates before changing model or tier routing.', METRIC_CONTEXTS['advisor'])}"
         f'<div class="advisor-grid">{"".join(cards)}</div>'
@@ -1795,6 +2032,7 @@ def render_rate_limits(pressure: RateLimitPressure | None) -> str:
         )
         if part
     )
+    forecast_html = render_rate_limit_forecasts(pressure.forecasts)
     return (
         f'<section class="sec" id="{sec_id}">'
         f"{section_head(sec_id, 'Rate limits', 'pressure and reset signal')}"
@@ -1807,8 +2045,84 @@ def render_rate_limits(pressure: RateLimitPressure | None) -> str:
         f'<span class="limit-samples">{fmt_int(pressure.sample_count)} samples</span>'
         f"</div>"
         f'<div class="limit-stats">{stat_html}</div>'
+        f"{forecast_html}"
         f"</div></div></section>"
     )
+
+
+def render_rate_limit_forecasts(
+    forecasts: tuple[RateLimitForecastBand, ...] | list[RateLimitForecastBand],
+) -> str:
+    """ETA-to-100% band per rate-limit window.
+
+    Rendered inside ``render_rate_limits`` as a sub-block under the
+    pressure-stats grid. Confidence chip + sample count make the band
+    self-explanatory; ``confidence == "low"`` swaps the ETA for a
+    "needs more samples" message.
+    """
+    if not forecasts:
+        return ""
+    items: list[str] = []
+    for band in forecasts:
+        label = band.limit_name or band.window
+        confidence = (band.confidence or "low").lower()
+        if band.eta_mid_hours is None or confidence == "low":
+            eta_body = (
+                '<div class="eta-empty mute">needs more samples '
+                f"({fmt_int(band.samples)} so far)</div>"
+            )
+        else:
+            mid = _fmt_eta_hours(band.eta_mid_hours)
+            low = _fmt_eta_hours(band.eta_low_hours)
+            high = _fmt_eta_hours(band.eta_high_hours)
+            range_html = ""
+            if band.eta_low_hours is not None and band.eta_high_hours is not None:
+                range_html = (
+                    f'<div class="eta-range mute" data-section="rate-limit-eta-range">'
+                    f"({esc(low)} → {esc(high)})</div>"
+                )
+            eta_body = (
+                f'<div class="eta-mid"><span class="eta-value">{esc(mid)}</span>'
+                f'<span class="eta-unit mute">to 100%</span></div>'
+                f"{range_html}"
+            )
+        burn_html = ""
+        if band.burn_rate_per_hour is not None:
+            burn_html = (
+                f'<div class="eta-burn mute">{band.burn_rate_per_hour * 100:.1f}% / hr burn</div>'
+            )
+        items.append(
+            f'<div class="eta-card eta-confidence-{esc(confidence)}" '
+            f'data-section="rate-limit-eta" data-window="{esc(band.window)}" '
+            f'data-confidence="{esc(confidence)}">'
+            f'<div class="eta-head">'
+            f'<span class="eta-window">{esc(label)}</span>'
+            f'<span class="eta-confidence-chip">{esc(confidence)}</span>'
+            f"</div>"
+            f"{eta_body}"
+            f"{burn_html}"
+            f'<div class="eta-samples mute">{fmt_int(band.samples)} samples</div>'
+            f"</div>"
+        )
+    return (
+        f'<div class="limit-forecasts" data-section="rate-limit-forecasts">'
+        f'<h4 class="limit-forecasts-title">Time to exhaustion</h4>'
+        f'<div class="eta-grid">{"".join(items)}</div>'
+        f"</div>"
+    )
+
+
+def _fmt_eta_hours(hours: float | None) -> str:
+    if hours is None:
+        return "—"
+    if hours < 1:
+        return f"{round(hours * 60)} min"
+    if hours < 24:
+        return f"{hours:.1f} h"
+    days = hours / 24
+    if days < 14:
+        return f"{days:.1f} d"
+    return f"{round(days)} d"
 
 
 # 11. Models & tiers -----------------------------------------------------------
@@ -1825,6 +2139,11 @@ def render_models(rows: list[ModelRow], total_cost: float) -> str:
     )
     for r in ordered_rows:
         share = r.cost_usd / total_cost if total_cost > 0 else 0
+        spark_html = sparkline(
+            list(r.daily_cost_sparkline),
+            "var(--accent)",
+            f"{r.model} daily cost",
+        )
         body.append(
             f"<tr>"
             f"<td>{vendor_badge(r.vendor)}</td>"
@@ -1832,6 +2151,7 @@ def render_models(rows: list[ModelRow], total_cost: float) -> str:
             f'<span class="mute"> · {esc(r.tier)}</span></td>'
             f'<td class="num strong" data-value="{r.cost_usd:.8f}">{fmt_money(r.cost_usd)}</td>'
             f'<td class="num">{inline_share_bar(share, "selected-window cost")}</td>'
+            f'<td class="num model-spark" data-section="model-sparkline">{spark_html}</td>'
             f'<td class="num" data-value="{r.events}">{r.events}</td>'
             f'<td class="num" data-value="{r.tokens}">{fmt_tokens(r.tokens)}</td>'
             f'<td class="num" data-value="{r.cache_hit_rate:.8f}">{fmt_pct_round(r.cache_hit_rate)}</td>'
@@ -1848,6 +2168,7 @@ def render_models(rows: list[ModelRow], total_cost: float) -> str:
         f'<th class="th-model" data-sort="text">Model · tier</th>'
         f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
         f'<th class="num">Share of window</th>'
+        f'<th class="num">Daily trend</th>'
         f'<th class="num" data-sort="number">Events</th>'
         f'<th class="num" data-sort="number">Tokens</th>'
         f'<th class="num th-cache" data-sort="number">Cache</th>'
@@ -1889,13 +2210,27 @@ def render_projects(
             f'<div class="mono mute proj-path">{esc(r.path)}</div>' if show_paths and r.path else ""
         )
         tools_html = "".join(mini_bar(t.name, t.count, max_tool, t.category) for t in r.top_tools)
+        activity_html = (
+            f'<div class="project-activity">'
+            f"<span>{fmt_int(r.active_days)} active days</span>"
+            f"{sparkline(r.daily_cost_sparkline, 'var(--accent)', r.name + ' daily cost')}"
+            f'<div class="mono mute">last {esc(r.last_seen or "unknown")}</div>'
+            f"</div>"
+        )
+        trend_label = r.trend_label or "needs history"
+        trend_html = (
+            f'<span class="reason-chip reason-chip-{esc(r.trend_tone)}">{esc(trend_label)}</span>'
+        )
         body.append(
             f"<tr>"
             f'<td><span class="proj-name">{esc(r.name)}</span>{path_html}</td>'
             f'<td class="num strong" data-value="{r.cost_usd:.8f}">{fmt_money(r.cost_usd)}</td>'
             f'<td class="num">{inline_share_bar(share, basis_label)}</td>'
-            f'<td class="num" data-value="{r.events}">{r.events}</td>'
-            f'<td class="num" data-value="{r.sessions}">{r.sessions}</td>'
+            f'<td class="num" data-value="{r.active_days}">{activity_html}</td>'
+            f'<td class="num" data-value="{r.daily_mean_cost_usd:.8f}">{fmt_money(r.daily_mean_cost_usd)}</td>'
+            f'<td class="num" data-value="{r.projected_30d_cost_usd:.8f}" data-section="project-forecast-cell">'
+            f"{_project_forecast_cell(r)}</td>"
+            f'<td>{trend_html}<div class="mono mute">{fmt_int(r.events)} events · {fmt_int(r.sessions)} sessions</div></td>'
             f'<td class="col-tools">{tools_html}</td>'
             f"</tr>"
         )
@@ -1910,22 +2245,281 @@ def render_projects(
             f'<td class="num">{inline_share_bar(share, basis_label)}</td>'
             f'<td class="num" data-value="0">—</td>'
             f'<td class="num" data-value="0">—</td>'
+            f'<td class="num" data-value="0">—</td>'
+            f"<td>—</td>"
             f'<td class="col-tools">—</td>'
             f"</tr>"
         )
     return (
         f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Projects', 'sorted by cost')}"
+        f"{section_head(sec_id, 'Projects', 'cost, cadence, and selected-window projection')}"
         f'<div class="sec-body">'
-        f"{section_note('Projects are sorted by selected-window cost. Share uses the selected-window total when available; Other covers any omitted or unattributed cost.', METRIC_CONTEXTS['mix.share'])}"
+        f"{section_note('Project cost, events, sessions, and active days are measured from the selected window. The 30-day value is selected-window daily mean × 30, labelled as an estimate and not a committed future bill.', METRIC_CONTEXTS['mix.share'])}"
         f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
         f"<thead><tr>"
         f'<th data-sort="text">Project</th>'
         f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
         f'<th class="num">Share of window</th>'
-        f'<th class="num" data-sort="number">Events</th>'
-        f'<th class="num" data-sort="number">Sessions</th>'
+        f'<th class="num" data-sort="number">Activity</th>'
+        f'<th class="num" data-sort="number">Avg/day</th>'
+        f'<th class="num" data-sort="number">Est. 30d</th>'
+        f'<th data-sort="text">Trend</th>'
         f'<th class="th-tools">Top tools</th>'
+        f"</tr></thead>"
+        f"<tbody>{''.join(body)}</tbody>"
+        f"</table></div></div></section>"
+    )
+
+
+def render_cache_leverage(rows: list[CacheLeverageRow]) -> str:
+    """Top-N sessions ranked by realised cache savings, with hit-rate chip."""
+    if not rows:
+        return ""
+    sec_id = "cache-leverage"
+    vmax = max(r.savings_usd for r in rows) or 1.0
+    body: list[str] = []
+    for row in rows:
+        share = row.savings_usd / vmax if vmax else 0
+        bar_width = max(2.0, share * 100)
+        body.append(
+            f'<div class="cl-row" data-section="cache-leverage-row" '
+            f'data-session="{esc(row.session_label)}">'
+            f'<div class="cl-head">'
+            f'<span class="cl-session mono">{esc(row.session_label)}</span>'
+            f'<span class="cl-savings">{fmt_money(row.savings_usd)}</span>'
+            f"</div>"
+            f'<div class="cl-bar"><div class="cl-bar-fill" '
+            f'style="width: {bar_width:.1f}%"></div></div>'
+            f'<div class="cl-meta mute">{fmt_pct_round(row.hit_rate)} hit rate · '
+            f"{fmt_tokens(row.cached_input_tokens)} cached · "
+            f"{fmt_tokens(row.uncached_input_tokens)} paid input</div>"
+            f"</div>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}" data-section="cache-leverage">'
+        f"{section_head(sec_id, 'Cache leverage', 'top sessions by realised cache savings')}"
+        f'<div class="sec-body">'
+        f"{section_note('Sessions ranked by the dollars cached input avoided. Hit rate is cached input / total input — read it next to the bar to spot under-leveraged sessions.')}"
+        f'<div class="cl-list">{"".join(body)}</div>'
+        f"</div></section>"
+    )
+
+
+def render_long_context_histogram(hist: LongContextHistogram | None) -> str:
+    """Distribution of per-event input tokens vs the LC threshold."""
+    if hist is None or hist.total_events == 0:
+        return ""
+    sec_id = "lc-histogram"
+    cmax = max(hist.counts) or 1
+    labels = ("<1k", "1–4k", "4–16k", "16–64k", "64–200k", "200k–1M", "1M+")
+    bars: list[str] = []
+    for idx, count in enumerate(hist.counts):
+        height_pct = (count / cmax) * 100
+        label = labels[idx] if idx < len(labels) else f"{hist.bins[idx]:,}"
+        tip = f"{label} · {count:,} events"
+        threshold_marker = ""
+        if (
+            hist.threshold_tokens
+            and idx < len(hist.bins)
+            and hist.bins[idx] >= hist.threshold_tokens
+        ):
+            threshold_marker = ' data-above-threshold="true"'
+        bars.append(
+            f'<div class="lc-col"{threshold_marker} data-tip="{esc(tip)}">'
+            f'<div class="lc-bar" style="height: {height_pct:.1f}%"></div>'
+            f'<div class="lc-label mono">{esc(label)}</div>'
+            f"</div>"
+        )
+    above_marker = (
+        f'<div class="lc-threshold-line" data-section="lc-threshold-line" '
+        f'data-threshold="{hist.threshold_tokens}">'
+        f"LC threshold · {fmt_tokens(hist.threshold_tokens)}</div>"
+    )
+    return (
+        f'<section class="sec" id="{sec_id}" data-section="lc-histogram">'
+        f"{section_head(sec_id, 'Input-token distribution', 'long-context misfire heatmap')}"
+        f'<div class="sec-body">'
+        f"{section_note(f'Log-spaced bins of per-event input tokens. {fmt_pct_round(hist.share_above_threshold)} of events ({fmt_pct_round(hist.cost_share_above_threshold)} of spend) crossed the long-context threshold.')}"
+        f'<div class="lc-chart">{"".join(bars)}</div>'
+        f"{above_marker}"
+        f"</div></section>"
+    )
+
+
+def _project_forecast_cell(row: ProjectRow) -> str:
+    """Per-project 30d projection w/ optional ±σ band + confidence chip."""
+    base = f"est. {fmt_money(row.projected_30d_cost_usd)}"
+    if row.forecast_confidence and (row.projected_30d_low or row.projected_30d_high):
+        band = (
+            f'<div class="proj-band mute" data-section="project-band">'
+            f"({fmt_money(row.projected_30d_low)} – {fmt_money(row.projected_30d_high)})"
+            f"</div>"
+        )
+        chip = (
+            f'<span class="forecast-chip forecast-chip-{esc(row.forecast_confidence)}" '
+            f'data-confidence="{esc(row.forecast_confidence)}">'
+            f"{esc(row.forecast_confidence)}</span>"
+        )
+        return f'<div class="proj-est">{base}{chip}</div>{band}'
+    return f'<div class="proj-est">{base}<span class="forecast-chip mute">—</span></div>'
+
+
+def render_model_forecasts(rows: list[ModelForecastRow]) -> str:
+    """Per-model demand forecast strip — small-multiples grid."""
+    if not rows:
+        return ""
+    sec_id = "model-forecasts"
+    cards: list[str] = []
+    for row in rows:
+        spark = sparkline(
+            list(row.daily_cost_sparkline),
+            "var(--accent)",
+            f"{row.model} daily cost",
+        )
+        band_html = ""
+        if row.projected_30d_low or row.projected_30d_high:
+            band_html = (
+                f'<div class="mf-band mute" data-section="model-forecast-band">'
+                f"{fmt_money(row.projected_30d_low)} – {fmt_money(row.projected_30d_high)}"
+                f"</div>"
+            )
+        cards.append(
+            f'<div class="mf-card" data-section="model-forecast" data-model="{esc(row.model)}">'
+            f'<div class="mf-head">'
+            f'<span class="mf-vendor">{esc(row.vendor)}</span>'
+            f'<span class="mf-trend reason-chip reason-chip-{esc(row.trend_tone)}">{esc(row.trend_label)}</span>'
+            f"</div>"
+            f'<div class="mf-model mono">{esc(row.model)}</div>'
+            f'<div class="mf-spark">{spark}</div>'
+            f'<div class="mf-figures">'
+            f'<div><span class="mute">30d est.</span>'
+            f'<span class="mf-figure">{fmt_money(row.projected_30d_cost_usd)}</span></div>'
+            f'<div><span class="mute">EWMA 30d</span>'
+            f'<span class="mf-figure">{fmt_money(row.ewma_30d_cost_usd)}</span></div>'
+            f"</div>"
+            f"{band_html}"
+            f'<div class="mf-meta mute">{row.days_analyzed} day history · '
+            f"{fmt_money(row.daily_mean_cost_usd)}/day mean</div>"
+            f"</div>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}" data-section="model-forecasts">'
+        f"{section_head(sec_id, 'Model demand forecasts', 'top by selected-window cost')}"
+        f'<div class="sec-body">'
+        f"{section_note('Per-model 30-day projections from OLS trend over the analysed daily cost series. The ±band scales with daily-cost stdev × √30 days.')}"
+        f'<div class="mf-grid">{"".join(cards)}</div>'
+        f"</div></section>"
+    )
+
+
+def render_outlook(outlook: Outlook | None) -> str:
+    """Portfolio 30-day + 90-day side-by-side forward outlook."""
+    if outlook is None:
+        return ""
+    sec_id = "outlook"
+
+    def horizon_card(label: str, h, *, tone: str) -> str:
+        return (
+            f'<div class="outlook-card outlook-card-{esc(tone)}" data-section="outlook-{h.days}d" '
+            f'data-horizon="{h.days}d">'
+            f'<div class="outlook-head"><span class="outlook-label">{esc(label)}</span>'
+            f'<span class="outlook-days mute">{h.days} days</span></div>'
+            f'<div class="outlook-mid">{fmt_money(h.linear_total)}</div>'
+            f'<div class="outlook-range mute">'
+            f"({fmt_money(max(0.0, h.linear_low))} – {fmt_money(h.linear_high)})"
+            f"</div>"
+            f'<div class="outlook-ewma mute">EWMA {fmt_money(h.ewma_total)}</div>'
+            f"</div>"
+        )
+
+    cards = horizon_card("30-day outlook", outlook.horizon_30d, tone="neutral") + horizon_card(
+        "90-day outlook", outlook.horizon_90d, tone="warn"
+    )
+    return (
+        f'<section class="sec" id="{sec_id}" data-section="outlook">'
+        f"{section_head(sec_id, 'Portfolio outlook', 'forward 30-day + 90-day spend bands')}"
+        f'<div class="sec-body">'
+        f"{section_note(f'Outlook projects forward from the latest {outlook.days_analyzed} days of activity. Linear midpoint plus ±1σ band; EWMA reacts faster to recent acceleration.')}"
+        f'<div class="outlook-grid">{cards}</div>'
+        f"</div></section>"
+    )
+
+
+def render_cohort_deltas(rows: list[CohortDeltaRow]) -> str:
+    """Side-by-side selected window vs. prior equal window."""
+    if not rows:
+        return ""
+    sec_id = "cohort-deltas"
+    body: list[str] = []
+    for row in rows:
+        if row.delta_pct is None:
+            delta_html = '<span class="cohort-delta mute">—</span>'
+        else:
+            sign = "+" if row.delta_pct > 0 else ""
+            delta_html = (
+                f'<span class="cohort-delta cohort-delta-{esc(row.tone)}" '
+                f'data-tone="{esc(row.tone)}">{sign}{row.delta_pct * 100:.1f}%</span>'
+            )
+        body.append(
+            f'<tr data-section="cohort-delta-row" data-tone="{esc(row.tone)}">'
+            f'<td class="cohort-label">{esc(row.label)}</td>'
+            f'<td class="num strong">{esc(row.current_value)}</td>'
+            f'<td class="num mute">{esc(row.previous_value)}</td>'
+            f'<td class="num">{delta_html}</td>'
+            f"</tr>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}" data-section="cohort-deltas">'
+        f"{section_head(sec_id, 'Cohort delta', 'selected window vs. prior equal window')}"
+        f'<div class="sec-body">'
+        f"{section_note('Side-by-side comparison against the immediately preceding window of the same length. Empty when the prior window has no recorded activity.')}"
+        f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
+        f'<thead><tr><th>Metric</th><th class="num">Current</th>'
+        f'<th class="num">Previous</th><th class="num">Δ</th></tr></thead>'
+        f"<tbody>{''.join(body)}</tbody>"
+        f"</table></div></div></section>"
+    )
+
+
+def render_anomalies(rows: list[AnomalyRow]) -> str:
+    sec_id = "anomalies"
+    if not rows:
+        return (
+            f'<section class="sec" id="{sec_id}">'
+            f"{section_head(sec_id, 'Anomalies', 'sample-size gated spike checks')}"
+            f'<div class="sec-body">'
+            f"{section_note('No anomaly crossed the sample-size and sigma thresholds for this window. That is a statistical non-finding, not proof that every event was normal.', METRIC_CONTEXTS['anomalies'])}"
+            f'<div class="panel empty-panel">No dashboard anomaly finding.</div>'
+            f"</div></section>"
+        )
+    body = []
+    for row in sorted(rows, key=lambda item: (-item.z_score, -item.impact_usd, item.kind)):
+        body.append(
+            f"<tr>"
+            f'<td><span class="session-label">{esc(row.kind)}</span>'
+            f'<div class="mono mute">{esc(row.timestamp)}</div></td>'
+            f"<td>{esc(row.label)}</td>"
+            f'<td class="num strong" data-value="{row.observed_usd:.8f}">{fmt_money(row.observed_usd)}</td>'
+            f'<td class="num" data-value="{row.baseline_usd:.8f}">{fmt_money(row.baseline_usd)}</td>'
+            f'<td class="num" data-value="{row.impact_usd:.8f}">{fmt_money(row.impact_usd)}</td>'
+            f'<td class="num" data-value="{row.z_score:.8f}">{row.z_score:.1f}σ</td>'
+            f"<td>{status_word(row.evidence_status)}</td>"
+            f"</tr>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}">'
+        f"{section_head(sec_id, 'Anomalies', 'daily, project, model, and session spikes')}"
+        f'<div class="sec-body">'
+        f"{section_note('Anomalies are estimated statistical findings over measured cost aggregates. Baselines use robust medians, and sparse scopes are omitted instead of guessed.', METRIC_CONTEXTS['anomalies'])}"
+        f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
+        f"<thead><tr>"
+        f'<th data-sort="text">Scope</th>'
+        f'<th data-sort="text">Label</th>'
+        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Observed <span class="sort-glyph">↓</span></th>'
+        f'<th class="num" data-sort="number">Baseline</th>'
+        f'<th class="num" data-sort="number">Impact</th>'
+        f'<th class="num" data-sort="number">Score</th>'
+        f'<th data-sort="text">Evidence</th>'
         f"</tr></thead>"
         f"<tbody>{''.join(body)}</tbody>"
         f"</table></div></div></section>"
@@ -2164,6 +2758,137 @@ def render_forecast(f: Forecast | None) -> str:
 # 10. Evidence ----------------------------------------------------------------
 
 
+_DOW_LABELS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def render_seasonality(section: SeasonalitySection | None) -> str:
+    """Cost-weighted hour×dow + hour strip + dow strip.
+
+    Distinct from the event-count Recap heatmap — values are USD, the peak
+    callouts read "highest-spend hour/day," and the off-peak share quantifies
+    how concentrated spend is.
+    """
+    if section is None or section.total_cost_usd <= 0:
+        return ""
+    sec_id = "seasonality"
+    grid_cells: list[str] = []
+    flat = [v for row in section.by_dow_hour_cost_usd for v in row]
+    cell_max = max(flat) if flat else 0.0
+    for dow in range(7):
+        for hour in range(24):
+            value = section.by_dow_hour_cost_usd[dow][hour]
+            level = _intensity_level(value, cell_max)
+            tip = (
+                f"{_DOW_LABELS[dow]} {hour:02d}:00 · "
+                f"{fmt_money(value)} ({value / section.total_cost_usd * 100:.1f}%)"
+            )
+            grid_cells.append(
+                f'<div class="hod-cell hod-level-{level}" '
+                f'data-day="{dow}" data-hour="{hour}" '
+                f'data-tip="{esc(tip)}" role="img" aria-label="{esc(tip)}"></div>'
+            )
+    dow_labels_html = "".join(
+        f'<div class="hod-row-label">{esc(label)}</div>' for label in _DOW_LABELS
+    )
+    hour_labels_html = "".join(
+        f'<div class="hod-col-label">{hour:02d}</div>' for hour in range(0, 24, 3)
+    )
+    hour_max = max(section.by_hour_cost_usd) or 1.0
+    hour_strip = "".join(
+        f'<div class="strip-bar" style="height: {(v / hour_max) * 100:.1f}%" '
+        f'data-tip="{esc(f"{h:02d}:00 · {fmt_money(v)}")}" aria-label="hour {h}"></div>'
+        for h, v in enumerate(section.by_hour_cost_usd)
+    )
+    dow_max = max(section.by_dow_cost_usd) or 1.0
+    dow_strip = "".join(
+        f'<div class="strip-bar" style="height: {(v / dow_max) * 100:.1f}%" '
+        f'data-tip="{esc(f"{_DOW_LABELS[d]} · {fmt_money(v)}")}" '
+        f'aria-label="{esc(_DOW_LABELS[d])}"></div>'
+        for d, v in enumerate(section.by_dow_cost_usd)
+    )
+    callouts = (
+        f'<div class="seasonality-callouts">'
+        f'<div class="callout"><span class="callout-label">Peak hour</span>'
+        f'<span class="callout-value">{section.peak_hour:02d}:00</span></div>'
+        f'<div class="callout"><span class="callout-label">Peak day</span>'
+        f'<span class="callout-value">{esc(_DOW_LABELS[section.peak_dow])}</span></div>'
+        f'<div class="callout"><span class="callout-label">Off-peak share</span>'
+        f'<span class="callout-value">{fmt_pct_round(section.off_peak_share)}</span></div>'
+        f'<div class="callout"><span class="callout-label">Total in window</span>'
+        f'<span class="callout-value">{fmt_money(section.total_cost_usd)}</span></div>'
+        f"</div>"
+    )
+    return (
+        f'<section class="sec" id="{sec_id}" data-section="seasonality">'
+        f"{section_head(sec_id, 'Spend seasonality', 'cost-weighted hour × day-of-week')}"
+        f'<div class="sec-body">'
+        f"{section_note('Cells are dollar spend in local timezone (' + esc(section.timezone) + '). Use this to find sustained high-spend windows distinct from the event-count Recap heatmap.')}"
+        f'<div class="seasonality-grid-wrap">'
+        f'<div class="hod-row-labels">{dow_labels_html}</div>'
+        f'<div class="hod-grid" data-cells="168" style="grid-template-columns: repeat(24, 1fr);">{"".join(grid_cells)}</div>'
+        f"</div>"
+        f'<div class="hod-col-labels">{hour_labels_html}</div>'
+        f'<div class="seasonality-strips">'
+        f'<div class="strip"><div class="strip-title">Hour of day</div>'
+        f'<div class="strip-bars" data-section="seasonality-hour-strip">{hour_strip}</div></div>'
+        f'<div class="strip"><div class="strip-title">Day of week</div>'
+        f'<div class="strip-bars" data-section="seasonality-dow-strip">{dow_strip}</div></div>'
+        f"</div>"
+        f"{callouts}"
+        f"</div></section>"
+    )
+
+
+def _intensity_level(value: float, vmax: float) -> int:
+    if vmax <= 0 or value <= 0:
+        return 0
+    ratio = value / vmax
+    if ratio >= 0.75:
+        return 4
+    if ratio >= 0.5:
+        return 3
+    if ratio >= 0.25:
+        return 2
+    return 1
+
+
+def render_tier_provenance(provenance: TierProvenance | None) -> str:
+    """Horizontal stacked bar of where each event's service tier came from."""
+    if provenance is None or provenance.total_events <= 0:
+        return ""
+    sec_id = "tier-provenance"
+    total = provenance.total_events
+    segments: list[str] = []
+    legend: list[str] = []
+    for idx, (label, count) in enumerate(provenance.sources):
+        share = count / total if total else 0.0
+        slot = idx % 5
+        segments.append(
+            f'<div class="prov-seg prov-seg-{slot}" '
+            f'style="flex: {count} 0 0%;" '
+            f'data-tier-source="{esc(label)}" '
+            f'data-tip="{esc(f"{label} · {count:,} events · {share * 100:.1f}%")}"></div>'
+        )
+        legend.append(
+            f'<li class="prov-legend-item">'
+            f'<span class="prov-swatch prov-seg-{slot}"></span>'
+            f'<span class="prov-label">{esc(label)}</span>'
+            f'<span class="prov-count mute">{fmt_int(count)} ({fmt_pct_round(share)})</span>'
+            f"</li>"
+        )
+    return (
+        f'<section class="sec" id="{sec_id}" data-section="tier-provenance">'
+        f"{section_head(sec_id, 'Service-tier provenance', 'how each event tier was resolved')}"
+        f'<div class="sec-body">'
+        f"{section_note('Precedence: CLI override → JSON override → logged in event → codex config → assumed default. Lower-precedence sources should be a minority for high-confidence pricing.')}"
+        f'<div class="prov-bar" role="img" aria-label="Tier source distribution">'
+        f"{''.join(segments)}"
+        f"</div>"
+        f'<ul class="prov-legend">{"".join(legend)}</ul>'
+        f"</div></section>"
+    )
+
+
 def render_evidence(rows: list[EvidenceRow], quality: QualityScore | None = None) -> str:
     sec_id = "evidence"
     if not rows and quality is None:
@@ -2199,7 +2924,7 @@ def render_evidence(rows: list[EvidenceRow], quality: QualityScore | None = None
     )
     return (
         f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Evidence', 'how trustworthy each number is')}"
+        f"{section_head(sec_id, 'Evidence', 'how each number is supported')}"
         f'<div class="sec-body">'
         f"{section_note('Evidence tells you which numbers are exact, estimated, partial, or unsupported before you act on the report.', METRIC_CONTEXTS['evidence'])}"
         f"{quality_html}"
@@ -5239,6 +5964,447 @@ code { color: var(--accent); font-size: 0.92em; }
   [class*="twk-"] { display: none !important; }
 }
 
+/* === Phase 1 power-ups: seasonality, ETA bands, tier provenance ======== */
+
+/* Cost-weighted hour×dow grid (distinct from event-count Recap heatmap). */
+.seasonality-grid-wrap {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  column-gap: 8px;
+  row-gap: 4px;
+  margin-top: var(--s4);
+}
+.hod-row-labels {
+  display: grid;
+  grid-template-rows: repeat(7, 14px);
+  row-gap: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--mute);
+  align-items: center;
+  justify-items: end;
+  padding-right: 4px;
+}
+.hod-row-label { line-height: 14px; }
+.hod-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 14px);
+  grid-template-columns: repeat(24, 1fr);
+  gap: 4px;
+}
+.hod-cell {
+  border-radius: 3px;
+  background: var(--hour-0);
+  outline: 0 solid var(--accent);
+  outline-offset: 1px;
+  transition: outline-width 80ms ease-out, transform 100ms ease-out;
+}
+.hod-cell:hover {
+  outline-width: 1.5px;
+  transform: scale(1.25);
+  z-index: 3;
+  position: relative;
+}
+.hod-level-0 { background: var(--hour-0); }
+.hod-level-1 { background: var(--hour-1); }
+.hod-level-2 { background: var(--hour-2); }
+.hod-level-3 { background: var(--hour-3); }
+.hod-level-4 { background: var(--hour-4); }
+.hod-col-labels {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  margin: 4px 0 var(--s4) 44px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--mute);
+}
+.seasonality-strips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s5);
+  margin-top: var(--s5);
+}
+.strip-title {
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  margin-bottom: 6px;
+}
+.strip-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 56px;
+  border-bottom: 1px solid var(--rule);
+}
+.strip-bar {
+  flex: 1 1 0;
+  min-height: 2px;
+  background: var(--accent);
+  opacity: 0.85;
+  border-radius: 2px 2px 0 0;
+}
+.strip-bar:hover { opacity: 1; }
+.seasonality-callouts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s5);
+  margin-top: var(--s5);
+}
+.seasonality-callouts .callout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.seasonality-callouts .callout-label {
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.seasonality-callouts .callout-value {
+  color: var(--ink);
+  font-size: var(--num-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Rate-limit ETA bands */
+.limit-forecasts {
+  margin-top: var(--s5);
+  border-top: 1px solid var(--rule);
+  padding-top: var(--s5);
+}
+.limit-forecasts-title {
+  margin: 0 0 var(--s3) 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--mute);
+}
+.eta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s4);
+}
+.eta-card {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.eta-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s2);
+}
+.eta-window {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: capitalize;
+}
+.eta-confidence-chip {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--mute);
+}
+.eta-confidence-high .eta-confidence-chip {
+  background: rgba(34, 197, 94, 0.15);
+  color: rgb(34, 197, 94);
+}
+.eta-confidence-medium .eta-confidence-chip {
+  background: rgba(251, 191, 36, 0.15);
+  color: rgb(251, 191, 36);
+}
+.eta-mid {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.eta-value {
+  font-size: var(--num-lg);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.eta-unit { font-size: 11px; }
+.eta-range, .eta-burn, .eta-samples, .eta-empty {
+  font-size: 11px;
+  font-family: var(--mono);
+}
+
+/* Tier-source provenance stacked bar */
+.prov-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: var(--s4);
+  background: var(--surface-2);
+}
+.prov-seg { height: 100%; min-width: 2px; }
+.prov-seg-0 { background: var(--accent); }
+.prov-seg-1 { background: #6366f1; }
+.prov-seg-2 { background: #f59e0b; }
+.prov-seg-3 { background: #ef4444; }
+.prov-seg-4 { background: var(--mute); }
+.prov-legend {
+  list-style: none;
+  padding: 0;
+  margin: var(--s3) 0 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s2);
+}
+.prov-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12px;
+}
+.prov-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+.prov-label { font-weight: 600; color: var(--ink); }
+.prov-count { margin-left: auto; font-family: var(--mono); }
+
+/* === Phase 2 power-ups: model forecasts, portfolio outlook, project bands === */
+
+.mf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s4);
+}
+.mf-card {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  background: var(--surface);
+}
+.mf-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s2);
+}
+.mf-vendor {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mute);
+  font-weight: 600;
+}
+.mf-model {
+  font-size: 12px;
+  color: var(--ink);
+}
+.mf-spark { display: flex; align-items: center; min-height: 22px; }
+.mf-figures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+}
+.mf-figures > div { display: flex; flex-direction: column; gap: 2px; }
+.mf-figures .mute {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.mf-figure {
+  font-size: var(--num-md);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.mf-band, .mf-meta { font-size: 11px; font-family: var(--mono); }
+
+.outlook-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s5);
+}
+.outlook-card {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  background: var(--surface);
+}
+.outlook-card-warn { border-color: var(--rule); }
+.outlook-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.outlook-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--mute);
+}
+.outlook-days { font-family: var(--mono); font-size: 11px; }
+.outlook-mid {
+  font-size: var(--num-lg);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.outlook-range, .outlook-ewma { font-size: 12px; font-family: var(--mono); }
+
+.proj-est { display: inline-flex; gap: var(--s2); align-items: baseline; }
+.proj-band { font-size: 10px; }
+.forecast-chip {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--mute);
+}
+.forecast-chip-high { background: rgba(34, 197, 94, 0.15); color: rgb(34, 197, 94); }
+.forecast-chip-medium { background: rgba(251, 191, 36, 0.15); color: rgb(251, 191, 36); }
+.forecast-chip-low { background: rgba(148, 163, 184, 0.18); color: var(--mute); }
+
+/* === Phase 3 power-ups: prompt-rot curves, cache leverage, LC histogram === */
+
+.rot-curve {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s2) 0;
+}
+
+.cl-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.cl-row {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
+}
+.cl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.cl-session { font-size: 12px; color: var(--ink); }
+.cl-savings {
+  font-size: var(--num-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--ink);
+}
+.cl-bar {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cl-bar-fill {
+  height: 100%;
+  background: rgb(34, 197, 94);
+  border-radius: 3px;
+}
+.cl-meta { font-size: 11px; font-family: var(--mono); }
+
+.lc-chart {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--s2);
+  align-items: end;
+  height: 140px;
+  border-bottom: 1px solid var(--rule);
+}
+.lc-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.lc-bar {
+  width: 100%;
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+}
+.lc-col[data-above-threshold="true"] .lc-bar { background: #ef4444; }
+.lc-label { font-size: 10px; color: var(--mute); }
+.lc-threshold-line {
+  margin-top: var(--s3);
+  font-size: 11px;
+  color: var(--mute);
+  border-top: 1px dashed var(--rule);
+  padding-top: var(--s2);
+}
+
+/* === Phase 4 power-ups: cohort delta + agent sparkline === */
+
+.cohort-label { font-weight: 600; color: var(--ink); }
+.cohort-delta {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.cohort-delta-warn { color: rgb(239, 68, 68); }
+.cohort-delta-good { color: rgb(34, 197, 94); }
+.cohort-delta-neutral { color: var(--mute); }
+
+/* === Share-safe banner ================================================ */
+
+.share-safe-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  margin: var(--s3) 0 var(--s4);
+  border-radius: 8px;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--ink);
+  font-size: 13px;
+}
+.share-safe-banner code {
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: var(--mono);
+}
+.share-safe-banner strong { color: var(--ink); }
+.share-safe-icon { font-size: 16px; line-height: 1; }
+.share-safe-copy { line-height: 1.5; }
 """
 
 
@@ -5269,6 +6435,25 @@ def _share_safe_dashboard(d: Dashboard) -> Dashboard:
         project = replacements.get(row.project, "Project hidden")
         safe_sessions.append(dataclasses.replace(row, label=session_label, project=project))
 
+    safe_agents: list[AgentRow] = []
+    for index, row in enumerate(d.agents, start=1):
+        agent_label = f"Agent {index}"
+        replacements[row.agent_id] = agent_label
+        safe_agents.append(dataclasses.replace(row, agent_id=agent_label))
+
+    safe_skills: list[SkillRow] = []
+    for index, row in enumerate(d.skills, start=1):
+        skill_label = f"Workflow {index}"
+        replacements[row.name] = skill_label
+        safe_skills.append(dataclasses.replace(row, name=skill_label))
+
+    safe_anomalies: list[AnomalyRow] = []
+    for index, row in enumerate(d.anomalies, start=1):
+        label = _redact_text(row.label, replacements)
+        if label == row.label:
+            label = f"Anomaly {index}"
+        safe_anomalies.append(dataclasses.replace(row, label=label))
+
     def redact_dataclass(item):
         changes = {
             field.name: _redact_text(getattr(item, field.name), replacements)
@@ -5287,10 +6472,15 @@ def _share_safe_dashboard(d: Dashboard) -> Dashboard:
     return dataclasses.replace(
         d,
         by_project=safe_projects,
+        anomalies=safe_anomalies,
         top_sessions=safe_sessions,
+        agents=safe_agents,
+        skills=safe_skills,
         impact_cards=[redact_dataclass(row) for row in d.impact_cards],
         command_center=[redact_dataclass(row) for row in d.command_center],
         advisor_recommendations=safe_advisor,
+        inefficiencies=[redact_dataclass(row) for row in d.inefficiencies],
+        forecast_drivers=[redact_dataclass(row) for row in d.forecast_drivers],
         insights=[redact_dataclass(row) for row in d.insights],
         evidence=[redact_dataclass(row) for row in d.evidence],
         executive_brief=(
@@ -5336,6 +6526,7 @@ def render_dashboard(
     body = "".join(
         [
             render_header(d),
+            render_share_safe_banner(share_safe),
             render_banner(d.banner) if not is_empty else "",
             render_dashboard_nav(d),
             render_lens_controls(lens),
@@ -5351,15 +6542,27 @@ def render_dashboard(
             render_cost_over_time(d.daily, is_empty),
             render_yearly_heatmap(d.heatmap) if not is_empty else "",
             render_recap(d.recap) if not is_empty else "",
+            render_seasonality(d.seasonality) if not is_empty else "",
             render_session_shape(d.shape, is_empty),
             render_usage_mix(d.usage_mix) if not is_empty else "",
+            render_agents(d.agents) if not is_empty else "",
+            render_skills(d.skills) if not is_empty else "",
+            render_inefficiencies(d.inefficiencies) if not is_empty else "",
+            render_cache_leverage(d.cache_leverage) if not is_empty else "",
+            render_long_context_histogram(d.long_context_histogram) if not is_empty else "",
+            render_forecast_drivers(d.forecast_drivers) if not is_empty else "",
             render_advisor(d.advisor_recommendations) if not is_empty else "",
             render_top_sessions(d.top_sessions) if not is_empty else "",
             render_models(d.by_model, d.totals.cost_usd) if not is_empty else "",
+            render_model_forecasts(d.model_forecasts) if not is_empty else "",
             render_projects(d.by_project, d.show_paths, d.totals.cost_usd) if not is_empty else "",
+            render_anomalies(d.anomalies) if not is_empty else "",
             render_rate_limits(d.rate_limit_pressure) if not is_empty else "",
             render_insights(d.insights),
             render_forecast(d.forecast) if not is_empty else "",
+            render_outlook(d.outlook) if not is_empty else "",
+            render_cohort_deltas(d.cohort_deltas) if not is_empty else "",
+            render_tier_provenance(d.tier_provenance) if not is_empty else "",
             render_evidence(d.evidence, d.quality_score) if not is_empty else "",
             render_footer(d),
         ]

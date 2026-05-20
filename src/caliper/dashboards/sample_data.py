@@ -17,6 +17,7 @@ from __future__ import annotations
 from caliper import __version__
 from caliper.dashboards.data_models import (
     AdvisorRecommendation,
+    AnomalyRow,
     Banner,
     BriefFinding,
     CaliperMeta,
@@ -285,6 +286,13 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                     ToolCount("Bash", 51, "diagnose"),
                     ToolCount("Edit", 31, "execute"),
                 ],
+                11,
+                "2026-05-17 10:40",
+                29.44,
+                883.24,
+                "+18.4% vs prior 7d",
+                "warn",
+                [22.0, 18.0, 41.0, 16.0, 12.0, 8.0, 31.0, 52.0, 28.0, 24.0, 18.0, 39.0, 44.0, 59.0],
             ),
             ProjectRow(
                 "frontend-app",
@@ -297,6 +305,13 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                     ToolCount("Read", 33, "explore"),
                     ToolCount("Write", 18, "execute"),
                 ],
+                9,
+                "2026-05-16 18:10",
+                22.74,
+                682.29,
+                "flat vs prior 7d",
+                "neutral",
+                [12.0, 24.0, 18.0, 8.0, 14.0, 19.0, 26.0, 20.0, 21.0, 25.0, 18.0, 22.0, 17.0, 23.0],
             ),
             ProjectRow(
                 "mobile-app",
@@ -309,6 +324,13 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                     ToolCount("Read", 24, "explore"),
                     ToolCount("Bash", 18, "diagnose"),
                 ],
+                6,
+                "2026-05-15 14:05",
+                13.30,
+                399.00,
+                "-12.0% vs prior 7d",
+                "good",
+                [10.0, 12.0, 22.0, 18.0, 16.0, 0.0, 18.0, 12.0, 8.0, 14.0, 11.0, 0.0, 9.0, 16.0],
             ),
             ProjectRow(
                 "data-pipeline",
@@ -321,6 +343,13 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                     ToolCount("Read", 14, "explore"),
                     ToolCount("Edit", 8, "execute"),
                 ],
+                5,
+                "2026-05-15 09:20",
+                11.71,
+                351.43,
+                "new activity in last 7d",
+                "warn",
+                [0.0, 0.0, 0.0, 12.0, 18.0, 0.0, 0.0, 22.0, 31.0, 40.0, 28.0, 25.0, 0.0, 10.0],
             ),
             ProjectRow(
                 "infra-cdk",
@@ -333,20 +362,54 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                     ToolCount("Edit", 14, "execute"),
                     ToolCount("Read", 9, "explore"),
                 ],
+                4,
+                "2026-05-14 17:35",
+                11.60,
+                348.00,
+                "needs 14d history",
+                "neutral",
+                [0.0, 0.0, 13.0, 0.0, 18.0, 0.0, 0.0, 24.0, 0.0, 16.0, 0.0, 37.0, 0.0, 0.0],
+            ),
+        ],
+        anomalies=[
+            AnomalyRow(
+                "Project-day spike",
+                "api-server / 2026-05-17",
+                "2026-05-17 10:40",
+                59.00,
+                22.00,
+                7.20,
+                5.1,
+                37.00,
+                "estimated",
+                "critical",
+            ),
+            AnomalyRow(
+                "Session spike",
+                "session-018",
+                "2026-05-10 15:42",
+                84.10,
+                20.00,
+                15.20,
+                4.2,
+                64.10,
+                "estimated",
+                "warn",
             ),
         ],
         insights=[
             Insight(
                 "info",
                 "High cache reuse",
-                "72.4% of input tokens served from cache. Keep prompts "
-                "and file context stable to preserve hits.",
-                impact="saves ~$612",
+                "72.4% of input tokens were recorded as cached input. Keep prompts "
+                "and file context stable to preserve cache reads.",
+                impact="est. $612",
             ),
             Insight(
                 "warn",
                 "Project concentration",
-                "One repo (api-server) drives a third of cost. Consider "
+                "One repo (api-server) accounts for about a third of selected-window "
+                "cost. Consider "
                 "per-PR caps or splitting sessions.",
                 impact="$412 · 33%",
             ),
@@ -354,7 +417,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "warn",
                 "Tier mix is fast-heavy",
                 "18% of events ran on the fast tier. Run "
-                "`caliper advise --by tier` for a rewrite plan.",
+                "`caliper advise --strict` to review high-confidence swaps.",
                 impact="+$74 vs standard",
             ),
             Insight(
@@ -367,8 +430,8 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             Insight(
                 "info",
                 "Sonnet dominates spend",
-                "claude-sonnet-4-6 carries 65% of cost. Try "
-                "`caliper whatif --model haiku` for the same window.",
+                "claude-sonnet-4-6 accounts for 65% of selected-window cost. Try "
+                "`caliper whatif --model claude-haiku-4.5` for the same window.",
                 impact="$812 · 65%",
             ),
         ],
@@ -478,7 +541,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             ImpactCard(
                 "Estimated cache savings",
                 "$612.40",
-                "72.4% input cache hit rate.",
+                "72.4% cached-input share.",
                 "good",
             ),
             ImpactCard(
@@ -509,11 +572,18 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "trend",
             ),
             CommandCenterCard(
-                "Estimated avoidable spend",
+                "Largest savings candidate",
                 "$184.20",
-                "3 recommendations ready",
+                "Largest advisor recommendation",
                 "good",
                 "savings",
+            ),
+            CommandCenterCard(
+                "Anomaly findings",
+                "2",
+                "Project-day spike · observed $59.00",
+                "critical",
+                "audit",
             ),
             CommandCenterCard(
                 "Highest-cost session",
@@ -529,11 +599,11 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "warn",
                 "reliability",
             ),
-            CommandCenterCard("Data quality", "82/100", "Good", "neutral", "trust"),
+            CommandCenterCard("Evidence quality", "82/100", "Good", "neutral", "evidence"),
         ],
         executive_brief=ExecutiveBrief(
             title="AI usage needs review",
-            verdict="3 priority items before the report is clean.",
+            verdict="4 priority items before sharing or acting on this report.",
             subtitle=(
                 "$1,243 selected-window cost · 480 deduped events · 32 sessions · Last 7 days $799"
             ),
@@ -541,7 +611,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             findings=[
                 BriefFinding(
                     "Spend velocity changed",
-                    "The last 7 days are running materially hotter than the 30-day baseline.",
+                    "The last 7 days are running higher than the 30-day daily baseline.",
                     "$114/day",
                     "warn",
                     "usage-windows",
@@ -549,7 +619,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 ),
                 BriefFinding(
                     "Review estimated savings",
-                    "Caliper found routing changes worth review before the next heavy session.",
+                    "Estimated routing savings need review before the next heavy session.",
                     "est. $184",
                     "good",
                     "advisor",
@@ -563,13 +633,21 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                     "rate-limits",
                     "audit",
                 ),
+                BriefFinding(
+                    "Review anomaly finding",
+                    "Project-day spike crossed the dashboard detector threshold.",
+                    "5.1σ",
+                    "critical",
+                    "anomalies",
+                    "audit",
+                ),
             ],
         ),
         decision_queue=[
             DecisionQueueItem(
                 1,
                 "Spend velocity changed",
-                "The last 7 days are running materially hotter than the 30-day baseline.",
+                "The last 7 days are running higher than the 30-day daily baseline.",
                 "Review rolling windows and daily cost to find the date that moved the trend.",
                 "$114/day",
                 "warn",
@@ -589,7 +667,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             DecisionQueueItem(
                 3,
                 "Review estimated savings",
-                "Caliper found $184.20 of estimated avoidable spend.",
+                "Largest advisor recommendation is $184.20.",
                 "Validate quality and latency before changing model or tier routing.",
                 "3 recommendations",
                 "good",
@@ -598,6 +676,16 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             ),
             DecisionQueueItem(
                 4,
+                "Review anomaly finding",
+                "Project-day spike on api-server / 2026-05-17: observed $59.00.",
+                "Inspect the Anomalies section before treating the spike as a repeatable trend.",
+                "5.1σ · $37.00 impact",
+                "critical",
+                "anomalies",
+                "audit",
+            ),
+            DecisionQueueItem(
+                5,
                 "Inspect the highest-cost session",
                 "The top session is $84.10 and long context.",
                 "Inspect tokens, tools, models, and project attribution.",
@@ -847,6 +935,7 @@ def empty_dashboard() -> Dashboard:
         ),
         by_model=[],
         by_project=[],
+        anomalies=[],
         insights=[],
         forecast=None,
         evidence=[],

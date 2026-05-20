@@ -61,7 +61,6 @@ from caliper.exporters import (
     ReceiptInputs,
     month_bounds,
     render_grafana_dashboard,
-    render_receipt_html,
     render_receipt_markdown,
 )
 from caliper.forecasts import project as project_forecast
@@ -153,7 +152,7 @@ app = typer.Typer(
 )
 console = Console()
 
-OUTPUT_FORMATS = ("table", "json", "csv", "markdown", "compat-json")
+OUTPUT_FORMATS = ("table", "json", "csv", "markdown", "compat-json", "html")
 
 
 def _dashboard_stdout_is_interactive() -> bool:
@@ -396,6 +395,39 @@ OutputOpt = Annotated[
     Path | None,
     typer.Option("--out", "--output", "--output-file", help="Write to file. Pipes still work."),
 ]
+ProgressOpt = Annotated[
+    bool,
+    typer.Option(
+        "--progress",
+        "--show-progress",
+        help=(
+            "Force a multi-stage progress widget on stderr (parse → aggregate → render → write). "
+            "Useful when piping JSON / writing to a file. Without this, progress only "
+            "auto-activates for a TTY + classic table output."
+        ),
+    ),
+]
+QuietOpt = Annotated[
+    bool,
+    typer.Option(
+        "--quiet",
+        "--silent",
+        help=(
+            "Suppress progress output even when --progress or the TTY auto-detect would enable it."
+        ),
+    ),
+]
+ShareSafeOpt = Annotated[
+    bool,
+    typer.Option(
+        "--share-safe/--no-share-safe",
+        help=(
+            "Redact project paths, project names, session labels, and prompts from HTML "
+            "output (default ON so reports are safe to forward). Pass --no-share-safe for "
+            "local-only renders that need real labels."
+        ),
+    ),
+]
 OrderOpt = Annotated[
     str,
     typer.Option("--order", "--sort-order", "-o", help="asc or desc."),
@@ -612,52 +644,93 @@ def _safe_load_rate_card(options: RuntimeOptions) -> Any:
 
 def _safe_load_usage(options: RuntimeOptions, *, progress=None) -> Any:
     """Wrapper that converts a malformed `--tier-map` (or other parser
-    boundary errors) into a friendly CLI error."""
+    boundary errors) into a friendly CLI error.
+
+    ``progress`` is forwarded to ``load_usage`` only when it is a non-null
+    callback. The :data:`NULL_PROGRESS` singleton — yielded by
+    :func:`cli_report_progress` when progress is suppressed — is treated
+    the same as ``None`` so test stubs that monkeypatch ``load_usage`` to
+    a lambda without a ``progress=`` kwarg keep working.
+    """
+    from caliper.progress import NULL_PROGRESS
+
     try:
-        return load_usage(options, progress=progress) if progress else load_usage(options)
+        if progress is None or progress is NULL_PROGRESS:
+            return load_usage(options)
+        return load_usage(options, progress=progress)
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
 
 def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
-    from caliper.cli_progress import cli_parse_progress
+    from caliper.cli_progress import cli_report_progress
 
     values = _with_parent_options(values)
     _validate_format(values["output_format"])
     options = _options(values)
-    with cli_parse_progress(
+    with cli_report_progress(
         output_format=values["output_format"],
         output=values["output"],
+        progress=bool(values.get("progress", False)),
+        quiet=bool(values.get("quiet", False)),
     ) as progress:
+        progress.stage_start("parse")
         result = _safe_load_usage(options, progress=progress)
-    if name == "daily" and options.instances:
-        rows_fn = aggregate_daily_instances
+        progress.stage_done(
+            "parse",
+            summary=f"{len(result.events):,} events",
+        )
+        if name == "daily" and options.instances:
+            rows_fn = aggregate_daily_instances
 
-    # Per-vendor split. Same rules everywhere: TTY classic table only,
-    # more than one vendor, no --out. JSON / CSV / markdown / compat-
-    # json keep one envelope so scripts read the same shape.
-    if (
-        values["output_format"] == "table"
-        and values["output"] is None
-        and values.get("by_vendor")
-        and _has_multiple_tool_vendors(result)
-    ):
-        _render_grouped_per_vendor(name, rows_fn, result, options)
-        return
+        # Per-vendor split. Same rules everywhere: TTY classic table only,
+        # more than one vendor, no --out. JSON / CSV / markdown / compat-
+        # json keep one envelope so scripts read the same shape.
+        if (
+            values["output_format"] == "table"
+            and values["output"] is None
+            and values.get("by_vendor")
+            and _has_multiple_tool_vendors(result)
+        ):
+            progress.stage_start("aggregate")
+            _render_grouped_per_vendor(name, rows_fn, result, options)
+            progress.stage_done("aggregate")
+            return
 
-    rows = rows_fn(result, options)
-    if options.order == "desc" and name in {"daily", "weekly", "monthly"}:
-        rows = list(reversed(rows))
-    if options.top_threads:
-        rows = rows[: options.top_threads]
-    if values["output_format"] == "compat-json":
-        text = _compat_json(name, rows, result, options)
-        if values["output"]:
-            values["output"].expanduser().write_text(text)
-        else:
-            typer.echo(text, nl=False)
-        return
-    render(result, options, rows, name, values["output_format"], values["output"])
+        progress.stage_start("aggregate")
+        rows = rows_fn(result, options)
+        if options.order == "desc" and name in {"daily", "weekly", "monthly"}:
+            rows = list(reversed(rows))
+        if options.top_threads:
+            rows = rows[: options.top_threads]
+        progress.stage_done("aggregate", summary=f"{len(rows):,} rows")
+
+        progress.stage_start("render")
+        if values["output_format"] == "compat-json":
+            text = _compat_json(name, rows, result, options)
+            progress.stage_done("render")
+            if values["output"]:
+                values["output"].expanduser().write_text(text)
+            else:
+                typer.echo(text, nl=False)
+            return
+        if values["output_format"] == "html":
+            from caliper.html_export import render_command_html
+
+            text = render_command_html(
+                result,
+                options,
+                command=name,
+                share_safe=bool(values.get("share_safe", True)),
+            )
+            progress.stage_done("render", summary=f"{len(text):,} bytes")
+            if values["output"]:
+                values["output"].expanduser().write_text(text, encoding="utf-8")
+            else:
+                typer.echo(text, nl=False)
+            return
+        render(result, options, rows, name, values["output_format"], values["output"])
+        progress.stage_done("render")
 
 
 def _render_grouped_per_vendor(
@@ -923,16 +996,23 @@ def _run_overview(values: dict) -> None:
         longest_options = build_options(**option_values)
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
-    from caliper.cli_progress import cli_parse_progress
+    from caliper.cli_progress import cli_report_progress
 
-    with cli_parse_progress(
+    with cli_report_progress(
         output_format=output_format,
         output=values["output"],
+        progress=bool(values.get("progress", False)),
+        quiet=bool(values.get("quiet", False)),
     ) as progress:
+        progress.stage_start("parse")
         longest_result = _safe_load_usage(longest_options, progress=progress)
-    rate_card = _safe_load_rate_card(longest_options)
-    overview_windows = _overview_windows(longest_options, now, scoped=scoped)
-    with _interactive_status("Aggregating overview windows...", output_format, values["output"]):
+        progress.stage_done(
+            "parse",
+            summary=f"{len(longest_result.events):,} events",
+        )
+        progress.stage_start("aggregate")
+        rate_card = _safe_load_rate_card(longest_options)
+        overview_windows = _overview_windows(longest_options, now, scoped=scoped)
         rows, total = aggregate_overview_windows(
             longest_result,
             longest_options,
@@ -940,6 +1020,7 @@ def _run_overview(values: dict) -> None:
             rate_card=rate_card,
             detailed=output_format == "json",
         )
+        progress.stage_done("aggregate", summary=f"{len(overview_windows)} windows")
 
     # Per-vendor split. Only triggers on the classic Rich table path
     # when more than one tool vendor is present. JSON / CSV / markdown
@@ -958,6 +1039,21 @@ def _run_overview(values: dict) -> None:
             total,
             rows,
         )
+        return
+
+    if output_format == "html":
+        from caliper.html_export import render_command_html
+
+        text = render_command_html(
+            longest_result,
+            longest_options,
+            command="overview",
+            share_safe=bool(values.get("share_safe", True)),
+        )
+        if values["output"]:
+            values["output"].expanduser().write_text(text, encoding="utf-8")
+        else:
+            typer.echo(text, nl=False)
         return
 
     render(
@@ -1127,6 +1223,9 @@ def overview(
     vendors: VendorOpt = None,
     by_vendor: ByVendorOpt = False,
     classic: ClassicOpt = False,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Print the rolling 7, 30, and 90 day cost summary. Start here."""
     _run_overview(locals())
@@ -1167,6 +1266,9 @@ def daily(
     cost_mode: CostModeOpt = "auto",
     vendors: VendorOpt = None,
     by_vendor: ByVendorOpt = False,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Print token and cost rollups grouped by day."""
     _run_grouped("daily", aggregate_daily, locals())
@@ -1207,6 +1309,9 @@ def weekly(
     cost_mode: CostModeOpt = "auto",
     vendors: VendorOpt = None,
     by_vendor: ByVendorOpt = False,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Print token and cost rollups grouped by week."""
     _run_grouped("weekly", aggregate_weekly, locals())
@@ -1246,6 +1351,9 @@ def monthly(
     cost_mode: CostModeOpt = "auto",
     vendors: VendorOpt = None,
     by_vendor: ByVendorOpt = False,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Print token and cost rollups grouped by month."""
     _run_grouped("monthly", aggregate_monthly, locals())
@@ -1288,6 +1396,9 @@ def session_command(
     ] = None,
     vendors: VendorOpt = None,
     by_vendor: ByVendorOpt = False,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Print one row per session with tokens, cost, and model breakdown."""
     if id:
@@ -1449,6 +1560,9 @@ def project(
     cost_mode: CostModeOpt = "auto",
     vendors: VendorOpt = None,
     by_vendor: ByVendorOpt = False,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Print cost per project (working directory). Answers: which repo cost what."""
     _run_grouped("project", aggregate_projects, locals())
@@ -1489,6 +1603,9 @@ def models(
     vendors: VendorOpt = None,
     by_vendor: ByVendorOpt = False,
     by: Annotated[str, typer.Option("--group-by", "--by", help="model or vendor.")] = "model",
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Print cost per model and service tier. Answers: which model cost what."""
     if by not in {"model", "vendor"}:
@@ -1618,12 +1735,36 @@ def limits(
     width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
     vendors: VendorOpt = None,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Show recent rate-limit hits and credit-cap samples by window."""
+    from caliper.cli_progress import cli_report_progress
+
     _validate_format(output_format)
     options = _options(locals())
-    result = _safe_load_usage(options)
-    render_limits(result, options, output_format, output)
+    with cli_report_progress(
+        output_format=output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        prog.stage_start("parse")
+        result = _safe_load_usage(options, progress=prog)
+        prog.stage_done("parse", summary=f"{len(result.events):,} events")
+        prog.stage_start("render")
+        if output_format == "html":
+            from caliper.html_export import render_command_html
+
+            text = render_command_html(result, options, command="limits", share_safe=share_safe)
+            if output:
+                output.expanduser().write_text(text, encoding="utf-8")
+            else:
+                typer.echo(text, nl=False)
+        else:
+            render_limits(result, options, output_format, output)
+        prog.stage_done("render")
 
 
 @app.command()
@@ -1653,20 +1794,41 @@ def insights(
     width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
     vendors: VendorOpt = None,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Call out cache reuse, tier confidence, and project concentration signals."""
-    if output_format not in {"table", "json", "markdown"}:
-        raise _exit_error("--output-format must be one of: table, json, markdown")
+    from caliper.cli_progress import cli_report_progress
+
+    if output_format not in {"table", "json", "markdown", "html"}:
+        raise _exit_error("--output-format must be one of: table, json, markdown, html")
     options = _options(locals())
-    result = _safe_load_usage(options)
-    card = _safe_load_rate_card(options)
-    items = build_insights(result, options, rate_card=card)[: options.top_threads]
-    if output_format == "json":
-        text = json_dumps_enveloped(insights_payload(items)) + "\n"
-    elif output_format == "markdown":
-        text = render_insights_markdown(items)
-    else:
-        text = _render_insights_table(items)
+    with cli_report_progress(
+        output_format=output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        prog.stage_start("parse")
+        result = _safe_load_usage(options, progress=prog)
+        prog.stage_done("parse", summary=f"{len(result.events):,} events")
+        prog.stage_start("analyse")
+        card = _safe_load_rate_card(options)
+        items = build_insights(result, options, rate_card=card)[: options.top_threads]
+        prog.stage_done("analyse", summary=f"{len(items):,} insights")
+        prog.stage_start("render")
+        if output_format == "json":
+            text = json_dumps_enveloped(insights_payload(items)) + "\n"
+        elif output_format == "markdown":
+            text = render_insights_markdown(items)
+        elif output_format == "html":
+            from caliper.html_export import render_command_html
+
+            text = render_command_html(result, options, command="insights", share_safe=share_safe)
+        else:
+            text = _render_insights_table(items)
+        prog.stage_done("render")
     if output:
         output.expanduser().write_text(text)
     else:
@@ -1876,13 +2038,6 @@ def dashboard(
             help="Dashboard audience lens: executive, engineer, finance, or audit.",
         ),
     ] = "executive",
-    share_safe: Annotated[
-        bool,
-        typer.Option(
-            "--share-safe",
-            help="Redact project paths, project names, session labels, and action commands.",
-        ),
-    ] = False,
     no_deltas: Annotated[
         bool,
         typer.Option(
@@ -1920,8 +2075,13 @@ def dashboard(
     width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
     vendors: VendorOpt = None,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Open a self-contained static HTML dashboard. Offline. No external resources."""
+    from caliper.cli_progress import cli_report_progress
+
     if theme not in {"dark", "light", "print"}:
         raise _exit_error("--theme must be one of: dark, light, print")
     if density not in {"comfortable", "compact"}:
@@ -1930,46 +2090,76 @@ def dashboard(
         raise _exit_error("--lens must be one of: executive, engineer, finance, audit")
     if stdout_html and (output is not None or open_in_browser):
         raise _exit_error("--stdout cannot be combined with --output or --open")
-    if demo:
-        payload = sample_dashboard(show_paths=show_paths)
-    else:
-        values = dict(locals())
-        # The dashboard command does not take an output_format; carve out before _options.
-        dashboard_only_keys = (
-            "output",
-            "open_in_browser",
-            "stdout_html",
-            "theme",
-            "density",
-            "lens",
-            "share_safe",
-            "no_deltas",
-            "demo",
-        )
-        for k in dashboard_only_keys:
-            values.pop(k, None)
-        values["output_format"] = "table"
-        options = _options(values)
-        result = _safe_load_usage(options)
-        rolling_start = options.end - dt.timedelta(days=90)
-        if options.start == rolling_start:
-            rolling_options = options
-            rolling_result = result
+    # The dashboard always emits HTML on stdout when --stdout, so the
+    # progress check is "treat HTML output as non-table".
+    dashboard_output_format = "html"
+    with cli_report_progress(
+        output_format=dashboard_output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        if demo:
+            prog.stage_start("build")
+            payload = sample_dashboard(show_paths=show_paths)
+            prog.stage_done("build", summary="demo data")
         else:
-            rolling_options = dataclasses.replace(options, start=rolling_start)
-            rolling_result = _safe_load_usage(rolling_options)
-        budget_config = load_config(config) if config else load_config()
-        payload = build_handoff_dashboard(
-            result,
-            options,
-            with_deltas=not no_deltas,
-            rolling_result=rolling_result,
-            rolling_options=rolling_options,
-            budget_config=budget_config,
+            values = dict(locals())
+            # The dashboard command does not take an output_format; carve out before _options.
+            dashboard_only_keys = (
+                "output",
+                "open_in_browser",
+                "stdout_html",
+                "theme",
+                "density",
+                "lens",
+                "share_safe",
+                "no_deltas",
+                "demo",
+                "progress",
+                "quiet",
+                "prog",
+                "dashboard_output_format",
+                "cli_report_progress",
+            )
+            for k in dashboard_only_keys:
+                values.pop(k, None)
+            values["output_format"] = "table"
+            options = _options(values)
+            prog.stage_start("parse")
+            result = _safe_load_usage(options, progress=prog)
+            prog.stage_done(
+                "parse",
+                summary=f"{len(result.events):,} events (selected)",
+            )
+            rolling_start = options.end - dt.timedelta(days=90)
+            if options.start == rolling_start:
+                rolling_options = options
+                rolling_result = result
+            else:
+                prog.stage_start("parse")
+                rolling_options = dataclasses.replace(options, start=rolling_start)
+                rolling_result = _safe_load_usage(rolling_options, progress=prog)
+                prog.stage_done(
+                    "parse",
+                    summary=f"{len(rolling_result.events):,} events (90-day rolling)",
+                )
+            prog.stage_start("build")
+            budget_config = load_config(config) if config else load_config()
+            payload = build_handoff_dashboard(
+                result,
+                options,
+                with_deltas=not no_deltas,
+                rolling_result=rolling_result,
+                rolling_options=rolling_options,
+                budget_config=budget_config,
+            )
+            prog.stage_done("build", summary="dashboard payload")
+        prog.stage_start("render")
+        text = render_dashboard(
+            payload, theme=theme, density=density, default_lens=lens, share_safe=share_safe
         )
-    text = render_dashboard(
-        payload, theme=theme, density=density, default_lens=lens, share_safe=share_safe
-    )
+        prog.stage_done("render", summary=f"{len(text):,} bytes")
     should_open = open_in_browser or (
         output is None and not stdout_html and _dashboard_stdout_is_interactive()
     )
@@ -2036,22 +2226,41 @@ def tail(
     width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
     vendors: VendorOpt = None,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Print the most recent usage events or sessions. Use --by session to group."""
+    from caliper.cli_progress import cli_report_progress
+
     del top_threads
     if by not in {"event", "session"}:
         raise _exit_error("--by must be one of: event, session")
-    if output_format not in {"table", "json", "csv"}:
-        raise _exit_error("--output-format must be one of: table, json, csv")
+    if output_format not in {"table", "json", "csv", "html"}:
+        raise _exit_error("--output-format must be one of: table, json, csv, html")
     options = _options(locals() | {"top_threads": n})
-    result = _safe_load_usage(options)
-    rows = _recent_tail_rows(result, n, by)
-    if output_format == "json":
-        text = json_dumps_enveloped({"by": by, f"{by}s": rows}) + "\n"
-    elif output_format == "csv":
-        text = _tail_csv(rows)
-    else:
-        text = _tail_table(rows, by, options)
+    with cli_report_progress(
+        output_format=output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        prog.stage_start("parse")
+        result = _safe_load_usage(options, progress=prog)
+        prog.stage_done("parse", summary=f"{len(result.events):,} events")
+        prog.stage_start("render")
+        rows = _recent_tail_rows(result, n, by)
+        if output_format == "json":
+            text = json_dumps_enveloped({"by": by, f"{by}s": rows}) + "\n"
+        elif output_format == "csv":
+            text = _tail_csv(rows)
+        elif output_format == "html":
+            from caliper.html_export import render_command_html
+
+            text = render_command_html(result, options, command="tail", share_safe=share_safe)
+        else:
+            text = _tail_table(rows, by, options)
+        prog.stage_done("render")
     if output:
         output.expanduser().write_text(text)
     else:
@@ -2785,8 +2994,14 @@ def forecast(
     service_tier: ServiceTierOpt = "auto",
     pricing_mode: PricingModeOpt = "model",
     vendors: VendorOpt = None,
+    output: OutputOpt = None,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Project month-end cost with a ±1σ band. Pass --cap for days-to-depletion."""
+    from caliper.cli_progress import cli_report_progress
+
     _validate_format(output_format)
     try:
         options = build_options(
@@ -2804,16 +3019,28 @@ def forecast(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
-    result = _safe_load_usage(options)
-    rate_card = _safe_load_rate_card(options)
-    total = aggregate_total(result, options, rate_card=rate_card)
-    status = pricing_status(total)
-    warnings = pricing_warnings(total)
-    daily = _daily_cost_usd_series(result.events, options, rate_card)
-    now = dt.datetime.now(tz=local_timezone())
-    days_remaining = _days_remaining_in_month(now)
-    projection = project_forecast(daily, days_remaining, unit="cost_usd", cap=cap)
-    sparkline = _sparkline(daily)
+    with cli_report_progress(
+        output_format=output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        prog.stage_start("parse")
+        result = _safe_load_usage(options, progress=prog)
+        prog.stage_done("parse", summary=f"{len(result.events):,} events")
+        prog.stage_start("aggregate")
+        rate_card = _safe_load_rate_card(options)
+        total = aggregate_total(result, options, rate_card=rate_card)
+        prog.stage_done("aggregate")
+        prog.stage_start("analyse")
+        status = pricing_status(total)
+        warnings = pricing_warnings(total)
+        daily = _daily_cost_usd_series(result.events, options, rate_card)
+        now = dt.datetime.now(tz=local_timezone())
+        days_remaining = _days_remaining_in_month(now)
+        projection = project_forecast(daily, days_remaining, unit="cost_usd", cap=cap)
+        sparkline = _sparkline(daily)
+        prog.stage_done("analyse", summary=f"σ={projection.daily_stdev:.2f}")
 
     forecast_payload = {
         "unit": projection.unit,
@@ -2859,6 +3086,16 @@ def forecast(
 
     if output_format == "markdown":
         typer.echo(records_to_markdown(forecast_records), nl=False)
+        return
+
+    if output_format == "html":
+        from caliper.html_export import render_command_html
+
+        text = render_command_html(result, options, command="forecast", share_safe=share_safe)
+        if output:
+            output.expanduser().write_text(text, encoding="utf-8")
+        else:
+            typer.echo(text, nl=False)
         return
 
     console.print("[bold]Caliper - Forecast[/bold]")
@@ -2951,8 +3188,14 @@ def compare(
             help="total (default) or vendor. Pass vendor to split rows per vendor.",
         ),
     ] = "total",
+    output: OutputOpt = None,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Compare two windows side-by-side. Reports cost and token deltas."""
+    from caliper.cli_progress import cli_report_progress
+
     _validate_format(output_format)
     if by not in {"total", "vendor"}:
         raise _exit_error("--by must be one of: total, vendor")
@@ -2983,10 +3226,20 @@ def compare(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
-    result = _safe_load_usage(options)
-    rate_card = _safe_load_rate_card(options)
-    agg_a = aggregate_interval(result.events, options, rate_card, interval_a, "A")
-    agg_b = aggregate_interval(result.events, options, rate_card, interval_b, "B")
+    with cli_report_progress(
+        output_format=output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        prog.stage_start("parse")
+        result = _safe_load_usage(options, progress=prog)
+        prog.stage_done("parse", summary=f"{len(result.events):,} events")
+        prog.stage_start("aggregate")
+        rate_card = _safe_load_rate_card(options)
+        agg_a = aggregate_interval(result.events, options, rate_card, interval_a, "A")
+        agg_b = aggregate_interval(result.events, options, rate_card, interval_b, "B")
+        prog.stage_done("aggregate", summary="2 windows")
 
     if by == "vendor":
         _render_compare_by_vendor(
@@ -3051,6 +3304,15 @@ def compare(
         return
     if output_format == "markdown":
         typer.echo(_records_to_human_markdown(compare_records), nl=False)
+        return
+    if output_format == "html":
+        from caliper.html_export import render_command_html
+
+        text = render_command_html(result, options, command="compare", share_safe=share_safe)
+        if output:
+            output.expanduser().write_text(text, encoding="utf-8")
+        else:
+            typer.echo(text, nl=False)
         return
 
     console.print("[bold]Caliper - Compare[/bold]")
@@ -3625,8 +3887,14 @@ def whatif(
     pricing_mode: PricingModeOpt = "model",
     no_parse_cache: NoParseCacheOpt = False,
     vendors: VendorOpt = None,
+    output: OutputOpt = None,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Re-price the window as if you had used a different tier or model."""
+    from caliper.cli_progress import cli_report_progress
+
     _validate_whatif_inputs(tier, model, output_format)
 
     try:
@@ -3646,16 +3914,35 @@ def whatif(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
 
-    result = _safe_load_usage(options)
-    rate_card = _safe_load_rate_card(options)
-    report = build_whatif_report(
-        result,
-        options,
-        rate_card,
-        days=days,
-        tier=tier,
-        model=model,
-    )
+    with cli_report_progress(
+        output_format=output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        prog.stage_start("parse")
+        result = _safe_load_usage(options, progress=prog)
+        prog.stage_done("parse", summary=f"{len(result.events):,} events")
+        prog.stage_start("aggregate")
+        rate_card = _safe_load_rate_card(options)
+        report = build_whatif_report(
+            result,
+            options,
+            rate_card,
+            days=days,
+            tier=tier,
+            model=model,
+        )
+        prog.stage_done("aggregate")
+    if output_format == "html":
+        from caliper.html_export import render_command_html
+
+        text = render_command_html(result, options, command="whatif", share_safe=share_safe)
+        if output:
+            output.expanduser().write_text(text, encoding="utf-8")
+        else:
+            typer.echo(text, nl=False)
+        return
     _render_whatif_report(report, output_format)
 
 
@@ -3870,6 +4157,355 @@ def _emit_records(records: list[dict], output_format: str, title: str) -> None:
     console.print(table)
 
 
+@app.command()
+def agents(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = 7.0,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 10,
+    vendors: VendorOpt = None,
+    source_category: Annotated[
+        str,
+        typer.Option(
+            "--source-category",
+            "--category",
+            help="Filter agent source category: all, user, direct, overhead, unknown.",
+        ),
+    ] = "all",
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
+) -> None:
+    """Show direct-session, logged-agent, and overhead cost attribution."""
+    from caliper.attribution import agent_summary, build_agent_attributions
+    from caliper.cli_progress import cli_report_progress
+
+    if output_format not in {"table", "json", "csv", "markdown", "html"}:
+        raise _exit_error("--output-format must be one of: table, json, csv, markdown, html")
+    if source_category not in {"all", "user", "direct", "overhead", "unknown"}:
+        raise _exit_error("--source-category must be one of: all, user, direct, overhead, unknown")
+    options = _options(locals())
+    with cli_report_progress(
+        output_format=output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        prog.stage_start("parse")
+        result = _safe_load_usage(options, progress=prog)
+        prog.stage_done("parse", summary=f"{len(result.events):,} events")
+        prog.stage_start("analyse")
+        rate_card = _safe_load_rate_card(options)
+        rows = build_agent_attributions(result, rate_card)
+        if source_category != "all":
+            rows = [row for row in rows if row.source_category == source_category]
+        records = [row.to_record() for row in rows[: options.top_threads]]
+        summary = agent_summary(rows)
+        prog.stage_done("analyse", summary=f"{len(rows):,} rows")
+        prog.stage_start("render")
+        if output_format == "html":
+            from caliper.html_export import render_command_html
+
+            text = render_command_html(
+                result,
+                options,
+                command="agents",
+                share_safe=share_safe,
+                with_deltas=True,
+            )
+        else:
+            text = _render_attribution_output(
+                output_format,
+                records,
+                "Caliper - Agents",
+                "agents",
+                summary=summary,
+                empty="No agent or direct-session attribution for this window.",
+            )
+        prog.stage_done("render")
+    _write_or_echo(text, output, output_format)
+
+
+@app.command()
+def skills(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = 7.0,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 10,
+    vendors: VendorOpt = None,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
+) -> None:
+    """Show estimated skill and workflow costs with evidence labels."""
+    from caliper.attribution import build_skill_attributions, skill_summary
+    from caliper.cli_progress import cli_report_progress
+
+    if output_format not in {"table", "json", "csv", "markdown", "html"}:
+        raise _exit_error("--output-format must be one of: table, json, csv, markdown, html")
+    options = _options(locals())
+    with cli_report_progress(
+        output_format=output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        prog.stage_start("parse")
+        result = _safe_load_usage(options, progress=prog)
+        prog.stage_done("parse", summary=f"{len(result.events):,} events")
+        prog.stage_start("analyse")
+        rate_card = _safe_load_rate_card(options)
+        rows = build_skill_attributions(result, rate_card)
+        records = [row.to_record() for row in rows[: options.top_threads]]
+        summary = skill_summary(rows, result)
+        prog.stage_done("analyse", summary=f"{len(rows):,} rows")
+        prog.stage_start("render")
+        if output_format == "html":
+            from caliper.html_export import render_command_html
+
+            text = render_command_html(
+                result,
+                options,
+                command="skills",
+                share_safe=share_safe,
+                with_deltas=True,
+            )
+        else:
+            text = _render_attribution_output(
+                output_format,
+                records,
+                "Caliper - Skills & Workflows",
+                "skills",
+                summary=summary,
+                empty="No skill or workflow attribution for this window.",
+            )
+        prog.stage_done("render")
+    _write_or_echo(text, output, output_format)
+
+
+@app.command()
+def inefficiencies(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = 7.0,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 10,
+    vendors: VendorOpt = None,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
+    share_safe: ShareSafeOpt = True,
+) -> None:
+    """Rank evidence-labelled, quantified waste and risk findings."""
+    from caliper.cli_progress import cli_report_progress
+    from caliper.inefficiencies import inefficiency_payload
+
+    if output_format not in {"table", "json", "csv", "markdown", "html"}:
+        raise _exit_error("--output-format must be one of: table, json, csv, markdown, html")
+    options = _options(locals())
+    with cli_report_progress(
+        output_format=output_format,
+        output=output,
+        progress=progress,
+        quiet=quiet,
+    ) as prog:
+        prog.stage_start("parse")
+        result = _safe_load_usage(options, progress=prog)
+        prog.stage_done("parse", summary=f"{len(result.events):,} events")
+        prog.stage_start("analyse")
+        rate_card = _safe_load_rate_card(options)
+        try:
+            budget_config = load_config(config) if config else load_config()
+        except ValueError:
+            budget_config = {}
+        payload = inefficiency_payload(
+            result,
+            options,
+            rate_card,
+            budget_config=budget_config,
+        )
+        records = list(payload["findings"])[: options.top_threads]  # type: ignore[index]
+        prog.stage_done("analyse", summary=f"{len(records):,} findings")
+        prog.stage_start("render")
+        if output_format == "html":
+            from caliper.html_export import render_command_html
+
+            text = render_command_html(
+                result,
+                options,
+                command="inefficiencies",
+                share_safe=share_safe,
+                with_deltas=True,
+            )
+        else:
+            text = _render_attribution_output(
+                output_format,
+                records,
+                "Caliper - Inefficiencies",
+                "inefficiencies",
+                summary={key: value for key, value in payload.items() if key != "findings"},
+                empty="No evidence-labelled inefficiency findings for this window.",
+            )
+        prog.stage_done("render")
+    _write_or_echo(text, output, output_format)
+
+
+def _write_or_echo(text: str, output: Path | None, output_format: str) -> None:
+    if output:
+        encoding = "utf-8" if output_format == "html" else None
+        output.expanduser().write_text(text, encoding=encoding)
+    else:
+        typer.echo(text, nl=False)
+
+
+def _render_attribution_output(
+    output_format: str,
+    records: list[dict],
+    title: str,
+    payload_key: str,
+    *,
+    summary: dict[str, object],
+    empty: str,
+) -> str:
+    if output_format == "json":
+        return json_dumps_enveloped({payload_key: records, "summary": summary}) + "\n"
+    if output_format == "csv":
+        return records_to_csv(records)
+    if output_format == "markdown":
+        if not records:
+            return f"_{empty}_\n"
+        return records_to_markdown(records)
+
+    buffer = io.StringIO()
+    local_console = Console(file=buffer, width=140, _environ={})
+    local_console.print(f"[bold]{title}[/bold]")
+    if summary:
+        summary_bits = [
+            f"{key}={value}"
+            for key, value in summary.items()
+            if key in {"evidence_status", "overhead_share", "coverage", "finding_count"}
+        ]
+        if summary_bits:
+            local_console.print("[dim]" + " · ".join(summary_bits) + "[/dim]")
+    if not records:
+        local_console.print(empty)
+        return buffer.getvalue()
+
+    columns = _columns_for_payload(payload_key, records[0])
+    table = Table(show_lines=False, expand=True)
+    for _key, label, justify in columns:
+        table.add_column(label, justify=justify)
+    for record in records:
+        table.add_row(*(_format_record_cell(record.get(key)) for key, _label, _justify in columns))
+    local_console.print(table)
+    return buffer.getvalue()
+
+
+def _columns_for_payload(payload_key: str, first: dict) -> list[tuple[str, str, str]]:
+    del first
+    if payload_key == "agents":
+        return [
+            ("agent_id", "Agent", "left"),
+            ("source_category", "Source", "left"),
+            ("evidence_status", "Evidence", "left"),
+            ("cost_usd_exact", "Cost", "right"),
+            ("total_tokens", "Tokens", "right"),
+            ("events", "Events", "right"),
+            ("tool_calls", "Tools", "right"),
+            ("reason", "Reason", "left"),
+        ]
+    if payload_key == "skills":
+        return [
+            ("name", "Skill / workflow", "left"),
+            ("evidence_status", "Evidence", "left"),
+            ("attribution_method", "Method", "left"),
+            ("estimated_cost_usd_exact", "Est. cost", "right"),
+            ("invocations", "Invocations", "right"),
+            ("sessions", "Sessions", "right"),
+            ("total_tokens", "Tokens", "right"),
+        ]
+    return [
+        ("code", "Code", "left"),
+        ("severity", "Severity", "left"),
+        ("evidence_status", "Evidence", "left"),
+        ("impact_usd_exact", "Impact", "right"),
+        ("confidence", "Confidence", "left"),
+        ("sample_size", "Sample", "right"),
+        ("title", "Finding", "left"),
+        ("action", "Action", "left"),
+    ]
+
+
+def _format_record_cell(value: object) -> str:
+    if isinstance(value, float):
+        return f"{value:,.3f}" if abs(value) < 1 else f"{value:,.2f}"
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, list | tuple):
+        return ", ".join(str(item) for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True)
+    return str(value or "")
+
+
 export_app = typer.Typer(help="Render receipts, Grafana dashboards, and Prometheus metrics.")
 app.add_typer(export_app, name="export")
 
@@ -3976,13 +4612,28 @@ def export_receipt(
         typer.Option(
             "--include-sensitive-receipt-data",
             "--show-sensitive",
-            help="Include full session labels and local project paths in the receipt.",
+            help=(
+                "DEPRECATED: alias for --no-share-safe. Will be removed in a "
+                "future release. Use --no-share-safe instead."
+            ),
         ),
     ] = False,
+    share_safe: ShareSafeOpt = True,
 ) -> None:
     """Render a monthly cost receipt as Markdown or HTML. Suitable for finance handoff."""
     if receipt_format not in {"markdown", "html"}:
         raise _exit_error("--receipt-format must be one of: markdown, html")
+
+    # Backwards compatibility: --show-sensitive ⇒ --no-share-safe.
+    # Emit a one-line stderr deprecation note when the legacy flag is
+    # supplied so CI scripts get a nudge to migrate without breaking.
+    if show_sensitive:
+        Console(stderr=True).print(
+            "[yellow]deprecation:[/yellow] --show-sensitive / "
+            "--include-sensitive-receipt-data is deprecated; "
+            "use --no-share-safe instead."
+        )
+        share_safe = False
 
     now = dt.datetime.now(tz=local_timezone())
     chosen_month = month or now.strftime("%Y-%m")
@@ -4008,6 +4659,8 @@ def export_receipt(
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
+    if not share_safe:
+        options = dataclasses.replace(options, show_paths=True, show_prompts=True)
 
     result = _safe_load_usage(options)
     rate_card = _safe_load_rate_card(options)
@@ -4021,6 +4674,20 @@ def export_receipt(
         rate_limit_samples=[],
         warnings=[],
     )
+
+    # HTML receipts now route through the polished dashboard chrome for
+    # parity with `caliper <cmd> --format html`. Markdown stays on the
+    # original bare receipt template — finance teams that diff month-to-
+    # month receipts rely on that line-stable shape.
+    if receipt_format == "html":
+        from caliper.html_export import render_command_html
+
+        text = render_command_html(scoped, options, command="monthly", share_safe=share_safe)
+        if output:
+            output.expanduser().write_text(text, encoding="utf-8")
+        else:
+            typer.echo(text)
+        return
 
     from caliper.aggregation import (
         aggregate_model_mode,
@@ -4038,12 +4705,12 @@ def export_receipt(
     top_sessions = _safe_receipt_rows(
         aggregate_sessions(scoped, options, rate_card=rate_card)[:top],
         kind="session",
-        show_sensitive=show_sensitive,
+        show_sensitive=not share_safe,
     )
     top_projects = _safe_receipt_rows(
         aggregate_projects(scoped, options, rate_card=rate_card)[:top],
         kind="project",
-        show_sensitive=show_sensitive,
+        show_sensitive=not share_safe,
     )
 
     payload = ReceiptInputs(
@@ -4061,11 +4728,7 @@ def export_receipt(
         accuracy_status=str(evidence["overall"]),
         accuracy_reasons=[str(reason) for reason in accuracy_reasons[:3]],
     )
-    text = (
-        render_receipt_html(payload)
-        if receipt_format == "html"
-        else render_receipt_markdown(payload)
-    )
+    text = render_receipt_markdown(payload)
     if output:
         output.expanduser().write_text(text)
     else:
@@ -4495,3 +5158,594 @@ def tui(
             no_watchdog=True,
         )
     caliper_tui.run_tui(options, demo=demo, tui_config=tui_config)
+
+
+# ---------------------------------------------------------------------------
+# Predictive analytics + inefficiency detection commands.
+# These reuse the standard option surface; bodies stay thin and push
+# the math into caliper.predict, caliper.anomaly, and caliper.efficiency.
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def predict(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 0,
+    rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
+    include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
+    project: ProjectOpt = None,
+    vendors: VendorOpt = None,
+    horizon_days: Annotated[
+        int,
+        typer.Option("--horizon-days", help="Forecast horizon (default 30)."),
+    ] = 30,
+) -> None:
+    """Predictive analytics: per-model demand, seasonality, rate-limit ETA, anomalies."""
+    from caliper.anomaly import (
+        detect_daily_anomalies,
+        detect_model_anomalies,
+        detect_project_daily_anomalies,
+        detect_session_anomalies,
+    )
+    from caliper.predict import (
+        decompose_seasonality,
+        forecast_per_model,
+        forecast_rate_limits,
+        total_outlook,
+    )
+
+    _validate_format(output_format)
+    options = _options(locals())
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
+    daily = aggregate_daily(result, options, rate_card=rate_card)
+    per_model = forecast_per_model(
+        result.events, rate_card, options.timezone, horizon_days=horizon_days
+    )
+    seasonality = decompose_seasonality(result.events, rate_card, options.timezone)
+    rate_limits = forecast_rate_limits(result.rate_limit_samples)
+    anomalies = (
+        detect_session_anomalies(result.events, rate_card)
+        + detect_daily_anomalies(daily)
+        + detect_model_anomalies(result.events, rate_card)
+        + detect_project_daily_anomalies(result.events, rate_card, options.timezone)
+    )
+    daily_costs = [float(row.costs.cost_usd) for row in daily]
+    outlook = total_outlook(daily_costs)
+    payload = {
+        "horizon_days": horizon_days,
+        "per_model": [dataclasses.asdict(item) for item in per_model],
+        "seasonality": dataclasses.asdict(seasonality),
+        "rate_limits": [dataclasses.asdict(item) for item in rate_limits],
+        "anomalies": [
+            {
+                **dataclasses.asdict(item),
+                "timestamp": iso_z(item.timestamp),
+                "impact_usd_exact": str(item.impact_usd_exact),
+            }
+            for item in anomalies
+        ],
+        "cost_outlook": {
+            "30d": dataclasses.asdict(outlook["30d"]),
+            "90d": dataclasses.asdict(outlook["90d"]),
+        },
+    }
+    text = _render_predict(payload, output_format)
+    if output:
+        output.expanduser().write_text(text)
+    else:
+        typer.echo(text, nl=False)
+
+
+def _render_predict(payload: dict[str, Any], output_format: str) -> str:
+    if output_format in {"json", "compat-json"}:
+        return json_dumps_enveloped(payload) + "\n"
+    if output_format == "csv":
+        return records_to_csv(payload["per_model"])
+    if output_format == "markdown":
+        return _predict_markdown(payload)
+    return _predict_table(payload)
+
+
+def _predict_markdown(payload: dict[str, Any]) -> str:
+    lines = ["## Predictive analytics", ""]
+    lines.append("### Per-model demand")
+    if payload["per_model"]:
+        lines.append(
+            "| Model | Vendor | Days | Daily mean tokens | Slope/day | Growing | 30d cost |"
+        )
+        lines.append("| --- | --- | ---: | ---: | ---: | :---: | ---: |")
+        for row in payload["per_model"]:
+            lines.append(
+                f"| {row['model']} | {row['model_vendor']} | {row['days_analyzed']} | "
+                f"{int(row['daily_mean_tokens']):,} | "
+                f"{int(row['trend_slope_tokens_per_day']):+,} | "
+                f"{'yes' if row['growing'] else 'no'} | ${row['projected_cost_30d_usd']:,.2f} |"
+            )
+    else:
+        lines.append("_No per-model data in this window._")
+    lines.append("")
+    lines.append(
+        f"**30d outlook**: ${payload['cost_outlook']['30d']['linear_total']:,.2f} "
+        f"(EWMA ${payload['cost_outlook']['30d']['ewma_total']:,.2f}). "
+        f"**90d outlook**: ${payload['cost_outlook']['90d']['linear_total']:,.2f}."
+    )
+    if payload["anomalies"]:
+        lines.append("")
+        lines.append("### Anomalies")
+        lines.append("| Kind | Label | Observed | σ | Impact |")
+        lines.append("| --- | --- | ---: | ---: | ---: |")
+        for row in payload["anomalies"][:5]:
+            lines.append(
+                f"| {row['kind']} | {row['label'][:32]} | ${row['observed']:,.2f} | "
+                f"{row['z_score']:.1f} | ${float(row['impact_usd_exact']):,.2f} |"
+            )
+    return "\n".join(lines) + "\n"
+
+
+def _predict_table(payload: dict[str, Any]) -> str:
+    buffer = io.StringIO()
+    local_console = Console(file=buffer, width=140, _environ={})
+    local_console.print("[bold]Caliper - Predictive analytics[/bold]")
+    local_console.print(
+        f"Horizon: {payload['horizon_days']} days. "
+        f"30d outlook: ${payload['cost_outlook']['30d']['linear_total']:,.2f}, "
+        f"90d outlook: ${payload['cost_outlook']['90d']['linear_total']:,.2f}."
+    )
+    if payload["per_model"]:
+        table = Table(title="Per-model demand", show_lines=False, expand=False)
+        table.add_column("Model")
+        table.add_column("Days", justify="right")
+        table.add_column("Daily mean tokens", justify="right")
+        table.add_column("Slope/day", justify="right")
+        table.add_column("Growing", justify="center")
+        table.add_column("30d cost", justify="right")
+        for row in payload["per_model"]:
+            table.add_row(
+                row["model"],
+                str(row["days_analyzed"]),
+                f"{int(row['daily_mean_tokens']):,}",
+                f"{int(row['trend_slope_tokens_per_day']):+,}",
+                "yes" if row["growing"] else "no",
+                f"${row['projected_cost_30d_usd']:,.2f}",
+            )
+        local_console.print(table)
+    if payload["rate_limits"]:
+        local_console.print("[bold]Rate-limit forecast[/bold]")
+        for row in payload["rate_limits"]:
+            eta = (
+                f"{row['eta_to_100_hours']:.1f}h"
+                if row.get("eta_to_100_hours") is not None
+                else "—"
+            )
+            local_console.print(
+                f"  {row['window']}: {row['current_percent']:.0f}% used, "
+                f"ETA→100 {eta} (confidence: {row['confidence']})"
+            )
+    if payload["anomalies"]:
+        local_console.print("[bold]Anomalies[/bold]")
+        for row in payload["anomalies"][:5]:
+            local_console.print(
+                f"  {row['kind']}: {row['label'][:40]} "
+                f"(σ={row['z_score']:.1f}, ${row['observed']:,.2f})"
+            )
+    seasonality = payload["seasonality"]
+    if any(seasonality["by_hour_cost_usd"]):
+        local_console.print(
+            f"[bold]Seasonality[/bold] peak hour {seasonality['peak_hour']:02d}:00, "
+            f"peak weekday {seasonality['peak_dow']}, "
+            f"off-peak share {seasonality['off_peak_share']:.0%}"
+        )
+    return buffer.getvalue()
+
+
+@app.command()
+def audit(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "table",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 0,
+    rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
+    include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
+    project: ProjectOpt = None,
+    vendors: VendorOpt = None,
+    codes: Annotated[
+        str | None,
+        typer.Option("--codes", help="Comma-separated finder codes to run."),
+    ] = None,
+    min_impact_usd: Annotated[
+        float,
+        typer.Option("--min-impact-usd", help="Drop findings under this dollar amount."),
+    ] = 0.10,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help="Exit 2 when total quantified waste exceeds --waste-threshold-usd.",
+        ),
+    ] = False,
+    waste_threshold_usd: Annotated[
+        float,
+        typer.Option(
+            "--waste-threshold-usd",
+            help="Strict mode dollar trigger (default $10).",
+        ),
+    ] = 10.0,
+) -> None:
+    """Quantified inefficiency audit. Every finding quotes a dollar saving."""
+    from decimal import Decimal as _Decimal
+
+    from caliper.efficiency import (
+        monthly_projected_savings_usd,
+        run_audit,
+        total_savings_usd,
+        waste_share_of_spend,
+    )
+
+    _validate_format(output_format)
+    options = _options(locals())
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
+    selected_codes = [code.strip() for code in (codes or "").split(",") if code.strip()] or None
+    findings = run_audit(
+        result,
+        options,
+        rate_card,
+        codes=selected_codes,
+        min_impact_usd=_Decimal(str(min_impact_usd)),
+    )
+    total_total = aggregate_total(result, options, rate_card=rate_card)
+    total_spend = total_total.costs.cost_usd
+    total_saving = total_savings_usd(findings)
+    monthly = monthly_projected_savings_usd(findings)
+    waste_share = waste_share_of_spend(findings, total_spend)
+    payload = {
+        "findings": [
+            {
+                **dataclasses.asdict(item),
+                "impact_usd_exact": str(item.impact_usd_exact),
+                "monthly_projected_savings_usd": str(item.monthly_projected_savings_usd),
+            }
+            for item in findings
+        ],
+        "total_savings_usd": str(total_saving),
+        "monthly_projected_savings_usd": str(monthly),
+        "waste_share_of_spend": waste_share,
+        "total_spend_usd": str(total_spend),
+    }
+    text = _render_audit(payload, output_format)
+    if output:
+        output.expanduser().write_text(text)
+    else:
+        typer.echo(text, nl=False)
+    if strict and float(total_saving) > waste_threshold_usd:
+        raise typer.Exit(2)
+    if any(item.severity == "fail" for item in findings):
+        raise typer.Exit(2)
+    if findings:
+        raise typer.Exit(1)
+
+
+def _render_audit(payload: dict[str, Any], output_format: str) -> str:
+    if output_format in {"json", "compat-json"}:
+        return json_dumps_enveloped(payload) + "\n"
+    findings = payload["findings"]
+    if output_format == "csv":
+        return records_to_csv(findings)
+    if output_format == "markdown":
+        return _audit_markdown(payload)
+    return _audit_table(payload)
+
+
+def _audit_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "## Audit",
+        "",
+        f"**Sum of retained finding impacts**: ${float(payload['total_savings_usd']):,.2f} "
+        f"({payload['waste_share_of_spend']:.0%} of spend). "
+        f"**Monthly projection**: ${float(payload['monthly_projected_savings_usd']):,.2f}.",
+        "",
+        "| Code | Severity | Title | Impact | Monthly | Confidence | Action |",
+        "| --- | --- | --- | ---: | ---: | --- | --- |",
+    ]
+    for item in payload["findings"]:
+        lines.append(
+            f"| {item['code']} | {item['severity']} | {item['title']} | "
+            f"${float(item['impact_usd_exact']):,.2f} | "
+            f"${float(item['monthly_projected_savings_usd']):,.2f} | "
+            f"{item['confidence']} | {item['payback_action']} |"
+        )
+    if not payload["findings"]:
+        lines.append("| — | — | _No quantified waste detected._ | $0 | $0 | — | — |")
+    return "\n".join(lines) + "\n"
+
+
+def _audit_table(payload: dict[str, Any]) -> str:
+    buffer = io.StringIO()
+    local_console = Console(file=buffer, width=140, _environ={})
+    local_console.print("[bold]Caliper - Audit[/bold]")
+    local_console.print(
+        f"Retained finding impacts: [bold]${float(payload['total_savings_usd']):,.2f}[/bold] "
+        f"({payload['waste_share_of_spend']:.0%} of spend). "
+        f"Monthly projection: ${float(payload['monthly_projected_savings_usd']):,.2f}."
+    )
+    if not payload["findings"]:
+        local_console.print("[green]No quantified waste detected.[/green]")
+        return buffer.getvalue()
+    table = Table(show_lines=False, expand=False)
+    table.add_column("Code")
+    table.add_column("Severity")
+    table.add_column("Impact", justify="right")
+    table.add_column("Monthly", justify="right")
+    table.add_column("Action")
+    for item in payload["findings"]:
+        table.add_row(
+            item["code"],
+            item["severity"],
+            f"${float(item['impact_usd_exact']):,.2f}",
+            f"${float(item['monthly_projected_savings_usd']):,.2f}",
+            item["payback_action"],
+        )
+    local_console.print(table)
+    return buffer.getvalue()
+
+
+@app.command()
+def recommend(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
+    output_format: FormatOpt = "markdown",
+    output: OutputOpt = None,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 0,
+    rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
+    include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
+    project: ProjectOpt = None,
+    vendors: VendorOpt = None,
+    top: Annotated[
+        int,
+        typer.Option(
+            "--top-recommendations",
+            "--top-n",
+            "-n",
+            help="Number of recommendations to surface.",
+        ),
+    ] = 5,
+    summary: Annotated[
+        bool,
+        typer.Option(
+            "--summary",
+            help="Render a one-page executive summary (default for `caliper exec`).",
+        ),
+    ] = False,
+) -> None:
+    """Top-N action-first recommendations ranked by dollar impact × confidence."""
+    from caliper.efficiency import (
+        monthly_projected_savings_usd,
+        rank_recommendations,
+        run_audit,
+        total_savings_usd,
+    )
+
+    _validate_format(output_format)
+    options = _options(locals())
+    result = _safe_load_usage(options)
+    rate_card = _safe_load_rate_card(options)
+    findings = run_audit(result, options, rate_card)
+    total_spend = aggregate_total(result, options, rate_card=rate_card).costs.cost_usd
+    recs = rank_recommendations(findings, top=top)
+    payload = {
+        "recommendations": [
+            {
+                **dataclasses.asdict(rec),
+                "impact_usd_exact": str(rec.impact_usd_exact),
+                "monthly_projected_savings_usd": str(rec.monthly_projected_savings_usd),
+            }
+            for rec in recs
+        ],
+        "total_savings_usd": str(total_savings_usd(findings)),
+        "monthly_projected_savings_usd": str(monthly_projected_savings_usd(findings)),
+        "total_spend_usd": str(total_spend),
+        "summary": summary,
+    }
+    text = _render_recommend(payload, output_format)
+    if output:
+        output.expanduser().write_text(text)
+    else:
+        typer.echo(text, nl=False)
+
+
+def _render_recommend(payload: dict[str, Any], output_format: str) -> str:
+    if output_format in {"json", "compat-json"}:
+        return json_dumps_enveloped(payload) + "\n"
+    if output_format == "csv":
+        return records_to_csv(payload["recommendations"])
+    if output_format == "markdown":
+        return _recommend_markdown(payload)
+    return _recommend_table(payload)
+
+
+def _recommend_markdown(payload: dict[str, Any]) -> str:
+    total = float(payload["total_savings_usd"])
+    monthly = float(payload["monthly_projected_savings_usd"])
+    spend = float(payload["total_spend_usd"])
+    share = (total / spend) if spend > 0 else 0.0
+    lines: list[str] = []
+    if payload["summary"]:
+        lines.append("# Caliper executive summary")
+        lines.append("")
+        lines.append(
+            f"**Window spend**: ${spend:,.2f} • **Quantified waste**: ${total:,.2f} "
+            f"({share:.0%}) • **Monthly projection**: ${monthly:,.2f}."
+        )
+        lines.append("")
+        lines.append("## Top actions")
+    else:
+        lines.append("## Recommendations")
+    if not payload["recommendations"]:
+        lines.append("_No actionable savings opportunities in this window._")
+        return "\n".join(lines) + "\n"
+    for rec in payload["recommendations"]:
+        lines.append(
+            f"{rec['rank']}. **{rec['payback_action']}** — saves "
+            f"${float(rec['impact_usd_exact']):,.2f} "
+            f"(${float(rec['monthly_projected_savings_usd']):,.2f}/month, "
+            f"confidence {rec['confidence']})."
+        )
+        lines.append(f"   - {rec['detail']}")
+    return "\n".join(lines) + "\n"
+
+
+def _recommend_table(payload: dict[str, Any]) -> str:
+    buffer = io.StringIO()
+    local_console = Console(file=buffer, width=140, _environ={})
+    total = float(payload["total_savings_usd"])
+    monthly = float(payload["monthly_projected_savings_usd"])
+    local_console.print("[bold]Caliper - Recommendations[/bold]")
+    local_console.print(
+        f"Window saving available: [bold]${total:,.2f}[/bold]. Monthly projection: ${monthly:,.2f}."
+    )
+    if not payload["recommendations"]:
+        local_console.print("[green]No actionable savings in this window.[/green]")
+        return buffer.getvalue()
+    table = Table(show_lines=False, expand=False)
+    table.add_column("#", justify="right")
+    table.add_column("Action")
+    table.add_column("Saving", justify="right")
+    table.add_column("Monthly", justify="right")
+    table.add_column("Confidence")
+    for rec in payload["recommendations"]:
+        table.add_row(
+            str(rec["rank"]),
+            rec["payback_action"],
+            f"${float(rec['impact_usd_exact']):,.2f}",
+            f"${float(rec['monthly_projected_savings_usd']):,.2f}",
+            rec["confidence"],
+        )
+    local_console.print(table)
+    return buffer.getvalue()
+
+
+@app.command(name="exec")
+def exec_command(
+    since: SinceOpt = None,
+    until: UntilOpt = None,
+    days: DaysOpt = None,
+    timezone: TimezoneOpt = "local",
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    pricing_mode: PricingModeOpt = "model",
+    service_tier: ServiceTierOpt = "auto",
+    unknown_service_tier: UnknownTierOpt = "current-config",
+    tier_overrides: TierOverridesOpt = None,
+    rates_file: RatesFileOpt = None,
+    no_dedupe: NoDedupeOpt = False,
+    no_parse_cache: NoParseCacheOpt = False,
+    default_model: DefaultModelOpt = "gpt-5.5",
+    show_prompts: ShowPromptsOpt = False,
+    show_paths: ShowPathsOpt = False,
+    offline: OfflineOpt = True,
+    compact: CompactOpt = False,
+    width: WidthOpt = None,
+    top_threads: TopThreadsOpt = 0,
+    rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
+    include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
+    project: ProjectOpt = None,
+    vendors: VendorOpt = None,
+    output: OutputOpt = None,
+) -> None:
+    """One-pager executive summary. Alias for ``recommend --summary --top 5``."""
+    recommend(
+        since=since,
+        until=until,
+        days=days,
+        timezone=timezone,
+        output_format="markdown",
+        output=output,
+        session_root=session_root,
+        state_db=state_db,
+        codex_config=codex_config,
+        config=config,
+        pricing_mode=pricing_mode,
+        service_tier=service_tier,
+        unknown_service_tier=unknown_service_tier,
+        tier_overrides=tier_overrides,
+        rates_file=rates_file,
+        no_dedupe=no_dedupe,
+        no_parse_cache=no_parse_cache,
+        default_model=default_model,
+        show_prompts=show_prompts,
+        show_paths=show_paths,
+        offline=offline,
+        compact=compact,
+        width=width,
+        top_threads=top_threads,
+        rate_limit_sample_limit=rate_limit_sample_limit,
+        include_all_rate_limit_samples=include_all_rate_limit_samples,
+        project=project,
+        vendors=vendors,
+        top=5,
+        summary=True,
+    )

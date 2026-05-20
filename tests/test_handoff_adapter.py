@@ -226,7 +226,8 @@ def test_build_model_rows_are_sorted_by_cost_then_usage() -> None:
     assert [row.model for row in rows] == ["model-a", "model-c", "model-b"]
 
 
-def test_build_project_rows_are_sorted_by_cost_then_activity() -> None:
+def test_build_project_rows_are_sorted_by_cost_then_activity(tmp_path) -> None:
+    options = _options(tmp_path)
     rows = _build_project_rows(
         [
             _aggregate("/tmp/project-b", cost=3.0, events=10, tokens=100, sessions=1),
@@ -235,6 +236,8 @@ def test_build_project_rows_are_sorted_by_cost_then_activity() -> None:
         ],
         _empty_load_result(),
         show_paths=True,
+        options=options,
+        daily_by_project={},
     )
 
     assert [row.name for row in rows] == ["project-a", "project-c", "project-b"]
@@ -276,6 +279,50 @@ def test_build_handoff_dashboard_adds_rolling_usage_windows(monkeypatch, tmp_pat
     assert by_label["Last 7 days"].events == 1
     assert by_label["Last 30 days"].events == 2
     assert by_label["Last 90 days"].events == 2
+
+
+def test_build_handoff_dashboard_adds_project_tracking_and_anomalies(monkeypatch, tmp_path) -> None:
+    rows = []
+    for offset in range(7):
+        row = _row(
+            i=offset + 1,
+            cwd="/tmp/project-alpha",
+            timestamp=f"2026-05-{10 + offset:02d}T10:00:00.000Z",
+        )
+        row["sessionId"] = f"s{offset + 1}"
+        row["message"]["usage"]["input_tokens"] = 100
+        rows.append(row)
+    spike = _row(
+        i=20,
+        cwd="/tmp/project-alpha",
+        timestamp="2026-05-17T10:00:00.000Z",
+    )
+    spike["sessionId"] = "huge"
+    spike["message"]["usage"]["input_tokens"] = 10_000_000
+    rows.append(spike)
+    _write_session(tmp_path, rows)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    options = build_options(
+        since="2026-05-10",
+        until="2026-05-18",
+        timezone="UTC",
+        session_root=tmp_path / "missing-codex",
+        state_db=tmp_path / "missing-state.sqlite",
+        codex_config=tmp_path / "missing-config.toml",
+        vendors=[VENDOR_CLAUDE_CODE],
+        no_parse_cache=True,
+    )
+    result = load_usage(options)
+
+    d = build_handoff_dashboard(result, options, with_deltas=False)
+
+    project = next(row for row in d.by_project if row.name == "project-alpha")
+    assert project.active_days == 8
+    assert project.daily_mean_cost_usd > 0
+    assert project.projected_30d_cost_usd > 0
+    assert len(project.daily_cost_sparkline) == (options.end.date() - options.start.date()).days
+    assert any(row.kind == "Project-day spike" for row in d.anomalies)
+    assert any(row.kind == "Session spike" for row in d.anomalies)
 
 
 def test_build_handoff_dashboard_rolling_windows_are_deduped(monkeypatch, tmp_path) -> None:

@@ -269,6 +269,7 @@ def _turn_facts_from_message(
 ) -> TurnFacts:
     content = message.get("content")
     tool_names: list[str] = []
+    skill_names: list[str] = []
     tool_use_count = 0
     has_thinking = False
     if isinstance(content, list):
@@ -281,15 +282,36 @@ def _turn_facts_from_message(
                 name = block.get("name")
                 if isinstance(name, str) and name:
                     tool_names.append(name)
+                if name == "Skill":
+                    skill_name = _skill_name_from_tool_use(block)
+                    if skill_name:
+                        skill_names.append(skill_name)
             elif block_type == "thinking":
                 has_thinking = True
     return TurnFacts(
         turn_index=turn_index,
         parent_uuid=str(raw.get("parentUuid") or ""),
         tool_use_count=tool_use_count,
-        tool_names=tuple(sorted(set(tool_names))),
+        tool_names=tuple(tool_names),
+        skill_names=tuple(skill_names),
         has_thinking_block=has_thinking,
     )
+
+
+def _skill_name_from_tool_use(block: dict[str, Any]) -> str:
+    """Extract only the skill identifier from a Claude Code Skill tool call.
+
+    The input payload can contain arguments or free-form text. Caliper keeps
+    only the skill name and drops everything else.
+    """
+    raw_input = block.get("input")
+    if not isinstance(raw_input, dict):
+        return ""
+    for key in ("skill", "name", "skill_name"):
+        value = raw_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:120]
+    return ""
 
 
 def _usage_from_claude(raw: dict[str, Any]) -> Usage:

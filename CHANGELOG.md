@@ -2,6 +2,138 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.40 - 2026-05-20
+
+### Added (dashboard power-ups — 12 capabilities across 5 phases)
+
+**Phase 1 — quick wins (data already computed):**
+
+- **Cost-weighted seasonality matrix.** New `Spend seasonality` section
+  surfaces `predict.decompose_seasonality` as a 7×24 hour-of-day +
+  day-of-week heat grid plus hour and day strips, all in dollars
+  (distinct from the event-count Recap heatmap). Highlights peak hour,
+  peak day, off-peak share, and total spend in the window.
+- **Rate-limit ETA confidence band.** Rate-limit section now shows a
+  "Time to exhaustion" block per window with low/mid/high hours, a
+  confidence chip (low/medium/high), burn rate, and sample count.
+  Powered by `predict.forecast_rate_limits` — `low` confidence swaps
+  the ETA for a "needs more samples" message instead of a wild number.
+- **Model row sparkline parity.** `Models & tiers` table now carries a
+  per-model 30-day cost sparkline so the row gets the same trend
+  affordance that projects and usage-mix already had.
+- **Service-tier provenance bar.** New `Service-tier provenance`
+  section renders a horizontal stacked bar of where each event's tier
+  was resolved (CLI override → JSON override → logged → codex config →
+  assumed default), with a labelled legend.
+
+**Phase 2 — forecast depth:**
+
+- **Per-model demand forecast strip.** New `Model demand forecasts`
+  section: small-multiples grid of the top 8 models by cost, each card
+  carrying a 30-day OLS projection, ±σ band, EWMA midpoint, trend
+  slope chip, and daily cost sparkline.
+- **Portfolio 30/90-day outlook.** New `Portfolio outlook` section
+  surfaces `predict.total_outlook` as two side-by-side cards: 30-day
+  near-term + 90-day medium-term spend, each with linear midpoint, ±σ
+  band, and EWMA companion.
+- **Per-project forecast confidence bands.** `Projects` rows now carry
+  a low/medium/high confidence chip and a `($low – $high)` ±σ band on
+  the projected 30-day cost, fed by `predict.forecast_project_burn`.
+
+**Phase 3 — efficiency depth:**
+
+- **Prompt-rot curve sparkline.** Inefficiency cards with code
+  `PROMPT_ROT` now embed a median per-turn input-token curve so
+  reviewers can see the growth shape, not just the dollar impact.
+- **Cache leverage by session.** New `Cache leverage` section ranks
+  the top 8 sessions by realised cache savings, with hit-rate chip
+  and stacked cached/paid input bar.
+- **Long-context input-token histogram.** New `Input-token
+  distribution` section: log-spaced bins of per-event input tokens
+  with the long-context threshold marked; share-above-threshold for
+  both events and spend.
+
+**Phase 4 — cohort + attribution depth:**
+
+- **Cohort delta table.** New `Cohort delta` section: side-by-side
+  comparison of the selected window vs. the prior equal window across
+  cost, tokens, events, sessions, and cache hit rate. Emitted only
+  when `with_deltas=True` and the prior window has activity.
+- **Agent row sparklines.** `Agents & overhead` table now carries a
+  per-agent daily cost sparkline column for trend at a glance.
+
+### Changed
+
+- `Dashboard.caliper.schema_version` bumped `2 → 3` to reflect the new
+  top-level fields (`seasonality`, `tier_provenance`, `outlook`,
+  `model_forecasts`, `cache_leverage`, `long_context_histogram`,
+  `cohort_deltas`) and the extended `RateLimitPressure.forecasts`,
+  `ModelRow.daily_cost_sparkline`, `AgentRow.daily_cost_sparkline`,
+  `ProjectRow.projected_30d_low/high/forecast_confidence`,
+  `InefficiencyRow.curve`.
+
+### Tests
+
+- 50+ new tests across
+  `tests/test_dashboard_phase{1,2,3,4}_*.py`. Full suite at 844 tests,
+  coverage 88%+.
+
+## 0.0.39 - 2026-05-20
+
+### Added
+
+- **HTML-everywhere reporting.** Every grouped command now accepts
+  `--format html` (overview, daily, weekly, monthly, session, project,
+  models, insights, limits, tail, forecast, compare, whatif) and emits
+  the same polished, self-contained dashboard chrome that
+  `caliper dashboard` produces. The audience lens is defaulted per
+  command (executive for overview/insights, engineer for daily/weekly/
+  limits/tail, finance for monthly/models/forecast/compare/whatif,
+  audit for session/project). New module `caliper.html_export` is the
+  single dispatch point — `render_command_html(result, options, *,
+  command, share_safe=True)`. `export receipt --format html` now
+  routes through the same chrome (markdown receipt unchanged).
+- **Multi-stage progress, on every long-running command.** A new
+  `--progress` flag forces the multi-stage stderr widget on (parse →
+  aggregate → analyse → render → write) even when piping JSON or
+  writing to a file, so users never feel the CLI is hanging. `--quiet`
+  silences progress unconditionally. The existing TTY + classic-table
+  auto-detect is preserved for back-compat. `caliper dashboard` now
+  surfaces progress for both of its parse passes plus the build /
+  render stages. Backed by the extended `ParseProgress` Protocol
+  (`stage_start` / `stage_advance` / `stage_done`) and the new
+  `CliReportProgress` Rich widget; legacy `CliParseProgress` callers
+  keep working unchanged.
+- **Unified `--share-safe` flag.** Every HTML-emitting command now
+  defaults to share-safe (paths, project names, session labels,
+  prompts redacted). Pass `--no-share-safe` to expose the real values
+  for local-only renders. `export receipt --show-sensitive` is now an
+  alias for `--no-share-safe` and emits a one-line stderr deprecation
+  note. `caliper dashboard` no longer defaults to leaking labels.
+- New `caliper predict` command — per-model OLS demand forecast,
+  seasonality decomposition (local-TZ hour/dow), rate-limit exhaustion
+  ETA with low/mid/high confidence band, and 30/90-day cost outlooks.
+  Pure stdlib, offline.
+- New `caliper audit` command — seven quantified inefficiency finders
+  (`LONG_CONTEXT_MISFIRE`, `REASONING_WASTE`, `LOW_CACHE_REUSE`,
+  `MODEL_OVERSELECTION`, `TIER_MISMATCH`, `DUPLICATE_SESSIONS`,
+  `PROMPT_ROT`). Every finding quotes an exact dollar saving and a
+  monthly projection. `--strict --waste-threshold-usd` for CI gating.
+- New `caliper recommend` command — action-first top-N
+  recommendations ranked by dollar impact × confidence, with a
+  `--summary` flag that renders a stakeholder-ready one-pager.
+- New `caliper exec` shortcut — aliases `recommend --summary --top 5`
+  for board / leadership-ready output.
+- New `caliper.patterns`, `caliper.predict`, `caliper.anomaly`, and
+  `caliper.efficiency` pure modules; new value objects
+  (`ModelDemandForecast`, `SeasonalityProfile`, `RateLimitForecast`,
+  `Anomaly`, `Finding`, `Recommendation`, `SessionShapeCluster`).
+- Dashboard advisor and decision queue now compose efficiency findings
+  alongside the existing arbitrage hints, so the top of the
+  dashboard reflects real fixable spend.
+- Two new insights: "fixable waste" on the home scope, and
+  "demand is growing" on the models scope.
+
 ## 0.0.38 - 2026-05-18
 
 ### Added
@@ -196,7 +328,7 @@ dashboard replaces the v0.0.28 wedge; the offline invariant is unchanged.
 - `caliper shape --output-format json` for machine-readable session shape.
 - Tool-use extraction from Claude Code message blocks (counts and tool
   names only — never tool arguments).
-- Per-day cache hit rate sparkline (replaces the prior flat
+- Per-day cached-input share sparkline (replaces the prior flat
   approximation).
 - Per-project top-3 tools, keyed by full path so two projects sharing a
   basename never share a tool list.

@@ -74,7 +74,7 @@ def test_insights_json_reports_cache_tier_and_project_concentration(tmp_path) ->
     titles = {item["title"] for item in payload["insights"]}
     assert "High cache reuse" in titles
     assert "Service tier inferred" in titles
-    assert any("is 100% of cost" in title for title in titles)  # project concentration
+    assert any("is 100% of selected-window cost" in title for title in titles)
     cache = next(item for item in payload["insights"] if item["title"] == "High cache reuse")
     assert cache["category"] == "cache"
     assert cache["priority"] > 0

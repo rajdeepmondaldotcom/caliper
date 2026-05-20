@@ -80,7 +80,7 @@ def test_tool_use_blocks_are_counted(monkeypatch, tmp_path) -> None:
     first, second = events
     assert first.turn_facts is not None
     assert first.turn_facts.tool_use_count == 2
-    assert first.turn_facts.tool_names == ("Edit", "Read")
+    assert first.turn_facts.tool_names == ("Read", "Edit")
     assert first.turn_facts.has_thinking_block is True
     assert first.turn_facts.parent_uuid == "parent-1"
     assert first.turn_facts.turn_index == 0
@@ -116,6 +116,32 @@ def test_tool_use_input_is_never_captured(monkeypatch, tmp_path) -> None:
     # No field on turn_facts should contain prompt content.
     for value in vars(event.turn_facts).values():
         assert SECRET not in repr(value)
+
+
+def test_skill_tool_records_only_skill_name(monkeypatch, tmp_path) -> None:
+    _write_session(
+        tmp_path,
+        [
+            _base_row(
+                line_number=1,
+                content=[
+                    {
+                        "type": "tool_use",
+                        "name": "Skill",
+                        "input": {"skill": "review", "args": SECRET},
+                    },
+                ],
+            ),
+        ],
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+
+    result = load_usage(_options(tmp_path))
+
+    event = result.events[0]
+    assert event.turn_facts is not None
+    assert event.turn_facts.skill_names == ("review",)
+    assert SECRET not in repr(event.turn_facts)
 
 
 def test_missing_content_yields_empty_turn_facts(monkeypatch, tmp_path) -> None:

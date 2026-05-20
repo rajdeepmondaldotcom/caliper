@@ -63,7 +63,7 @@ caliper doctor
 
 AI coding tools are good at spending tokens and bad at explaining the bill.
 Vendor dashboards are per-tool, per-account, and behind logins. They do not
-know your local git history, project folders, pull requests, cache hit rate, or
+know your local git history, project folders, pull requests, cached-input share, or
 evidence quality.
 
 Caliper is the missing local ledger.
@@ -178,9 +178,9 @@ caliper insights
 ```
 
 ```text
-High cache reuse: 72.4% of input tokens served from cache,
-saving about $612. Keep prompts and file context stable
-to preserve cache hits.
+High cache reuse: 72.4% of input tokens were recorded as cached input,
+with an estimated $612 cache benefit. Keep prompts and file context stable
+to preserve cache reads.
 ```
 
 Names and numbers above are sanitized examples.
@@ -360,6 +360,13 @@ current local month to now.
 ## Exports
 
 ```bash
+# Every grouped report now supports --format html — emits a self-contained,
+# share-safe dashboard page (no CDN, no JS deps, inline styles).
+caliper daily   --format html --out daily.html
+caliper models  --format html --out models.html --no-share-safe   # local-only
+caliper monthly --format html > may.html
+
+# Monthly receipt + dedicated dashboard + integrations.
 caliper export receipt --receipt-month 2026-05 --receipt-format html
 caliper export prometheus --metrics-port 9090
 caliper export grafana
@@ -367,9 +374,21 @@ caliper export grafana
 
 | Exporter | Reads usage logs? | Output |
 |---|---:|---|
+| `<command> --format html` | yes | Self-contained dashboard for any grouped command |
+| `dashboard` | yes | Polished interactive dashboard (full chrome) |
 | `export receipt` | yes | Markdown or HTML monthly receipt |
 | `export prometheus` | yes | Local `/metrics` server |
 | `export grafana` | no | Static Grafana dashboard JSON |
+
+### Loading visibility
+
+Every long-running command honors `--progress` / `--quiet`. The
+`--progress` flag forces a multi-stage stderr widget on (parse →
+aggregate → analyse → render → write) so users never wonder what the
+CLI is doing — even when piping JSON or writing to a file. `--quiet`
+silences progress entirely. Without either flag, progress
+auto-activates only for the classic TTY + table path, preserving the
+existing default.
 
 The optional Prometheus dependency is available as an extra:
 
@@ -430,7 +449,7 @@ The public import path is `caliper`. Core dataclasses are frozen.
 - Engineering managers who need cost per PR, not per vendor account.
 - Teams with strict data policies that cannot upload prompts to another
   analytics service.
-- Anyone trying to understand whether model choice, service tier, cache hits,
+- Anyone trying to understand whether model choice, service tier, cache reads,
   or project shape is driving spend.
 
 ## Who It Is Not For

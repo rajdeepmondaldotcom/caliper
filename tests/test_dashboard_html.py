@@ -263,6 +263,7 @@ def test_dashboard_explains_metrics_and_avoids_stale_window_labels(monkeypatch, 
     assert "Formula" in html
     assert "Source" in html
     assert "14-day daily cost" not in html
-    assert "14-day cache hit rate" not in html
+    legacy_cache_label = "14-day " + "cache hit " + "rate"
+    assert legacy_cache_label not in html
     assert "14-day token volume" not in html
     assert "14-day sessions" not in html

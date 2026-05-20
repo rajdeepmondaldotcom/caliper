@@ -42,7 +42,14 @@ from caliper.analysis.session_shape import (
     category_label,
     compute_session_shape,
 )
+from caliper.anomaly import (
+    detect_daily_anomalies,
+    detect_model_anomalies,
+    detect_project_daily_anomalies,
+    detect_session_anomalies,
+)
 from caliper.arbitrage import recommend as recommend_arbitrage
+from caliper.attribution import build_agent_attributions, build_skill_attributions
 from caliper.budgets import (
     SEVERITY_BREACH,
     SEVERITY_WARN,
@@ -56,10 +63,14 @@ from caliper.budgets import (
 )
 from caliper.dashboards.data_models import (
     AdvisorRecommendation,
+    AgentRow,
+    AnomalyRow,
     Banner,
     BriefFinding,
+    CacheLeverageRow,
     CaliperMeta,
     CategoryCount,
+    CohortDeltaRow,
     CommandCenterCard,
     ComparisonSignal,
     DailyPoint,
@@ -68,20 +79,30 @@ from caliper.dashboards.data_models import (
     EvidenceRow,
     ExecutiveBrief,
     Forecast,
+    ForecastDriverRow,
     HeatCell,
     HourCell,
     ImpactCard,
+    InefficiencyRow,
     Insight,
+    LongContextHistogram,
     MixRow,
+    ModelForecastRow,
     ModelRow,
+    Outlook,
+    OutlookHorizon,
     ProjectRow,
     QualityScore,
     QualitySignal,
+    RateLimitForecastBand,
     RateLimitPressure,
     Recap,
     RecapStat,
+    SeasonalitySection,
     SessionRow,
     SessionShape,
+    SkillRow,
+    TierProvenance,
     ToolCount,
     Totals,
     UsageWindow,
@@ -91,9 +112,17 @@ from caliper.dashboards.data_models import (
 from caliper.evidence import evidence_dimensions
 from caliper.forecasts import project as project_forecast
 from caliper.health import rate_card_age_days
+from caliper.inefficiencies import build_inefficiency_findings
 from caliper.insights import build_insights
 from caliper.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions
 from caliper.parser import load_usage
+from caliper.predict import (
+    decompose_seasonality,
+    forecast_per_model,
+    forecast_project_burn,
+    forecast_rate_limits,
+    total_outlook,
+)
 from caliper.pricing import RateCard, load_rate_card, model_vendor
 
 # ---------------------------------------------------------------------------
@@ -184,11 +213,41 @@ def build_handoff_dashboard(
     )
 
     shape = _build_session_shape(shape_report)
-    by_model = _build_model_rows(aggregate_model_mode(result, options, rate_card=rate_card))
+    model_daily_cost = _daily_cost_sparkline_by_key(
+        result,
+        options,
+        rate_card,
+        lambda event: (event.model or "unknown", event.model or "unknown"),
+    )
+    by_model = _build_model_rows(
+        aggregate_model_mode(result, options, rate_card=rate_card),
+        daily_by_model=model_daily_cost,
+    )
+    project_daily_cost = _daily_cost_sparkline_by_key(
+        result,
+        options,
+        rate_card,
+        lambda event: (event.thread.cwd or UNKNOWN_PROJECT, event.thread.cwd or UNKNOWN_PROJECT),
+    )
+    project_aggregates = aggregate_projects(result, options, rate_card=rate_card)
+    project_forecast_bands = _build_project_forecast_bands(
+        project_aggregates,
+        options,
+        project_daily_cost,
+    )
     by_project = _build_project_rows(
-        aggregate_projects(result, options, rate_card=rate_card),
+        project_aggregates,
         result,
         show_paths=options.show_paths,
+        options=options,
+        daily_by_project=project_daily_cost,
+        forecast_bands=project_forecast_bands,
+    )
+    anomalies = _build_anomaly_rows(
+        result=result,
+        options=options,
+        rate_card=rate_card,
+        daily_aggregates=daily_aggregates,
     )
     insights = _build_insights(result, options, rate_card)
     forecast = _build_forecast(daily_points, options)
@@ -208,9 +267,24 @@ def build_handoff_dashboard(
         rate_card=rate_card,
         budget_config=budget_config,
     )
-    advisor_recommendations = _build_advisor_recommendations(result, rate_card)
+    advisor_recommendations = _build_advisor_recommendations(result, rate_card, options)
     top_sessions = _build_top_sessions(result, options, rate_card)
     usage_mix = _build_usage_mix(result, options, rate_card)
+    agent_rows = _build_agent_rows(result, rate_card, options=options)
+    skill_rows = _build_skill_rows(result, rate_card)
+    inefficiency_rows = _build_inefficiency_rows(
+        result,
+        options,
+        rate_card,
+        budget_config=budget_config,
+    )
+    forecast_drivers = _build_forecast_drivers(
+        by_project=by_project,
+        by_model=by_model,
+        agents=agent_rows,
+        skills=skill_rows,
+        options=options,
+    )
     rate_limit_pressure = _build_rate_limit_pressure(result)
     quality_score = _build_quality_score(result, total, evidence)
     command_center = _build_command_center(
@@ -218,6 +292,8 @@ def build_handoff_dashboard(
         usage_windows=usage_windows,
         impact_cards=impact_cards,
         advisor_recommendations=advisor_recommendations,
+        inefficiencies=inefficiency_rows,
+        anomalies=anomalies,
         top_sessions=top_sessions,
         rate_limit_pressure=rate_limit_pressure,
         quality_score=quality_score,
@@ -235,6 +311,8 @@ def build_handoff_dashboard(
         total=total,
         impact_cards=impact_cards,
         advisor_recommendations=advisor_recommendations,
+        inefficiencies=inefficiency_rows,
+        anomalies=anomalies,
         top_sessions=top_sessions,
         by_project=by_project,
         by_model=by_model,
@@ -248,9 +326,16 @@ def build_handoff_dashboard(
         decision_queue=decision_queue,
         comparisons=comparisons,
     )
+    seasonality = _build_seasonality(result, options, rate_card)
+    tier_provenance = _build_tier_provenance(result)
+    outlook = _build_outlook(daily_points)
+    model_forecasts = _build_model_forecasts(result, options, rate_card, by_model)
+    cache_leverage = _build_cache_leverage(result, options, rate_card)
+    long_context_histogram = _build_long_context_histogram(result, rate_card)
+    cohort_deltas = _build_cohort_deltas(result, options, rate_card, total) if with_deltas else []
 
     return Dashboard(
-        caliper=CaliperMeta(version=__version__, schema_version=2),
+        caliper=CaliperMeta(version=__version__, schema_version=3),
         window=_build_window(options, result),
         generated_at=(generated_at or dt.datetime.now(tz=dt.UTC)).isoformat(timespec="seconds"),
         totals=totals,
@@ -258,6 +343,7 @@ def build_handoff_dashboard(
         shape=shape,
         by_model=by_model,
         by_project=by_project,
+        anomalies=anomalies,
         insights=insights,
         forecast=forecast,
         evidence=evidence,
@@ -267,6 +353,10 @@ def build_handoff_dashboard(
         advisor_recommendations=advisor_recommendations,
         top_sessions=top_sessions,
         usage_mix=usage_mix,
+        agents=agent_rows,
+        skills=skill_rows,
+        inefficiencies=inefficiency_rows,
+        forecast_drivers=forecast_drivers,
         rate_limit_pressure=rate_limit_pressure,
         quality_score=quality_score,
         executive_brief=executive_brief,
@@ -276,6 +366,13 @@ def build_handoff_dashboard(
         recap=recap,
         banner=banner,
         show_paths=options.show_paths,
+        seasonality=seasonality,
+        tier_provenance=tier_provenance,
+        outlook=outlook,
+        model_forecasts=model_forecasts,
+        cache_leverage=cache_leverage,
+        long_context_histogram=long_context_histogram,
+        cohort_deltas=cohort_deltas,
     )
 
 
@@ -352,7 +449,7 @@ def _daily_cache_sparkline(
     options: RuntimeOptions,
     daily_points: list[DailyPoint],
 ) -> list[float]:
-    """True per-day cache hit rate, zero-filled across the window.
+    """Per-day cached-input share, zero-filled across the window.
 
     Per-day = ``cached_input_tokens / input_tokens`` computed from raw
     events grouped by local-tz day. A day with no input tokens (or no
@@ -615,8 +712,13 @@ def _build_session_shape(report: SessionShapeReport) -> SessionShape:
 # ---------------------------------------------------------------------------
 
 
-def _build_model_rows(aggregates: list[Aggregate]) -> list[ModelRow]:
+def _build_model_rows(
+    aggregates: list[Aggregate],
+    *,
+    daily_by_model: dict[str, list[float]] | None = None,
+) -> list[ModelRow]:
     rows: list[ModelRow] = []
+    daily_by_model = daily_by_model or {}
     for agg in aggregates:
         if agg.totals.events == 0:
             continue
@@ -625,6 +727,7 @@ def _build_model_rows(aggregates: list[Aggregate]) -> list[ModelRow]:
         vendor = next(iter(agg.model_vendors), "") or model_vendor(model)
         input_tokens = agg.totals.input_tokens
         cache_hit_rate = agg.totals.cached_input_tokens / input_tokens if input_tokens else 0.0
+        sparkline = list(daily_by_model.get(model, ()))
         rows.append(
             ModelRow(
                 vendor=vendor,
@@ -634,6 +737,7 @@ def _build_model_rows(aggregates: list[Aggregate]) -> list[ModelRow]:
                 events=agg.totals.events,
                 tokens=agg.totals.total_tokens,
                 cache_hit_rate=cache_hit_rate,
+                daily_cost_sparkline=sparkline,
             )
         )
     return sorted(
@@ -652,6 +756,9 @@ def _build_project_rows(
     result: LoadResult,
     *,
     show_paths: bool,
+    options: RuntimeOptions,
+    daily_by_project: dict[str, list[float]],
+    forecast_bands: dict[str, tuple[float, float, str]] | None = None,
 ) -> list[ProjectRow]:
     """Map our project aggregates + per-project tool counters into rows.
 
@@ -663,22 +770,41 @@ def _build_project_rows(
     from collections import Counter
 
     from caliper.models import project_name_from_path
+    from caliper.timeutil import load_timezone
 
+    tz = load_timezone(options.timezone)
     tools_by_path: dict[str, Counter[str]] = {}
+    active_days_by_path: dict[str, set[dt.date]] = {}
     for event in result.events:
+        path = event.thread.cwd or UNKNOWN_PROJECT
+        active_days_by_path.setdefault(path, set()).add(event.timestamp.astimezone(tz).date())
         if event.turn_facts is None:
             continue
-        path = event.thread.cwd or ""
         bucket = tools_by_path.setdefault(path, Counter())
         for tool_name in event.turn_facts.tool_names:
             bucket[tool_name] += 1
 
+    start_day = options.start.astimezone(tz).date()
+    end_day = options.end.astimezone(tz).date()
+    window_days = max(1, (end_day - start_day).days)
     rows: list[ProjectRow] = []
     for agg in aggregates:
         if agg.totals.events == 0:
             continue
         path_str = agg.label
         name = project_name_from_path(path_str) if path_str else UNKNOWN_PROJECT
+        series = daily_by_project.get(path_str, [0.0] * window_days)
+        if len(series) < window_days:
+            series = series + [0.0] * (window_days - len(series))
+        active_days = len(active_days_by_path.get(path_str, set()))
+        daily_mean = float(agg.costs.cost_usd) / window_days
+        projected_30d = daily_mean * 30.0
+        trend_label, trend_tone = _project_trend_label(series)
+        last_seen = (
+            agg.last_seen.astimezone(tz).strftime("%Y-%m-%d %H:%M")
+            if agg.last_seen is not None
+            else ""
+        )
         top_tools_raw = sorted(
             tools_by_path.get(path_str, Counter()).items(),
             key=lambda item: (-item[1], item[0]),
@@ -687,6 +813,11 @@ def _build_project_rows(
             ToolCount(name=tname, count=count, category=tool_category(tname))  # type: ignore[arg-type]
             for tname, count in top_tools_raw
         ]
+        band = (forecast_bands or {}).get(path_str)
+        if band is not None:
+            low, high, confidence = band
+        else:
+            low, high, confidence = 0.0, 0.0, ""
         rows.append(
             ProjectRow(
                 name=name,
@@ -695,12 +826,44 @@ def _build_project_rows(
                 events=agg.totals.events,
                 sessions=len(agg.session_ids),
                 top_tools=top_tools,
+                active_days=active_days,
+                last_seen=last_seen,
+                daily_mean_cost_usd=daily_mean,
+                projected_30d_cost_usd=projected_30d,
+                trend_label=trend_label,
+                trend_tone=trend_tone,  # type: ignore[arg-type]
+                daily_cost_sparkline=series,
+                projected_30d_low=low,
+                projected_30d_high=high,
+                forecast_confidence=confidence,
             )
         )
     return sorted(
         rows,
         key=lambda row: (-row.cost_usd, -row.events, -row.sessions, row.name, row.path or ""),
     )[:15]
+
+
+def _project_trend_label(series: list[float]) -> tuple[str, str]:
+    """Compare the latest seven selected-window days with the prior seven.
+
+    The label is intentionally conservative: without two complete
+    seven-day slices, the dashboard says so instead of implying a trend.
+    """
+    if len(series) < 14:
+        return "needs 14d history", "neutral"
+    recent = series[-7:]
+    prior = series[-14:-7]
+    recent_mean = sum(recent) / 7.0
+    prior_mean = sum(prior) / 7.0
+    if recent_mean <= 0 and prior_mean <= 0:
+        return "flat vs prior 7d", "neutral"
+    if prior_mean <= 0:
+        return "new activity in last 7d", "warn"
+    delta = (recent_mean - prior_mean) / prior_mean
+    if abs(delta) < 0.05:
+        return "flat vs prior 7d", "neutral"
+    return f"{_format_signed_pct(delta)} vs prior 7d", ("warn" if delta > 0 else "good")
 
 
 # ---------------------------------------------------------------------------
@@ -788,7 +951,10 @@ def _cost_driver_card(
         return ImpactCard(
             label="Cost driver",
             value=top_project.name,
-            detail=f"{_format_money(top_project.cost_usd)} · {_format_pct_round(share)} of cost",
+            detail=(
+                f"{_format_money(top_project.cost_usd)} · "
+                f"{_format_pct_round(share)} of selected-window cost"
+            ),
             tone="warn" if share >= 0.5 else "neutral",
         )
     if by_model:
@@ -797,7 +963,10 @@ def _cost_driver_card(
         return ImpactCard(
             label="Cost driver",
             value=_humanize_model(top_model.model),
-            detail=f"{_format_money(top_model.cost_usd)} · {_format_pct_round(share)} of cost",
+            detail=(
+                f"{_format_money(top_model.cost_usd)} · "
+                f"{_format_pct_round(share)} of selected-window cost"
+            ),
             tone="warn" if share >= 0.5 else "neutral",
         )
     return ImpactCard(
@@ -872,13 +1041,13 @@ def _cache_leverage_card(total: Aggregate) -> ImpactCard:
         return ImpactCard(
             label="Estimated cache savings",
             value=_format_money(savings),
-            detail=f"{_format_pct(cache_hit)} input cache hit rate.",
+            detail=f"{_format_pct(cache_hit)} cached-input share.",
             tone="good",
         )
     return ImpactCard(
         label="Estimated cache savings",
         value="No savings",
-        detail=f"{_format_pct(cache_hit)} input cache hit rate in the selected window.",
+        detail=f"{_format_pct(cache_hit)} cached-input share in the selected window.",
     )
 
 
@@ -954,8 +1123,15 @@ def _format_pct_round(p: float) -> str:
 def _build_advisor_recommendations(
     result: LoadResult,
     rate_card: RateCard,
+    options: RuntimeOptions | None = None,
 ) -> list[AdvisorRecommendation]:
-    """Surface the highest-value arbitrage recommendations for the dashboard."""
+    """Surface the highest-value arbitrage and efficiency recommendations.
+
+    Composes two streams: the arbitrage engine (sibling-model routing
+    hints) and :mod:`caliper.efficiency` (the quantified inefficiency
+    finders). Both produce dollar-anchored guidance; the dashboard
+    advisor slot renders them as a single ranked list.
+    """
     if not result.events:
         return []
     rows: list[AdvisorRecommendation] = []
@@ -975,7 +1151,48 @@ def _build_advisor_recommendations(
                 savings_usd=savings,
             )
         )
+    rows.extend(_efficiency_advisor_rows(result, rate_card, options))
     return sorted(rows, key=lambda row: (-row.savings_usd, -row.confidence, -row.events))
+
+
+def _efficiency_advisor_rows(
+    result: LoadResult,
+    rate_card: RateCard,
+    options: RuntimeOptions | None,
+) -> list[AdvisorRecommendation]:
+    """Adapt :mod:`caliper.efficiency` findings into advisor rows."""
+    if options is None:
+        return []
+    try:
+        from caliper.efficiency import rank_recommendations, run_audit
+    except ImportError:
+        return []
+    try:
+        findings = run_audit(result, options, rate_card)
+    except Exception:
+        return []
+    recs = rank_recommendations(findings, top=5)
+    rows: list[AdvisorRecommendation] = []
+    confidence_floor = {"high": 0.9, "medium": 0.7, "low": 0.55}
+    for rec in recs:
+        savings = float(rec.impact_usd_exact)
+        if savings <= 0:
+            continue
+        action = rec.commands[0] if rec.commands else "caliper audit"
+        rows.append(
+            AdvisorRecommendation(
+                title=rec.payback_action,
+                value=_format_money(savings),
+                detail=rec.detail,
+                action=action,
+                confidence=confidence_floor.get(rec.confidence, 0.6),
+                events=0,
+                sessions=0,
+                tone="good",
+                savings_usd=savings,
+            )
+        )
+    return rows
 
 
 def _build_top_sessions(
@@ -1126,6 +1343,461 @@ def _build_usage_mix(
     return rows
 
 
+def _build_agent_rows(
+    result: LoadResult,
+    rate_card: RateCard,
+    *,
+    options: RuntimeOptions | None = None,
+) -> list[AgentRow]:
+    daily_by_agent = _per_agent_daily_cost(result, rate_card, options) if options else {}
+    rows: list[AgentRow] = []
+    for row in build_agent_attributions(result, rate_card)[:12]:
+        rows.append(
+            AgentRow(
+                agent_id=row.agent_id,
+                source_category=row.source_category,
+                evidence_status=_evidence_literal(row.evidence_status),
+                reason=row.reason,
+                kind=row.kind,
+                cost_usd=float(row.cost_usd),
+                total_tokens=row.total_tokens,
+                events=row.events,
+                tool_calls=row.tool_calls,
+                sessions=row.session_count,
+                daily_cost_sparkline=daily_by_agent.get(row.agent_id, []),
+            )
+        )
+    return rows
+
+
+def _per_agent_daily_cost(
+    result: LoadResult,
+    rate_card: RateCard,
+    options: RuntimeOptions,
+) -> dict[str, list[float]]:
+    """Per-agent daily cost dense series in local TZ."""
+    from caliper.attribution import _agent_identity, _normalize_agent_id
+    from caliper.timeutil import load_timezone
+
+    tz = load_timezone(options.timezone)
+    per_agent: dict[str, dict[dt.date, float]] = {}
+    for event in result.events:
+        identity = _agent_identity(event)
+        if not identity:
+            continue
+        agent_id = (
+            _normalize_agent_id(identity.get("agent_id", "")) if isinstance(identity, dict) else ""
+        )
+        if not agent_id:
+            continue
+        cost, _, _ = event_cost(rate_card, event)
+        local = event.timestamp.astimezone(tz).date()
+        bucket = per_agent.setdefault(agent_id, {})
+        bucket[local] = bucket.get(local, 0.0) + float(cost.cost_usd)
+    out: dict[str, list[float]] = {}
+    for agent_id, by_day in per_agent.items():
+        if not by_day:
+            continue
+        start, end = min(by_day), max(by_day)
+        days = (end - start).days + 1
+        series = [0.0] * days
+        for day, value in by_day.items():
+            series[(day - start).days] = value
+        out[agent_id] = series
+    return out
+
+
+def _build_cohort_deltas(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    total: Aggregate,
+) -> list[CohortDeltaRow]:
+    """Side-by-side comparison vs. the prior equal-length window.
+
+    Best-effort: returns ``[]`` when the prior window parses cleanly to zero
+    activity (avoids meaningless 0→x deltas) or when the prior load fails.
+    """
+    span = options.end - options.start
+    prior_options = dataclasses.replace(
+        options,
+        start=options.start - span,
+        end=options.start,
+    )
+    try:
+        prior = load_usage(prior_options)
+    except Exception:
+        return []
+    prior_total = aggregate_total(prior, prior_options, rate_card=rate_card)
+    if prior_total.totals.events == 0:
+        return []
+
+    def row(
+        label: str,
+        cur: float,
+        prev: float,
+        *,
+        money: bool = False,
+        pct: bool = False,
+        high_bad: bool = True,
+    ) -> CohortDeltaRow:
+        delta_value = cur - prev
+        delta_pct = None if prev == 0 else (cur - prev) / prev
+        if money:
+            cur_s = f"${cur:,.2f}"
+            prev_s = f"${prev:,.2f}"
+        elif pct:
+            cur_s = f"{cur * 100:.1f}%"
+            prev_s = f"{prev * 100:.1f}%"
+        else:
+            cur_s = f"{int(cur):,}"
+            prev_s = f"{int(prev):,}"
+        if delta_pct is None or abs(delta_pct) < 0.01:
+            tone = "neutral"
+        elif (delta_pct > 0) == high_bad:
+            tone = "warn"
+        else:
+            tone = "good"
+        return CohortDeltaRow(
+            label=label,
+            current_value=cur_s,
+            previous_value=prev_s,
+            delta_pct=delta_pct,
+            delta_value=delta_value,
+            tone=tone,  # type: ignore[arg-type]
+        )
+
+    cur_cache = (
+        total.totals.cached_input_tokens / total.totals.input_tokens
+        if total.totals.input_tokens
+        else 0.0
+    )
+    prior_cache = (
+        prior_total.totals.cached_input_tokens / prior_total.totals.input_tokens
+        if prior_total.totals.input_tokens
+        else 0.0
+    )
+    return [
+        row(
+            "Total cost",
+            float(total.costs.cost_usd),
+            float(prior_total.costs.cost_usd),
+            money=True,
+            high_bad=True,
+        ),
+        row(
+            "Total tokens",
+            total.totals.total_tokens,
+            prior_total.totals.total_tokens,
+            high_bad=True,
+        ),
+        row("Events", total.totals.events, prior_total.totals.events, high_bad=True),
+        row(
+            "Sessions",
+            len(total.session_ids),
+            len(prior_total.session_ids),
+            high_bad=False,
+        ),
+        row("Cache hit rate", cur_cache, prior_cache, pct=True, high_bad=False),
+    ]
+
+
+def _build_skill_rows(result: LoadResult, rate_card: RateCard) -> list[SkillRow]:
+    rows: list[SkillRow] = []
+    for row in build_skill_attributions(result, rate_card)[:12]:
+        rows.append(
+            SkillRow(
+                name=row.name,
+                evidence_status=_evidence_literal(row.evidence_status),
+                attribution_method=row.attribution_method,
+                estimated_cost_usd=float(row.cost_usd),
+                median_cost_per_invocation_usd=float(row.median_cost_per_invocation),
+                total_tokens=row.total_tokens,
+                invocations=row.invocation_count,
+                sessions=row.session_count,
+            )
+        )
+    return rows
+
+
+def _build_inefficiency_rows(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    *,
+    budget_config: dict[str, Any] | None,
+) -> list[InefficiencyRow]:
+    rows: list[InefficiencyRow] = []
+    prompt_rot_curve_data = _median_prompt_rot_curve(result)
+    for finding in build_inefficiency_findings(
+        result,
+        options,
+        rate_card,
+        budget_config=budget_config,
+    )[:12]:
+        curve = prompt_rot_curve_data if finding.code == "PROMPT_ROT" else ()
+        rows.append(
+            InefficiencyRow(
+                code=finding.code,
+                severity=finding.severity,
+                evidence_status=_evidence_literal(finding.evidence_status),
+                title=finding.title,
+                detail=finding.detail,
+                action=finding.action,
+                impact_usd=float(finding.impact_usd_exact),
+                monthly_projected_savings_usd=float(finding.monthly_projected_savings_usd),
+                confidence=finding.confidence,
+                sample_size=finding.sample_size,
+                baseline=finding.baseline,
+                curve=curve,
+            )
+        )
+    return rows
+
+
+def _median_prompt_rot_curve(result: LoadResult) -> tuple[int, ...]:
+    """Median per-turn input-token curve across the most rot-prone sessions.
+
+    Aligns curves to a common length (truncating to the shortest), so a
+    single SVG renders cleanly. Empty when no session has ≥3 turns.
+    """
+    from caliper.patterns import prompt_rot_curve, session_event_groups
+
+    candidates: list[list[int]] = []
+    for events in session_event_groups(result.events).values():
+        if len(events) < 3:
+            continue
+        curve = prompt_rot_curve(events)
+        if len(curve) < 3 or curve[0] <= 0:
+            continue
+        if max(curve) >= curve[0] * 2:
+            candidates.append(curve)
+    if not candidates:
+        return ()
+    min_len = min(len(c) for c in candidates)
+    truncated = [c[:min_len] for c in candidates]
+    median_curve: list[int] = []
+    for idx in range(min_len):
+        column = sorted(c[idx] for c in truncated)
+        median_curve.append(column[len(column) // 2])
+    return tuple(median_curve)
+
+
+# ---------------------------------------------------------------------------
+# Cache leverage by session — P7 power-up
+# ---------------------------------------------------------------------------
+
+
+def _build_cache_leverage(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    *,
+    top_n: int = 8,
+) -> list[CacheLeverageRow]:
+    """Rank sessions by how much cache savings their cached input produced.
+
+    ``savings_usd`` = cached input × (uncached input rate − cached input rate)
+    so the chip reflects realised dollar avoidance, not raw token volumes.
+    """
+    if not result.events:
+        return []
+    session_aggs = aggregate_sessions(result, options, rate_card=rate_card)
+    rows: list[CacheLeverageRow] = []
+    for agg in session_aggs:
+        totals = agg.totals
+        if not totals.cached_input_tokens:
+            continue
+        savings = float(
+            getattr(agg, "cache_savings", None).cost_usd
+            if getattr(agg, "cache_savings", None)
+            else 0.0
+        )
+        if savings <= 0:
+            continue
+        denom = totals.cached_input_tokens + totals.input_tokens
+        hit_rate = totals.cached_input_tokens / denom if denom else 0.0
+        project = next(iter(agg.projects), "") if hasattr(agg, "projects") else ""
+        rows.append(
+            CacheLeverageRow(
+                session_label=agg.label[:40],
+                project=project,
+                savings_usd=savings,
+                hit_rate=hit_rate,
+                cached_input_tokens=totals.cached_input_tokens,
+                uncached_input_tokens=totals.input_tokens,
+            )
+        )
+    rows.sort(key=lambda r: -r.savings_usd)
+    return rows[:top_n]
+
+
+# ---------------------------------------------------------------------------
+# Long-context input histogram — P10 power-up
+# ---------------------------------------------------------------------------
+
+
+_LC_BINS = (0, 1_000, 4_000, 16_000, 64_000, 200_000, 1_000_000)
+
+
+def _build_long_context_histogram(
+    result: LoadResult,
+    rate_card: RateCard,
+) -> LongContextHistogram | None:
+    """Log-spaced histogram of per-event input tokens vs the LC threshold."""
+    if not result.events:
+        return None
+    counts = [0] * len(_LC_BINS)
+    total_cost = 0.0
+    cost_above = 0.0
+    events_above = 0
+    threshold = 0
+    for event in result.events:
+        inp = event.usage.input_tokens or 0
+        # Bin assignment — left-edge-inclusive.
+        bucket = 0
+        for idx, edge in enumerate(_LC_BINS):
+            if inp >= edge:
+                bucket = idx
+        counts[bucket] += 1
+        cost, _, _ = event_cost(rate_card, event)
+        cost_value = float(cost.cost_usd)
+        total_cost += cost_value
+        card = rate_card.catalog_cards.get(event.model)
+        rule = getattr(card, "long_context", None) if card else None
+        model_threshold = getattr(rule, "input_tokens", 0) if rule else 0
+        if model_threshold:
+            threshold = max(threshold, int(model_threshold))
+        if model_threshold and inp >= model_threshold:
+            events_above += 1
+            cost_above += cost_value
+    total_events = sum(counts)
+    if total_events == 0:
+        return None
+    return LongContextHistogram(
+        bins=tuple(_LC_BINS),
+        counts=tuple(counts),
+        threshold_tokens=threshold or 200_000,
+        share_above_threshold=events_above / total_events if total_events else 0.0,
+        cost_share_above_threshold=cost_above / total_cost if total_cost else 0.0,
+        total_events=total_events,
+    )
+
+
+def _build_anomaly_rows(
+    *,
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    daily_aggregates: list[Aggregate],
+) -> list[AnomalyRow]:
+    from caliper.timeutil import load_timezone
+
+    tz = load_timezone(options.timezone)
+    raw = (
+        detect_session_anomalies(result.events, rate_card)
+        + detect_daily_anomalies(daily_aggregates)
+        + detect_model_anomalies(result.events, rate_card)
+        + detect_project_daily_anomalies(result.events, rate_card, options.timezone)
+    )
+    rows: list[AnomalyRow] = []
+    for item in raw:
+        rows.append(
+            AnomalyRow(
+                kind=_anomaly_kind_label(item.kind),
+                label=_anomaly_label(item.kind, item.label, show_paths=options.show_paths),
+                timestamp=item.timestamp.astimezone(tz).strftime("%Y-%m-%d %H:%M"),
+                observed_usd=item.observed,
+                baseline_usd=item.baseline_center,
+                baseline_scale_usd=item.baseline_scale,
+                z_score=item.z_score,
+                impact_usd=float(item.impact_usd_exact),
+                evidence_status="estimated",
+                tone="critical" if item.z_score >= 5.0 else "warn",
+            )
+        )
+    return sorted(rows, key=lambda row: (-row.z_score, -row.impact_usd, row.kind, row.label))[:12]
+
+
+def _anomaly_kind_label(kind: str) -> str:
+    return {
+        "daily_spike": "Daily spike",
+        "model_day_spike": "Model-day spike",
+        "project_day_spike": "Project-day spike",
+        "session_spike": "Session spike",
+    }.get(kind, kind.replace("_", " ").title())
+
+
+def _anomaly_label(kind: str, label: str, *, show_paths: bool) -> str:
+    if show_paths or kind != "project_day_spike" or " / " not in label:
+        return label
+    from caliper.models import project_name_from_path
+
+    project, day = label.rsplit(" / ", 1)
+    return f"{project_name_from_path(project)} / {day}"
+
+
+def _build_forecast_drivers(
+    *,
+    by_project: list[ProjectRow],
+    by_model: list[ModelRow],
+    agents: list[AgentRow],
+    skills: list[SkillRow],
+    options: RuntimeOptions,
+) -> list[ForecastDriverRow]:
+    window_days = max((options.end - options.start).total_seconds() / 86_400.0, 1.0)
+    multiplier = 30.0 / window_days
+    candidates: list[ForecastDriverRow] = []
+
+    def add(
+        dimension: str,
+        label: str,
+        cost: float,
+        evidence_status: str,
+        driver: str,
+    ) -> None:
+        if cost <= 0:
+            return
+        projected = cost * multiplier
+        candidates.append(
+            ForecastDriverRow(
+                dimension=dimension,
+                label=label,
+                evidence_status=_evidence_literal(evidence_status),
+                projected_30d_cost_usd=projected,
+                daily_mean_cost_usd=cost / window_days,
+                share=0.0,
+                driver=driver,
+            )
+        )
+
+    for row in by_project[:5]:
+        add("project", row.name, row.cost_usd, "exact", f"{row.events:,} events")
+    for row in by_model[:5]:
+        add("model", _humanize_model(row.model), row.cost_usd, "exact", row.tier)
+    for row in agents[:5]:
+        add("agent", row.agent_id, row.cost_usd, row.evidence_status, row.source_category)
+    for row in skills[:5]:
+        add("skill", row.name, row.estimated_cost_usd, row.evidence_status, row.attribution_method)
+
+    total = sum(row.projected_30d_cost_usd for row in candidates)
+    if total <= 0:
+        return []
+    with_share = [
+        dataclasses.replace(row, share=row.projected_30d_cost_usd / total) for row in candidates
+    ]
+    return sorted(
+        with_share,
+        key=lambda row: (-row.projected_30d_cost_usd, row.dimension, row.label),
+    )[:16]
+
+
+def _evidence_literal(value: str):
+    if value in {"exact", "estimated", "partial", "unsupported"}:
+        return value
+    return "partial"
+
+
 def _daily_cost_sparkline_by_key(result, options, rate_card, key_fn) -> dict[str, list[float]]:
     from caliper.timeutil import load_timezone
 
@@ -1184,6 +1856,7 @@ def _build_rate_limit_pressure(result: LoadResult) -> RateLimitPressure:
     elif peak >= 0.75:
         tone = "warn"
     latest_reset = latest.primary_resets_at or latest.secondary_resets_at or ""
+    forecasts = _build_rate_limit_forecast_bands(result)
     return RateLimitPressure(
         sample_count=len(records),
         peak_primary_pct=max(primary_values) if primary_values else None,
@@ -1195,7 +1868,299 @@ def _build_rate_limit_pressure(result: LoadResult) -> RateLimitPressure:
         latest_resets_at=_stringify_reset(latest_reset),
         reached_count=reached,
         tone=tone,  # type: ignore[arg-type]
+        forecasts=forecasts,
     )
+
+
+def _build_rate_limit_forecast_bands(
+    result: LoadResult,
+) -> tuple[RateLimitForecastBand, ...]:
+    samples = list(result.rate_limit_samples)
+    if not samples:
+        return ()
+    raw = forecast_rate_limits(samples)
+    bands: list[RateLimitForecastBand] = []
+    for forecast in raw:
+        bands.append(
+            RateLimitForecastBand(
+                window=forecast.window,
+                limit_name=forecast.limit_name or forecast.limit_id or forecast.window,
+                current_percent=forecast.current_percent,
+                burn_rate_per_hour=forecast.burn_rate_per_hour,
+                eta_low_hours=forecast.eta_low_hours,
+                eta_mid_hours=forecast.eta_to_100_hours,
+                eta_high_hours=forecast.eta_high_hours,
+                confidence=forecast.confidence,
+                samples=forecast.samples,
+            )
+        )
+    return tuple(bands)
+
+
+# ---------------------------------------------------------------------------
+# Seasonality (cost-weighted hour × dow) — P1 power-up
+# ---------------------------------------------------------------------------
+
+
+def _build_seasonality(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+) -> SeasonalitySection | None:
+    """Cost-weighted hour-of-day + day-of-week distribution."""
+    if not result.events:
+        return None
+    profile = decompose_seasonality(result.events, rate_card, options.timezone)
+    total = float(sum(profile.by_hour_cost_usd))
+    if total <= 0:
+        return None
+    matrix = _hour_dow_cost_matrix(result.events, rate_card, options.timezone)
+    return SeasonalitySection(
+        by_hour_cost_usd=tuple(profile.by_hour_cost_usd),
+        by_dow_cost_usd=tuple(profile.by_dow_cost_usd),
+        by_dow_hour_cost_usd=matrix,
+        peak_hour=profile.peak_hour,
+        peak_dow=profile.peak_dow,
+        off_peak_share=profile.off_peak_share,
+        timezone=profile.timezone,
+        total_cost_usd=total,
+    )
+
+
+def _hour_dow_cost_matrix(
+    events: list,
+    rate_card: RateCard,
+    timezone: str,
+) -> tuple[tuple[float, ...], ...]:
+    """7×24 cost matrix in local TZ — Mon=0..Sun=6."""
+    from caliper.timeutil import load_timezone
+
+    tz = load_timezone(timezone)
+    grid = [[0.0] * 24 for _ in range(7)]
+    for event in events:
+        cost, _, _ = event_cost(rate_card, event)
+        local = event.timestamp.astimezone(tz)
+        grid[local.weekday()][local.hour] += float(cost.cost_usd)
+    return tuple(tuple(row) for row in grid)
+
+
+# ---------------------------------------------------------------------------
+# Portfolio 30/90-day outlook — P4 power-up
+# ---------------------------------------------------------------------------
+
+
+def _build_outlook(daily_points: list[DailyPoint]) -> Outlook | None:
+    """Dual-horizon 30-day + 90-day forward outlook on portfolio spend.
+
+    Uses the same selected-window daily cost series ``Forecast`` already
+    consumes, but projects forward by two fixed horizons regardless of
+    ``options.end`` so stakeholders can compare near-term vs medium-term.
+    Returns ``None`` when there is not enough history for a useful band.
+    """
+    series = [float(point.cost_usd) for point in daily_points]
+    if len(series) < 3:
+        return None
+    horizons = total_outlook(series)
+    h30 = horizons["30d"]
+    h90 = horizons["90d"]
+    return Outlook(
+        days_analyzed=h30.days_analyzed,
+        daily_mean=h30.daily_mean,
+        daily_stdev=h30.daily_stdev,
+        horizon_30d=OutlookHorizon(
+            days=30,
+            linear_total=h30.linear_total,
+            linear_low=h30.linear_low,
+            linear_high=h30.linear_high,
+            ewma_total=h30.ewma_total,
+        ),
+        horizon_90d=OutlookHorizon(
+            days=90,
+            linear_total=h90.linear_total,
+            linear_low=h90.linear_low,
+            linear_high=h90.linear_high,
+            ewma_total=h90.ewma_total,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-model forecast strip — P2 power-up
+# ---------------------------------------------------------------------------
+
+
+def _build_model_forecasts(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    by_model: list[ModelRow],
+    *,
+    top_n: int = 8,
+) -> list[ModelForecastRow]:
+    """Top-N model OLS demand forecasts wrapped with per-model bands.
+
+    Pulls per-model token slope from ``predict.forecast_per_model`` and
+    cost-projection band from ``forecasts.project`` over the per-model
+    daily cost series. Returns ``[]`` when there is no history.
+    """
+    if not by_model or result is None or not result.events:
+        return []
+    demand = {f.model: f for f in forecast_per_model(result.events, rate_card, options.timezone)}
+    cost_by_model = _per_model_daily_cost_series(result, rate_card, options)
+    ranked = sorted(by_model, key=lambda row: -row.cost_usd)[:top_n]
+    rows: list[ModelForecastRow] = []
+    for row in ranked:
+        forecast = demand.get(row.model)
+        if forecast is None:
+            continue
+        series = cost_by_model.get(row.model, [])
+        if len(series) < 3:
+            # Stable: surface the row even without a band.
+            rows.append(
+                ModelForecastRow(
+                    vendor=row.vendor,
+                    model=row.model,
+                    days_analyzed=forecast.days_analyzed,
+                    daily_mean_cost_usd=forecast.daily_mean_cost_usd,
+                    projected_30d_cost_usd=forecast.projected_cost_30d_usd,
+                    projected_30d_low=0.0,
+                    projected_30d_high=0.0,
+                    ewma_30d_cost_usd=0.0,
+                    trend_label="needs 3d history",
+                    trend_tone="neutral",
+                    daily_cost_sparkline=list(row.daily_cost_sparkline),
+                    growing=forecast.growing,
+                )
+            )
+            continue
+        proj = project_forecast(series, 30, unit="cost_usd")
+        trend_label, trend_tone = _slope_trend_label(
+            forecast.trend_slope_tokens_per_day,
+            forecast.growing,
+        )
+        rows.append(
+            ModelForecastRow(
+                vendor=row.vendor,
+                model=row.model,
+                days_analyzed=forecast.days_analyzed,
+                daily_mean_cost_usd=proj.daily_mean,
+                projected_30d_cost_usd=proj.linear_total,
+                projected_30d_low=max(0.0, proj.linear_low),
+                projected_30d_high=proj.linear_high,
+                ewma_30d_cost_usd=proj.ewma_total,
+                trend_label=trend_label,
+                trend_tone=trend_tone,  # type: ignore[arg-type]
+                daily_cost_sparkline=list(row.daily_cost_sparkline),
+                growing=forecast.growing,
+            )
+        )
+    return rows
+
+
+def _per_model_daily_cost_series(
+    result: LoadResult,
+    rate_card: RateCard,
+    options: RuntimeOptions,
+) -> dict[str, list[float]]:
+    """Dense per-model daily cost series indexed by model name."""
+    from caliper.timeutil import load_timezone
+
+    tz = load_timezone(options.timezone)
+    per_model: dict[str, dict[dt.date, float]] = {}
+    for event in result.events:
+        if not event.model:
+            continue
+        cost, _, _ = event_cost(rate_card, event)
+        local = event.timestamp.astimezone(tz).date()
+        bucket = per_model.setdefault(event.model, {})
+        bucket[local] = bucket.get(local, 0.0) + float(cost.cost_usd)
+    out: dict[str, list[float]] = {}
+    for model, by_day in per_model.items():
+        if not by_day:
+            continue
+        start, end = min(by_day), max(by_day)
+        days = (end - start).days + 1
+        series = [0.0] * days
+        for day, value in by_day.items():
+            series[(day - start).days] = value
+        out[model] = series
+    return out
+
+
+def _slope_trend_label(slope_tokens_per_day: float, growing: bool) -> tuple[str, str]:
+    if slope_tokens_per_day == 0:
+        return "flat", "neutral"
+    direction = "↑" if growing else "↓"
+    tone = "warn" if growing else "good"
+    return f"{direction} {abs(slope_tokens_per_day):,.0f} tok/d slope", tone
+
+
+# ---------------------------------------------------------------------------
+# Per-project forecast bands — P5 power-up
+# ---------------------------------------------------------------------------
+
+
+def _build_project_forecast_bands(
+    project_aggregates: list[Aggregate],
+    options: RuntimeOptions,
+    daily_by_project: dict[str, list[float]],
+) -> dict[str, tuple[float, float, str]]:
+    """Per-project ±σ band + confidence chip keyed by project ``cwd``.
+
+    Confidence:
+      * "high"   when ≥14 days of activity,
+      * "medium" when 7–13 days,
+      * "low"    when 3–6 days (still emits a band),
+      * ""       when <3 days (band omitted — sparse history).
+    """
+    if not project_aggregates:
+        return {}
+
+    def factory(agg: Aggregate) -> list[float]:
+        return list(daily_by_project.get(agg.label, []))
+
+    raw = forecast_project_burn(project_aggregates, options, daily_factory=factory)
+    bands: dict[str, tuple[float, float, str]] = {}
+    for label, projection in raw.items():
+        days = projection.days_analyzed
+        if days >= 14:
+            confidence = "high"
+        elif days >= 7:
+            confidence = "medium"
+        else:
+            confidence = "low"
+        bands[label] = (
+            max(0.0, projection.linear_low),
+            projection.linear_high,
+            confidence,
+        )
+    return bands
+
+
+# ---------------------------------------------------------------------------
+# Tier-source provenance — P11 power-up
+# ---------------------------------------------------------------------------
+
+
+_TIER_SOURCE_LABELS = {
+    "cli": "CLI override",
+    "json_override": "JSON override",
+    "logged": "Logged in event",
+    "codex_config": "Codex config",
+    "assumed": "Assumed default",
+}
+
+
+def _build_tier_provenance(result: LoadResult) -> TierProvenance | None:
+    raw = dict(result.tier_sources or {})
+    total = sum(raw.values())
+    if total <= 0:
+        return None
+    items = sorted(raw.items(), key=lambda kv: (-kv[1], kv[0]))
+    labelled = tuple(
+        (_TIER_SOURCE_LABELS.get(key, key.replace("_", " ").title()), count) for key, count in items
+    )
+    return TierProvenance(sources=labelled, total_events=total)
 
 
 def _build_quality_score(
@@ -1290,6 +2255,8 @@ def _build_command_center(
     usage_windows: list[UsageWindow],
     impact_cards: list[ImpactCard],
     advisor_recommendations: list[AdvisorRecommendation],
+    inefficiencies: list[InefficiencyRow],
+    anomalies: list[AnomalyRow],
     top_sessions: list[SessionRow],
     rate_limit_pressure: RateLimitPressure,
     quality_score: QualityScore,
@@ -1304,7 +2271,10 @@ def _build_command_center(
     )
     velocity_tone = "warn" if velocity_delta is not None and velocity_delta >= 0.25 else "neutral"
     budget = next((card for card in impact_cards if card.label == "Budget risk"), None)
-    advisor_savings = sum(row.savings_usd for row in advisor_recommendations)
+    advisor_savings = max((row.savings_usd for row in advisor_recommendations), default=0.0)
+    inefficiency_savings = max((row.impact_usd for row in inefficiencies), default=0.0)
+    largest_candidate = max(advisor_savings, inefficiency_savings)
+    top_anomaly = anomalies[0] if anomalies else None
     top_session = top_sessions[0] if top_sessions else None
     peak_limit = max(
         [
@@ -1337,15 +2307,30 @@ def _build_command_center(
             metric="trend",
         ),
         CommandCenterCard(
-            label="Estimated avoidable spend",
-            value=_format_money(advisor_savings),
+            label="Largest savings candidate",
+            value=_format_money(largest_candidate),
             detail=(
-                f"{len(advisor_recommendations):,} recommendations ready"
-                if advisor_recommendations
-                else "No high-confidence swaps found."
+                "Largest evidence-labelled finding"
+                if inefficiencies
+                else (
+                    "Largest advisor recommendation"
+                    if advisor_recommendations
+                    else "No evidence-labelled savings candidate."
+                )
             ),
-            tone="good" if advisor_savings > 0 else "neutral",
+            tone="good" if largest_candidate > 0 else "neutral",
             metric="savings",
+        ),
+        CommandCenterCard(
+            label="Anomaly findings",
+            value=f"{len(anomalies):,}" if anomalies else "None",
+            detail=(
+                f"{top_anomaly.kind} · observed {_format_money(top_anomaly.observed_usd)}"
+                if top_anomaly
+                else "No spike crossed the detector thresholds."
+            ),
+            tone=top_anomaly.tone if top_anomaly else "neutral",
+            metric="audit",
         ),
         CommandCenterCard(
             label="Highest-cost session",
@@ -1370,11 +2355,11 @@ def _build_command_center(
             metric="reliability",
         ),
         CommandCenterCard(
-            label="Data quality",
+            label="Evidence quality",
             value=f"{quality_score.score}/100",
             detail=quality_score.grade,
             tone=quality_score.tone,
-            metric="trust",
+            metric="evidence",
         ),
     ]
 
@@ -1451,7 +2436,7 @@ def _build_comparisons(
         (
             "Cache movement",
             totals.delta_cache_pct,
-            "Cache hit rate vs previous equal window",
+            "Cached-input share vs previous equal window",
             "usage-mix",
             False,
         ),
@@ -1495,7 +2480,7 @@ def _build_comparisons(
                 value=_format_pct_round(share),
                 detail=(
                     f"{_humanize_model(top_model.model)} is "
-                    f"{_format_money(top_model.cost_usd)} of cost"
+                    f"{_format_money(top_model.cost_usd)} of selected-window cost"
                 ),
                 delta_pct=None,
                 tone="warn" if share >= 0.5 else "neutral",
@@ -1563,6 +2548,8 @@ def _build_decision_queue(
     total: Aggregate,
     impact_cards: list[ImpactCard],
     advisor_recommendations: list[AdvisorRecommendation],
+    inefficiencies: list[InefficiencyRow],
+    anomalies: list[AnomalyRow],
     top_sessions: list[SessionRow],
     by_project: list[ProjectRow],
     by_model: list[ModelRow],
@@ -1658,7 +2645,7 @@ def _build_decision_queue(
                 "Model concentration is high",
                 (
                     f"{_humanize_model(top_model.model)} accounts for "
-                    f"{_format_pct_round(share)} of cost."
+                    f"{_format_pct_round(share)} of selected-window cost."
                 ),
                 "Inspect model/tier mix before changing routing or budgets.",
                 f"{_format_money(top_model.cost_usd)} across {top_model.events:,} events",
@@ -1667,16 +2654,43 @@ def _build_decision_queue(
                 lens="engineer",
             )
 
-    savings = sum(row.savings_usd for row in advisor_recommendations)
+    savings = max((row.savings_usd for row in advisor_recommendations), default=0.0)
     if savings > 0:
         add(
             "Review estimated savings",
-            f"Caliper found {_format_money(savings)} of estimated avoidable spend.",
+            f"Largest advisor recommendation is {_format_money(savings)}.",
             "Review recommendations, then validate quality and latency before changing routing.",
             f"{len(advisor_recommendations):,} recommendations",
             tone="good",
             anchor="advisor",
             lens="executive",
+        )
+
+    if inefficiencies:
+        top_finding = max(inefficiencies, key=lambda row: row.impact_usd)
+        add(
+            "Review evidence-labelled inefficiency finding",
+            top_finding.detail,
+            top_finding.action,
+            f"{_format_money(top_finding.impact_usd)} · {top_finding.evidence_status}",
+            tone="warn" if top_finding.severity in {"warn", "fail"} else "neutral",
+            anchor="inefficiencies",
+            lens="executive",
+        )
+
+    if anomalies:
+        top_anomaly = anomalies[0]
+        add(
+            "Review anomaly finding",
+            (
+                f"{top_anomaly.kind} on {top_anomaly.label}: "
+                f"observed {_format_money(top_anomaly.observed_usd)}."
+            ),
+            "Inspect the Anomalies section before treating the spike as a repeatable trend.",
+            f"{top_anomaly.z_score:.1f}σ · {_format_money(top_anomaly.impact_usd)} impact",
+            tone=top_anomaly.tone,
+            anchor="anomalies",
+            lens="audit",
         )
 
     if total_cost > 0 and top_sessions:
@@ -1717,7 +2731,7 @@ def _build_decision_queue(
         add(
             "Review data quality",
             f"Evidence quality is {quality_score.score}/100 ({quality_score.grade}).",
-            "Check pricing, parser, and attribution notes before acting on exact dollar values.",
+            "Check pricing, parser, and attribution notes before acting on reported dollar values.",
             quality_score.grade,
             tone=quality_score.tone,
             anchor="evidence",
@@ -1754,7 +2768,7 @@ def _build_executive_brief(
             title="No AI usage detected",
             verdict="Setup or date range needs review",
             subtitle=(
-                "The selected window has no deduped usage events, so premium analysis is limited."
+                "The selected window has no deduped usage events, so dashboard analysis is limited."
             ),
             tone="warn",
             findings=[
@@ -1788,14 +2802,14 @@ def _build_executive_brief(
         title = "AI usage needs review"
         verdict = (
             f"{warn_count} priority item{'s' if warn_count != 1 else ''} "
-            "before the report is clean."
+            "before sharing or acting on this report."
         )
     elif good_count:
-        title = "AI usage is healthy with optimization upside"
-        verdict = "No urgent issues; review the savings queue when convenient."
+        title = "No warning-level issue surfaced"
+        verdict = "Review estimated savings candidates when convenient."
     else:
-        title = "AI usage is under control"
-        verdict = "No material cost, reliability, or evidence issue stands out."
+        title = "No priority issue surfaced"
+        verdict = "No generated cost, reliability, or evidence issue needs immediate action."
 
     findings = [
         BriefFinding(

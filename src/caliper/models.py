@@ -267,6 +267,7 @@ class TurnFacts:
     parent_uuid: str = ""
     tool_use_count: int = 0
     tool_names: tuple[str, ...] = ()
+    skill_names: tuple[str, ...] = ()
     has_thinking_block: bool = False
 
     @classmethod
@@ -275,11 +276,16 @@ class TurnFacts:
             return None
         names = raw.get("tool_names")
         tool_names = tuple(str(item) for item in names) if isinstance(names, list | tuple) else ()
+        skills = raw.get("skill_names")
+        skill_names = (
+            tuple(str(item) for item in skills) if isinstance(skills, list | tuple) else ()
+        )
         return cls(
             turn_index=_safe_int(raw.get("turn_index")),
             parent_uuid=str(raw.get("parent_uuid") or ""),
             tool_use_count=_safe_int(raw.get("tool_use_count")),
             tool_names=tool_names,
+            skill_names=skill_names,
             has_thinking_block=bool(raw.get("has_thinking_block")),
         )
 
@@ -668,3 +674,110 @@ class LoadResult:
     dedupe_stats: dict[str, int] = field(default_factory=dict)
     rate_limit_sample_duplicates: int = 0
     rate_limit_sample_dedupe_stats: dict[str, int] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Predictive analytics + inefficiency detection value objects.
+# Pure data — all numerics; no behaviour. Consumed by predict.py,
+# anomaly.py, efficiency.py, and the dashboard adapter.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ModelDemandForecast:
+    model: str
+    model_vendor: str
+    days_analyzed: int
+    daily_mean_tokens: float
+    daily_stdev_tokens: float
+    trend_slope_tokens_per_day: float
+    projected_share_30d: float
+    growing: bool
+    daily_mean_cost_usd: float
+    projected_cost_30d_usd: float
+
+
+@dataclass(frozen=True)
+class SeasonalityProfile:
+    by_hour_cost_usd: tuple[float, ...]
+    by_dow_cost_usd: tuple[float, ...]
+    peak_hour: int
+    peak_dow: int
+    off_peak_share: float
+    timezone: str
+
+
+@dataclass(frozen=True)
+class RateLimitForecast:
+    window: str
+    limit_id: str
+    limit_name: str
+    current_percent: float | None
+    burn_rate_per_hour: float | None
+    eta_to_100_hours: float | None
+    eta_low_hours: float | None
+    eta_high_hours: float | None
+    confidence: str
+    samples: int
+
+
+@dataclass(frozen=True)
+class SessionShapeCluster:
+    label: str
+    sessions: int
+    median_total_tokens: int
+    median_cost_usd: Decimal
+    p95_cost_usd: Decimal
+
+
+@dataclass(frozen=True)
+class Anomaly:
+    kind: str
+    timestamp: dt.datetime
+    label: str
+    observed: float
+    baseline_center: float
+    baseline_scale: float
+    z_score: float
+    impact_usd_exact: Decimal
+
+
+@dataclass(frozen=True)
+class Finding:
+    """A quantified inefficiency. ``impact_usd_exact`` is the dollar
+    saving available if the suggested action is taken. Never ``None`` —
+    finders that cannot quantify do not emit."""
+
+    code: str
+    severity: str
+    title: str
+    detail: str
+    action: str
+    payback_action: str
+    scope: str
+    impact_usd_exact: Decimal
+    monthly_projected_savings_usd: Decimal
+    confidence: str
+    evidence: tuple[str, ...]
+    evidence_metrics: dict[str, object] = field(default_factory=dict)
+    commands: tuple[str, ...] = ()
+    event_ids: tuple[str, ...] = ()
+    evidence_status: str = "estimated"
+    sample_size: int = 0
+    baseline: str = ""
+
+
+@dataclass(frozen=True)
+class Recommendation:
+    """A composed, ranked, action-first piece of advice. Wraps a Finding
+    or trend signal; the dashboard's advisor slot renders these directly."""
+
+    rank: int
+    title: str
+    payback_action: str
+    detail: str
+    impact_usd_exact: Decimal
+    monthly_projected_savings_usd: Decimal
+    confidence: str
+    source_code: str
+    commands: tuple[str, ...] = ()

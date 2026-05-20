@@ -34,7 +34,7 @@ DashboardLens = Literal["executive", "engineer", "finance", "audit"]
 @dataclass(frozen=True)
 class CaliperMeta:
     version: str  # e.g. "0.0.30"
-    schema_version: int  # 2
+    schema_version: int  # 3 (added seasonality/tier-provenance/rate-limit ETA bands)
 
 
 @dataclass(frozen=True)
@@ -207,6 +207,129 @@ class MixRow:
 
 
 @dataclass(frozen=True)
+class AgentRow:
+    agent_id: str
+    source_category: str
+    evidence_status: EvidenceStatus
+    reason: str
+    kind: str
+    cost_usd: float
+    total_tokens: int
+    events: int
+    tool_calls: int
+    sessions: int
+    daily_cost_sparkline: list[float] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CohortDeltaRow:
+    """Side-by-side delta between selected window and the prior equal window."""
+
+    label: str
+    current_value: str  # display-formatted
+    previous_value: str
+    delta_pct: float | None  # 0..n fraction; None when prior is zero
+    delta_value: float  # signed absolute delta in the row's natural unit
+    tone: ImpactTone = "neutral"
+
+
+@dataclass(frozen=True)
+class SkillRow:
+    name: str
+    evidence_status: EvidenceStatus
+    attribution_method: str
+    estimated_cost_usd: float
+    median_cost_per_invocation_usd: float
+    total_tokens: int
+    invocations: int
+    sessions: int
+
+
+@dataclass(frozen=True)
+class InefficiencyRow:
+    code: str
+    severity: str
+    evidence_status: EvidenceStatus
+    title: str
+    detail: str
+    action: str
+    impact_usd: float
+    monthly_projected_savings_usd: float
+    confidence: str
+    sample_size: int
+    baseline: str
+    # Phase 3: per-turn input-token curve for ``PROMPT_ROT`` rows
+    # (median across flagged sessions). Empty for every other code.
+    curve: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class CacheLeverageRow:
+    """One session's cache-leverage signature.
+
+    ``savings_usd`` is the cost the cached input would have incurred at the
+    uncached input rate. ``hit_rate`` = cached / (cached + uncached) input.
+    """
+
+    session_label: str
+    project: str
+    savings_usd: float
+    hit_rate: float
+    cached_input_tokens: int
+    uncached_input_tokens: int
+
+
+@dataclass(frozen=True)
+class LongContextHistogram:
+    """Distribution of per-event input tokens with the LC threshold marked.
+
+    ``bins`` is the left edge of each fixed log-spaced bucket; ``counts`` is
+    the matching event count. ``threshold_tokens`` is the per-model
+    long-context threshold (e.g. 200k for Sonnet 4.6). The two share fields
+    summarise how concentrated spend is above that line.
+    """
+
+    bins: tuple[int, ...]
+    counts: tuple[int, ...]
+    threshold_tokens: int
+    share_above_threshold: float  # 0..1 of events crossing the LC line
+    cost_share_above_threshold: float  # 0..1 of spend that crossed it
+    total_events: int
+
+
+@dataclass(frozen=True)
+class ForecastDriverRow:
+    dimension: str
+    label: str
+    evidence_status: EvidenceStatus
+    projected_30d_cost_usd: float
+    daily_mean_cost_usd: float
+    share: float
+    driver: str
+
+
+@dataclass(frozen=True)
+class RateLimitForecastBand:
+    """Time-to-exhaustion projection for one rate-limit window.
+
+    All hour values are ``None`` when the burn rate cannot be estimated
+    (no upward pressure or too few samples). ``confidence`` is one of
+    ``"low" | "medium" | "high"`` and depends on the sample count plus
+    burn-rate stability over the lookback window.
+    """
+
+    window: str  # "primary" | "secondary"
+    limit_name: str
+    current_percent: float | None
+    burn_rate_per_hour: float | None
+    eta_low_hours: float | None
+    eta_mid_hours: float | None
+    eta_high_hours: float | None
+    confidence: str  # "low" | "medium" | "high"
+    samples: int
+
+
+@dataclass(frozen=True)
 class RateLimitPressure:
     sample_count: int
     peak_primary_pct: float | None
@@ -218,6 +341,7 @@ class RateLimitPressure:
     latest_resets_at: str
     reached_count: int
     tone: ImpactTone = "neutral"
+    forecasts: tuple[RateLimitForecastBand, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -295,6 +419,7 @@ class ModelRow:
     events: int
     tokens: int
     cache_hit_rate: float
+    daily_cost_sparkline: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -305,6 +430,34 @@ class ProjectRow:
     events: int
     sessions: int
     top_tools: list[ToolCount]  # up to 3
+    active_days: int = 0
+    last_seen: str = ""
+    daily_mean_cost_usd: float = 0.0
+    projected_30d_cost_usd: float = 0.0
+    trend_label: str = ""
+    trend_tone: ImpactTone = "neutral"
+    daily_cost_sparkline: list[float] = field(default_factory=list)
+    # Phase 2 — per-project forecast confidence band.
+    # ``forecast_confidence`` is "low" | "medium" | "high" | "" when no
+    # forecast is available (sparse history). The ``low`` / ``high`` USD
+    # values are ``0.0`` when no band could be computed.
+    projected_30d_low: float = 0.0
+    projected_30d_high: float = 0.0
+    forecast_confidence: str = ""
+
+
+@dataclass(frozen=True)
+class AnomalyRow:
+    kind: str
+    label: str
+    timestamp: str
+    observed_usd: float
+    baseline_usd: float
+    baseline_scale_usd: float
+    z_score: float
+    impact_usd: float
+    evidence_status: EvidenceStatus
+    tone: ImpactTone = "warn"
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +470,7 @@ class Insight:
     severity: Severity
     title: str
     detail: str
-    impact: str | None = None  # right-side chip; e.g. "saves ~$612"
+    impact: str | None = None  # right-side chip; e.g. "est. $612"
 
 
 @dataclass(frozen=True)
@@ -333,10 +486,86 @@ class Forecast:
 
 
 @dataclass(frozen=True)
+class OutlookHorizon:
+    """One horizon of the dual 30/90-day portfolio outlook."""
+
+    days: int  # 30 or 90
+    linear_total: float
+    linear_low: float
+    linear_high: float
+    ewma_total: float
+
+
+@dataclass(frozen=True)
+class Outlook:
+    """Stakeholder-grade 30/90-day spend outlooks side-by-side.
+
+    Distinct from ``Forecast`` (single-horizon, days_remaining-bounded)
+    — ``Outlook`` is forward-looking from "today" by 30 and 90 days.
+    """
+
+    days_analyzed: int
+    daily_mean: float
+    daily_stdev: float
+    horizon_30d: OutlookHorizon
+    horizon_90d: OutlookHorizon
+
+
+@dataclass(frozen=True)
+class ModelForecastRow:
+    """One card in the per-model forecast strip (top N by cost)."""
+
+    vendor: str
+    model: str
+    days_analyzed: int
+    daily_mean_cost_usd: float
+    projected_30d_cost_usd: float
+    projected_30d_low: float
+    projected_30d_high: float
+    ewma_30d_cost_usd: float
+    trend_label: str
+    trend_tone: ImpactTone = "neutral"
+    daily_cost_sparkline: list[float] = field(default_factory=list)
+    growing: bool = False
+
+
+@dataclass(frozen=True)
 class EvidenceRow:
     label: str
     status: EvidenceStatus
     note: str  # may be ""
+
+
+@dataclass(frozen=True)
+class TierProvenance:
+    """Where each event's service tier resolution came from.
+
+    ``sources`` is a list of ``(source_label, event_count)`` tuples,
+    sorted by count descending. ``total_events`` is the sum.
+    Sources include ``cli``, ``json_override``, ``logged``, ``codex_config``,
+    ``assumed`` — see ``parser._tier_sources_from_events``.
+    """
+
+    sources: tuple[tuple[str, int], ...]
+    total_events: int
+
+
+@dataclass(frozen=True)
+class SeasonalitySection:
+    """Cost-weighted hour-of-day + day-of-week distribution.
+
+    Distinct from ``Recap.hours`` (event-count grid): values here are USD,
+    computed via ``predict.decompose_seasonality``.
+    """
+
+    by_hour_cost_usd: tuple[float, ...]  # 24 entries, Mon..Sun summed
+    by_dow_cost_usd: tuple[float, ...]  # 7 entries, Mon=0..Sun=6
+    by_dow_hour_cost_usd: tuple[tuple[float, ...], ...]  # 7×24 matrix
+    peak_hour: int  # 0..23
+    peak_dow: int  # 0..6
+    off_peak_share: float  # cost fraction in lower-spend half of hours
+    timezone: str
+    total_cost_usd: float
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +665,7 @@ class Dashboard:
     shape: SessionShape
     by_model: list[ModelRow]
     by_project: list[ProjectRow]
+    anomalies: list[AnomalyRow]
     insights: list[Insight]
     forecast: Forecast | None
     evidence: list[EvidenceRow]
@@ -451,6 +681,10 @@ class Dashboard:
     advisor_recommendations: list[AdvisorRecommendation] = field(default_factory=list)
     top_sessions: list[SessionRow] = field(default_factory=list)
     usage_mix: list[MixRow] = field(default_factory=list)
+    agents: list[AgentRow] = field(default_factory=list)
+    skills: list[SkillRow] = field(default_factory=list)
+    inefficiencies: list[InefficiencyRow] = field(default_factory=list)
+    forecast_drivers: list[ForecastDriverRow] = field(default_factory=list)
     rate_limit_pressure: RateLimitPressure | None = None
     quality_score: QualityScore | None = None
     executive_brief: ExecutiveBrief | None = None
@@ -465,3 +699,18 @@ class Dashboard:
 
     banner: Banner | None = None
     show_paths: bool = False
+
+    # Phase 1 power-ups: cost-weighted seasonality + tier provenance.
+    seasonality: SeasonalitySection | None = None
+    tier_provenance: TierProvenance | None = None
+
+    # Phase 2 power-ups: per-model forecast strip + portfolio 30/90d outlook.
+    model_forecasts: list[ModelForecastRow] = field(default_factory=list)
+    outlook: Outlook | None = None
+
+    # Phase 3 power-ups: cache leverage by session + long-context histogram.
+    cache_leverage: list[CacheLeverageRow] = field(default_factory=list)
+    long_context_histogram: LongContextHistogram | None = None
+
+    # Phase 4 power-ups: cohort delta table (compare lens) + agent sparklines.
+    cohort_deltas: list[CohortDeltaRow] = field(default_factory=list)

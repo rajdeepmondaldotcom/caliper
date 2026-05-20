@@ -2871,3 +2871,445 @@ code { color: var(--accent); font-size: 0.92em; }
   .chart-panel { break-inside: avoid; }
   [class*="twk-"] { display: none !important; }
 }
+
+/* === Phase 1 power-ups: seasonality, ETA bands, tier provenance ======== */
+
+/* Cost-weighted hour×dow grid (distinct from event-count Recap heatmap). */
+.seasonality-grid-wrap {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  column-gap: 8px;
+  row-gap: 4px;
+  margin-top: var(--s4);
+}
+.hod-row-labels {
+  display: grid;
+  grid-template-rows: repeat(7, 14px);
+  row-gap: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--mute);
+  align-items: center;
+  justify-items: end;
+  padding-right: 4px;
+}
+.hod-row-label { line-height: 14px; }
+.hod-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 14px);
+  grid-template-columns: repeat(24, 1fr);
+  gap: 4px;
+}
+.hod-cell {
+  border-radius: 3px;
+  background: var(--hour-0);
+  outline: 0 solid var(--accent);
+  outline-offset: 1px;
+  transition: outline-width 80ms ease-out, transform 100ms ease-out;
+}
+.hod-cell:hover {
+  outline-width: 1.5px;
+  transform: scale(1.25);
+  z-index: 3;
+  position: relative;
+}
+.hod-level-0 { background: var(--hour-0); }
+.hod-level-1 { background: var(--hour-1); }
+.hod-level-2 { background: var(--hour-2); }
+.hod-level-3 { background: var(--hour-3); }
+.hod-level-4 { background: var(--hour-4); }
+.hod-col-labels {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  margin: 4px 0 var(--s4) 44px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--mute);
+}
+.seasonality-strips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s5);
+  margin-top: var(--s5);
+}
+.strip-title {
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  margin-bottom: 6px;
+}
+.strip-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 56px;
+  border-bottom: 1px solid var(--rule);
+}
+.strip-bar {
+  flex: 1 1 0;
+  min-height: 2px;
+  background: var(--accent);
+  opacity: 0.85;
+  border-radius: 2px 2px 0 0;
+}
+.strip-bar:hover { opacity: 1; }
+.seasonality-callouts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s5);
+  margin-top: var(--s5);
+}
+.seasonality-callouts .callout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.seasonality-callouts .callout-label {
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.seasonality-callouts .callout-value {
+  color: var(--ink);
+  font-size: var(--num-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Rate-limit ETA bands */
+.limit-forecasts {
+  margin-top: var(--s5);
+  border-top: 1px solid var(--rule);
+  padding-top: var(--s5);
+}
+.limit-forecasts-title {
+  margin: 0 0 var(--s3) 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--mute);
+}
+.eta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s4);
+}
+.eta-card {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.eta-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s2);
+}
+.eta-window {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  text-transform: capitalize;
+}
+.eta-confidence-chip {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--mute);
+}
+.eta-confidence-high .eta-confidence-chip {
+  background: rgba(34, 197, 94, 0.15);
+  color: rgb(34, 197, 94);
+}
+.eta-confidence-medium .eta-confidence-chip {
+  background: rgba(251, 191, 36, 0.15);
+  color: rgb(251, 191, 36);
+}
+.eta-mid {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.eta-value {
+  font-size: var(--num-lg);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.eta-unit { font-size: 11px; }
+.eta-range, .eta-burn, .eta-samples, .eta-empty {
+  font-size: 11px;
+  font-family: var(--mono);
+}
+
+/* Tier-source provenance stacked bar */
+.prov-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: var(--s4);
+  background: var(--surface-2);
+}
+.prov-seg { height: 100%; min-width: 2px; }
+.prov-seg-0 { background: var(--accent); }
+.prov-seg-1 { background: #6366f1; }
+.prov-seg-2 { background: #f59e0b; }
+.prov-seg-3 { background: #ef4444; }
+.prov-seg-4 { background: var(--mute); }
+.prov-legend {
+  list-style: none;
+  padding: 0;
+  margin: var(--s3) 0 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s2);
+}
+.prov-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12px;
+}
+.prov-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+.prov-label { font-weight: 600; color: var(--ink); }
+.prov-count { margin-left: auto; font-family: var(--mono); }
+
+/* === Phase 2 power-ups: model forecasts, portfolio outlook, project bands === */
+
+.mf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--s4);
+}
+.mf-card {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  background: var(--surface);
+}
+.mf-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s2);
+}
+.mf-vendor {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mute);
+  font-weight: 600;
+}
+.mf-model {
+  font-size: 12px;
+  color: var(--ink);
+}
+.mf-spark { display: flex; align-items: center; min-height: 22px; }
+.mf-figures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+}
+.mf-figures > div { display: flex; flex-direction: column; gap: 2px; }
+.mf-figures .mute {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.mf-figure {
+  font-size: var(--num-md);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.mf-band, .mf-meta { font-size: 11px; font-family: var(--mono); }
+
+.outlook-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s5);
+}
+.outlook-card {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  background: var(--surface);
+}
+.outlook-card-warn { border-color: var(--rule); }
+.outlook-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.outlook-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--mute);
+}
+.outlook-days { font-family: var(--mono); font-size: 11px; }
+.outlook-mid {
+  font-size: var(--num-lg);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.outlook-range, .outlook-ewma { font-size: 12px; font-family: var(--mono); }
+
+.proj-est { display: inline-flex; gap: var(--s2); align-items: baseline; }
+.proj-band { font-size: 10px; }
+.forecast-chip {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--mute);
+}
+.forecast-chip-high { background: rgba(34, 197, 94, 0.15); color: rgb(34, 197, 94); }
+.forecast-chip-medium { background: rgba(251, 191, 36, 0.15); color: rgb(251, 191, 36); }
+.forecast-chip-low { background: rgba(148, 163, 184, 0.18); color: var(--mute); }
+
+/* === Phase 3 power-ups: prompt-rot curves, cache leverage, LC histogram === */
+
+.rot-curve {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s2) 0;
+}
+
+.cl-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.cl-row {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
+}
+.cl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.cl-session { font-size: 12px; color: var(--ink); }
+.cl-savings {
+  font-size: var(--num-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--ink);
+}
+.cl-bar {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cl-bar-fill {
+  height: 100%;
+  background: rgb(34, 197, 94);
+  border-radius: 3px;
+}
+.cl-meta { font-size: 11px; font-family: var(--mono); }
+
+.lc-chart {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--s2);
+  align-items: end;
+  height: 140px;
+  border-bottom: 1px solid var(--rule);
+}
+.lc-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.lc-bar {
+  width: 100%;
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+}
+.lc-col[data-above-threshold="true"] .lc-bar { background: #ef4444; }
+.lc-label { font-size: 10px; color: var(--mute); }
+.lc-threshold-line {
+  margin-top: var(--s3);
+  font-size: 11px;
+  color: var(--mute);
+  border-top: 1px dashed var(--rule);
+  padding-top: var(--s2);
+}
+
+/* === Phase 4 power-ups: cohort delta + agent sparkline === */
+
+.cohort-label { font-weight: 600; color: var(--ink); }
+.cohort-delta {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.cohort-delta-warn { color: rgb(239, 68, 68); }
+.cohort-delta-good { color: rgb(34, 197, 94); }
+.cohort-delta-neutral { color: var(--mute); }
+
+/* === Share-safe banner ================================================ */
+
+.share-safe-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  margin: var(--s3) 0 var(--s4);
+  border-radius: 8px;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--ink);
+  font-size: 13px;
+}
+.share-safe-banner code {
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: var(--mono);
+}
+.share-safe-banner strong { color: var(--ink); }
+.share-safe-icon { font-size: 16px; line-height: 1; }
+.share-safe-copy { line-height: 1.5; }

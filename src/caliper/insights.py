@@ -70,13 +70,21 @@ def build_insights(
     total = aggregate_total(result, options, rate_card=card)
     projects = aggregate_projects(result, options, rate_card=card)
     daily = aggregate_daily(result, options, rate_card=card)
-    return build_insights_from(
+    items = build_insights_from(
         result=result,
         rate_card=card,
         total=total,
         projects=projects,
         daily=daily,
     )
+    try:
+        from caliper.inefficiencies import build_inefficiency_findings
+
+        inefficiencies = build_inefficiency_findings(result, options, card)[:3]
+    except Exception:
+        inefficiencies = []
+    items.extend(_inefficiency_insight(item) for item in inefficiencies)
+    return sorted(items, key=lambda item: (-item.priority, item.title))
 
 
 def build_insights_from(
@@ -102,10 +110,157 @@ def build_insights_from(
         _daily_acceleration_insight(daily),
         _model_concentration_insight(total),
         _vendor_mix_insight(total),
+        _top_waste_insight(result, rate_card),
+        _demand_shift_insight(result, rate_card),
     ]
     return sorted(
         [item for item in candidates if item is not None],
         key=lambda item: (-item.priority, item.title),
+    )
+
+
+def _top_waste_insight(result: LoadResult, rate_card: RateCard) -> Insight | None:
+    """Surface the single highest-impact :class:`~caliper.efficiency.Finding`
+    as a home-screen insight so the dashboard headline reflects what is
+    actually fixable in dollar terms."""
+    if not result.events:
+        return None
+    try:
+        from caliper.efficiency import run_audit
+    except ImportError:
+        return None
+    try:
+        options = _synthetic_options(result)
+        findings = run_audit(result, options, rate_card)
+    except Exception:
+        return None
+    if not findings:
+        return None
+    top = findings[0]
+    impact = float(top.impact_usd_exact)
+    if impact <= 0:
+        return None
+    return Insight(
+        severity="warn" if top.severity != "info" else "info",
+        title=f"${impact:,.2f} of waste is fixable",
+        detail=top.detail,
+        action=top.payback_action,
+        scope=SCOPE_HOME,
+        evidence=top.evidence,
+        next_command="caliper recommend",
+        category="waste",
+        priority=95,
+        confidence=top.confidence,
+        impact_usd_exact=decimal_string(top.impact_usd_exact),
+        impact_label=f"${impact:,.2f} fixable",
+        evidence_metrics=dict(top.evidence_metrics),
+        commands=top.commands or ("caliper audit", "caliper recommend"),
+    )
+
+
+def _demand_shift_insight(result: LoadResult, rate_card: RateCard) -> Insight | None:
+    """Fastest-growing model. Used by the Models dashboard to flag
+    capacity-planning conversations early."""
+    if not result.events:
+        return None
+    try:
+        from caliper.predict import forecast_per_model
+    except ImportError:
+        return None
+    forecasts = forecast_per_model(result.events, rate_card, "UTC")
+    growing = [card for card in forecasts if card.growing and card.daily_mean_tokens > 0]
+    if not growing:
+        return None
+    top = max(growing, key=lambda card: card.trend_slope_tokens_per_day)
+    if top.trend_slope_tokens_per_day <= 0:
+        return None
+    return Insight(
+        severity="info",
+        title=f"{top.model} demand is growing",
+        detail=(
+            f"{top.model} usage is rising by ~{int(top.trend_slope_tokens_per_day):+,} tokens/day. "
+            f"30-day projection: ${top.projected_cost_30d_usd:,.2f}."
+        ),
+        action="caliper predict --per-model to see the full demand split.",
+        scope=SCOPE_MODELS,
+        evidence=(
+            f"slope {int(top.trend_slope_tokens_per_day):+,} tokens/day",
+            f"projected 30d share {top.projected_share_30d:.0%}",
+        ),
+        next_command="caliper predict",
+        category="forecast",
+        priority=70,
+        confidence="medium",
+        impact_label=f"${top.projected_cost_30d_usd:,.2f}/mo at current trend",
+        evidence_metrics={
+            "model": top.model,
+            "model_vendor": top.model_vendor,
+            "slope_tokens_per_day": top.trend_slope_tokens_per_day,
+            "projected_cost_30d_usd": top.projected_cost_30d_usd,
+        },
+        commands=("caliper predict", "caliper recommend"),
+    )
+
+
+def _synthetic_options(result: LoadResult):
+    """Build a minimal RuntimeOptions for finders that only require the
+    window span for monthly extrapolation."""
+    import datetime as _dt
+    from pathlib import Path as _Path
+
+    from caliper.models import RuntimeOptions as _RuntimeOptions
+
+    if not result.events:
+        now = _dt.datetime.now(tz=_dt.UTC)
+        start, end = now - _dt.timedelta(days=1), now
+    else:
+        start = min(event.timestamp for event in result.events)
+        end = max(event.timestamp for event in result.events) + _dt.timedelta(seconds=1)
+    return _RuntimeOptions(
+        session_root=_Path("/dev/null"),
+        state_db=_Path("/dev/null"),
+        config_path=_Path("/dev/null"),
+        start=start,
+        end=end,
+        timezone="UTC",
+        pricing_mode="model",
+        service_tier="auto",
+        unknown_service_tier="current-config",
+        tier_overrides=None,
+        rates_file=None,
+        dedupe=True,
+        parse_cache=True,
+        default_model="gpt-5.5",
+        show_prompts=False,
+        show_paths=False,
+        offline=True,
+        compact=False,
+        width=None,
+        top_threads=0,
+    )
+
+
+def _inefficiency_insight(finding) -> Insight:
+    return Insight(
+        severity="warn" if finding.severity in {"warn", "fail"} else "info",
+        title=finding.title,
+        detail=f"{finding.detail} Evidence: {finding.evidence_status}.",
+        action=finding.action,
+        scope=finding.scope,
+        evidence=finding.evidence,
+        next_command=(finding.commands[0] if finding.commands else "caliper inefficiencies"),
+        category="inefficiency",
+        priority=88 if finding.confidence == "high" else 78,
+        confidence=finding.confidence,
+        impact_usd_exact=decimal_string(finding.impact_usd_exact),
+        impact_label=f"${finding.impact_usd_exact:,.2f} impact",
+        evidence_metrics=finding.evidence_metrics
+        | {
+            "evidence_status": finding.evidence_status,
+            "sample_size": finding.sample_size,
+            "baseline": finding.baseline,
+        },
+        commands=finding.commands or ("caliper inefficiencies",),
     )
 
 
@@ -174,10 +329,10 @@ def _model_concentration_insight(total) -> Insight | None:
         return None
     return Insight(
         severity="info",
-        title=f"{top.model} is {share:.0%} of cost",
+        title=f"{top.model} is {share:.0%} of selected-window cost",
         detail=(
-            f"You don't have a cost problem. You have a {top.model} problem. "
-            "Try a cheaper sibling and re-run whatif to compare."
+            f"{top.model} accounts for {share:.0%} of selected-window cost. "
+            "Run a what-if check before changing routing."
         ),
         action="caliper whatif --hypothetical-model claude-sonnet-4.6",
         scope=SCOPE_HOME,
@@ -241,17 +396,17 @@ def _cache_reuse_insight(result: LoadResult, total, card: RateCard) -> Insight |
         severity="info",
         title="High cache reuse" if cache_ratio >= 0.5 else "Low cache reuse",
         detail=(
-            f"{cache_ratio:.1%} of input tokens came from cache. "
-            f"That saved ${savings.cost_usd:,.2f}."
+            f"{cache_ratio:.1%} of input tokens were recorded as cached input. "
+            f"Estimated cache savings: ${savings.cost_usd:,.2f}."
         ),
         action="Stable prompts keep that working.",
         scope=SCOPE_HOME,
-        evidence=(f"{cache_ratio:.1%} cache hit",),
+        evidence=(f"{cache_ratio:.1%} cached-input share",),
         category="cache",
         priority=70 if cache_ratio < 0.5 else 55,
         confidence="high",
         impact_usd_exact=decimal_string(savings.cost_usd),
-        impact_label=f"${savings.cost_usd:,.2f} saved by cache",
+        impact_label=f"est. ${savings.cost_usd:,.2f} cache savings",
         evidence_metrics={
             "cache_hit_ratio": cache_ratio,
             "input_tokens": total.totals.input_tokens,
@@ -300,10 +455,10 @@ def _project_concentration_insight(projects: list, total) -> Insight | None:
     label = _safe_project_label(top.label)
     return Insight(
         severity="info",
-        title=f"{label} is {share:.0%} of cost",
+        title=f"{label} is {share:.0%} of selected-window cost",
         detail=(
-            f"{label} ran up ${top.costs.cost_usd:,.2f}. "
-            "The next projects together are less. Decide if that is the intent."
+            f"{label} accounts for ${top.costs.cost_usd:,.2f} in the selected window. "
+            "Decide whether that concentration is expected."
         ),
         action="caliper project --top 5 to inspect the rest.",
         scope=SCOPE_PROJECTS,

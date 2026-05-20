@@ -27,7 +27,7 @@ wheels = [
 
 [[package]]
 name = "caliper-ai"
-version = "0.0.38"
+version = "0.0.40"
 source = { editable = "." }
 dependencies = [
     { name = "platformdirs" },
