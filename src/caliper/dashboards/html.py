@@ -362,6 +362,68 @@ section[id]:target > [class*="cal-section-head"] {
 /* Pretty wrap */
 p, h1, h2, h3 { text-wrap: pretty; }
 
+/* ============================================================================
+   Hover polish — only on devices with real pointers, never during print.
+   Disabled cleanly by the print theme + @media print blocks above. */
+@media (hover: hover) and (pointer: fine) {
+  /* Stat cards: subtle lift + brighter border, so hover feels alive. */
+  .cal-stat-card {
+    transition: transform 140ms ease-out, border-color 140ms ease-out,
+                box-shadow 140ms ease-out;
+  }
+  .cal-stat-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-strong);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  }
+  /* Bar chart rects: brighten the filled bar on hover so the tooltip
+     (native SVG <title>) is preceded by a visible affordance. */
+  .cal-bar-rect { transition: fill-opacity 120ms ease-out; }
+  .cal-bar-rect:hover { fill-opacity: 0.78; }
+  /* Verdict-strip pill links: existing <a> gets underline; lift the pill
+     background a touch so the whole chip reads as interactive. */
+  .cal-verdict-chip { display: inline-block; transition: transform 100ms ease-out; }
+  .cal-verdict-chip:hover { transform: translateY(-1px); }
+  .cal-verdict-chip:hover > span {
+    background: var(--panel-hover) !important;
+    border-color: var(--accent-tint-2) !important;
+  }
+  /* Heatmap cells: highlight the hovered cell so the user can scan
+     the matrix without losing their place. */
+  .cal-heatmap-cell {
+    transition: box-shadow 100ms ease-out, transform 100ms ease-out;
+  }
+  .cal-heatmap-cell:hover {
+    box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 3px var(--accent-tint);
+    transform: scale(1.15);
+    z-index: 1;
+    position: relative;
+  }
+  /* Tables: keep the existing row hover, add a sharper one-pixel accent
+     line at the row's left edge so the user sees where they are. */
+  .cal-table tbody tr { position: relative; }
+  .cal-table tbody tr:hover::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent);
+  }
+  /* Pills/badges sitting outside the verdict strip — soft highlight. */
+  a:hover > span[class=""], a:hover > span:not([class]) {
+    background: var(--panel-hover);
+  }
+  /* Advisor recommendation rows — soft highlight on hover. */
+  .cal-advisor-row { transition: background 120ms ease-out; }
+  .cal-advisor-row:hover { background: var(--panel-hover); }
+}
+
+/* Disable any hover transforms during actual print so the PDF is static. */
+@media print {
+  .cal-stat-card:hover { transform: none !important; box-shadow: none !important; }
+  .cal-heatmap-cell:hover { transform: none !important; box-shadow: none !important; }
+}
+
 /* Interactive playground — rhythm swap, tweaks panel, save button.
    The renderer emits BOTH rhythm bodies when interactive mode is on, and
    the active one is selected by a root-level data-rhythm attribute. */
@@ -932,7 +994,8 @@ def _bar_chart(
         )
         if bar_h > 0.5:
             parts.append(
-                f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" '
+                f'<rect class="cal-bar-rect" x="{x:.1f}" y="{y:.1f}" '
+                f'width="{bw:.1f}" height="{bar_h:.1f}" '
                 f'fill="{accent}" rx="1"><title>{_esc(label)}: '
                 f"{_esc(fmt_money(value))} · {_esc(shape)}</title></rect>"
             )
@@ -1001,7 +1064,8 @@ def _heatmap_7x24(recap: Recap) -> str:
                 bg = "var(--accent)"
                 op = 0.18 + (v / mx) * 0.82
             parts.append(
-                f'<span title="{day_labels[d]} {h:02d}:00 · {v} calls" '
+                f'<span class="cal-heatmap-cell" '
+                f'title="{day_labels[d]} {h:02d}:00 · {v} calls" '
                 f'style="background:{bg};opacity:{op:.2f};border-radius:2px;'
                 f'border:1px solid var(--hairline)"></span>'
             )
@@ -1305,23 +1369,30 @@ def _verdict_strip(d: Dashboard, rhythm: str) -> str:
         }.get(f.tone, "default")
 
     if rhythm == "terminal":
+        # 2-row layout (verdict + subtitle on row 1, pills on row 2) — same
+        # structure as receipt with terminal-flavoured typography. The
+        # prototype's 3-column grid collapsed when pill text was long
+        # (every word wrapping). Stacking the pills below makes the row
+        # robust against real-world finding strings.
         chips = "".join(
-            f'<a href="#{_esc(f.anchor)}" style="text-decoration:none">'
+            f'<a href="#{_esc(f.anchor)}" class="cal-verdict-chip" style="text-decoration:none">'
             f"{_pill(_esc(f.title) + ' · ' + _esc(f.impact), tone=_pill_tone(f))}</a>"
             for f in findings
         )
         return (
-            '<div class="cal-verdict-strip" style="display:grid;'
-            "grid-template-columns:auto 1fr auto;gap:18px;align-items:center;"
-            "padding:10px 16px;background:var(--panel);border:1px solid var(--border);"
-            f'border-left:3px solid {tone_accent};border-radius:0 var(--r-md) var(--r-md) 0">'
-            f'<div style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
-            f'color:{tone_accent};text-transform:uppercase;font-weight:600">Verdict</div>'
-            '<div style="display:flex;align-items:baseline;gap:12px;min-width:0">'
+            '<div class="cal-verdict-strip cal-verdict-terminal" '
+            'style="background:var(--panel);border:1px solid var(--border);'
+            f"border-left:3px solid {tone_accent};"
+            'border-radius:0 var(--r-md) var(--r-md) 0;padding:12px 16px">'
+            '<div style="display:flex;align-items:baseline;gap:12px;'
+            'margin-bottom:8px;flex-wrap:wrap">'
+            f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
+            f"color:{tone_accent};text-transform:uppercase;font-weight:600;"
+            'white-space:nowrap">Verdict</span>'
             f'<span style="font-size:14px;color:var(--ink);font-weight:600">{_esc(eb.verdict)}</span>'
             f'<span style="font-size:12px;color:var(--mute)">· {_esc(eb.subtitle)}</span>'
             "</div>"
-            f'<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">{chips}</div>'
+            f'<div style="display:flex;gap:6px;flex-wrap:wrap">{chips}</div>'
             "</div>"
         )
     chips_html = []
@@ -1334,7 +1405,7 @@ def _verdict_strip(d: Dashboard, rhythm: str) -> str:
             + "</span>"
         )
         chips_html.append(
-            f'<a href="#{_esc(f.anchor)}" style="text-decoration:none">'
+            f'<a href="#{_esc(f.anchor)}" class="cal-verdict-chip" style="text-decoration:none">'
             f"{_pill(inner, tone=_pill_tone(f))}</a>"
         )
     return (
@@ -1955,7 +2026,8 @@ def _section_advisor(d: Dashboard, *, rhythm: str) -> str:
         top = "none" if i == 0 else "1px solid var(--border)"
         conf_tone = "var(--ok)" if r.confidence >= 0.75 else "var(--warn)"
         body_rows.append(
-            '<div style="display:grid;grid-template-columns:1fr auto auto;gap:14px;'
+            '<div class="cal-advisor-row" '
+            'style="display:grid;grid-template-columns:1fr auto auto;gap:14px;'
             f'padding:12px 16px;border-top:{top};align-items:center">'
             '<div style="min-width:0">'
             f'<div style="font-size:13px;color:var(--ink);font-weight:500">{_esc(r.title)}</div>'

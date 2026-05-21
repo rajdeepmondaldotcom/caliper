@@ -2,6 +2,39 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.42 - 2026-05-21
+
+### Fixed
+
+- **Terminal verdict strip with long findings.** The 3-column grid
+  (`auto 1fr auto`) collapsed when real data carried long brief-finding
+  text — every word of the verdict subtitle wrapped onto its own line.
+  Switched the terminal verdict to the same 2-row block the receipt
+  uses (label + verdict + subtitle on row 1, pills on row 2), so the
+  layout stays readable regardless of finding length.
+
+### Added (hover polish — default on)
+
+- **Stat-card lift on hover** (subtle `translateY(-2px)` + brighter
+  border + drop shadow), so the four overview cards read as
+  interactive surfaces.
+- **Bar chart bar highlight on hover** — the filled rect fades to
+  `fill-opacity: 0.78` while the user dwells. The native SVG `<title>`
+  tooltip still appears under the cursor.
+- **Heatmap cell highlight on hover** — accent ring + slight scale-up,
+  so the user can scan a busy 7×24 grid without losing their place.
+- **Table row left-rail accent on hover** — a 2px accent stripe
+  appears on the row the cursor is on; combines with the existing
+  panel-hover background to give a clean focus indicator.
+- **Verdict-strip pill lift on hover** — the chip translates up 1px
+  and its background brightens, so the whole pill (not just the text)
+  reads as a clickable link.
+- **Advisor recommendation rows** highlight on hover.
+
+All hover effects are gated behind `@media (hover: hover) and (pointer: fine)`
+so touch devices don't pick up sticky states, and `@media print`
+disables every transform/shadow for clean PDF output.
+
 ## 0.0.41 - 2026-05-21
 
 ### Added (v2 dashboard — full redesign + interactive playground)
