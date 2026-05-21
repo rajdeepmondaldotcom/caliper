@@ -344,6 +344,55 @@ p, h1, h2, h3 { text-wrap: pretty; }
   .cal-advisor-row:hover { background: var(--panel-hover); }
 }
 
+/* Terminal masthead — three zones with hairline dividers, monospace,
+   icon prominent. Keeps the brand / stats / badges from kissing each
+   other on narrow viewports. */
+.cal-terminal-mast {
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--panel);
+  padding: 14px 28px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 20px;
+  align-items: center;
+  font-family: var(--mono);
+}
+.cal-terminal-mast .cal-terminal-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 20px;
+  border-right: 1px solid var(--border);
+}
+.cal-terminal-mast .cal-terminal-stats {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--mute);
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.cal-terminal-mast .cal-terminal-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
+}
+[data-viewport="mobile"] .cal-terminal-mast {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+[data-viewport="mobile"] .cal-terminal-mast .cal-terminal-brand,
+[data-viewport="mobile"] .cal-terminal-mast .cal-terminal-badges {
+  border: 0;
+  padding: 0;
+  justify-content: flex-start;
+}
+
 /* Disable any hover transforms during actual print so the PDF is static. */
 @media print {
   .cal-stat-card:hover { transform: none !important; box-shadow: none !important; }

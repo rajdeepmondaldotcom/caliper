@@ -2,6 +2,52 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.43 - 2026-05-21
+
+### Fixed
+
+- **Anomaly detection no longer produces nonsense σ on sparse data.**
+  Real reports were showing `354210.2σ` for a $307 spike: the old
+  baseline included zero-cost days, the median collapsed to $0, the
+  fallback scale dropped below $0.001, and any meaningful spend
+  exploded the σ. The detector now uses an active-day baseline
+  (≥ $0.01 only) with a max-of-three robust scale (`MAD × 1.4826`,
+  `IQR / 1.349`, `median × 0.10`) plus a **$1 absolute floor**, then
+  gates each spike on a 3× fold-change AND a $1 minimum impact, and
+  caps the displayed σ at 20 (anything past reads "≥20σ extreme").
+  Result: anomalies are now actionable signals, not math artifacts.
+  Web-research informed (AWS / GCP cost-anomaly best practices,
+  Tukey robust σ).
+
+### Changed (advisor)
+
+- **Model recommendations come from the live pricing catalog, not a
+  hard-coded list.** `arbitrage.py` previously routed Opus →
+  Sonnet 4.6 and GPT-5.5 → GPT-5.4 Mini regardless of what cheaper
+  models had shipped. The new `_cheapest_in_family(model, rate_card)`
+  helper scans the rate card (built-in `MODELS_BY_NAME` + Portkey /
+  LiteLLM catalog) and picks the cheapest sibling whose input price is
+  ≤ 1/3 of the source. Today that means:
+  - Claude Opus 4.7 → **Claude Haiku 4.5** (not Sonnet)
+  - Claude Sonnet 4.6 → **Claude Haiku 4.5** (Sonnet wasn't even
+    flagged before)
+  - GPT-5.5 → **GPT-5.4 Mini**
+  When Anthropic / OpenAI ship a newer / cheaper model, it lands in
+  the catalog and the advisor starts recommending it automatically —
+  no code change required.
+- "Premium" is no longer a static list. A model is treated as premium
+  iff the catalog holds a materially-cheaper sibling. New flagship
+  models flow into the heuristics the moment they're priced.
+
+### Polished
+
+- **Terminal masthead.** Icon scaled to 26px (matched the receipt),
+  three zones (brand / stats / badges) separated by hairline
+  dividers, mobile layout collapses to a single stacked column
+  without breaking the rhythm.
+- **σ chip in the anomalies section** widens when the label says
+  "extreme" so the text doesn't crowd the row's left rail.
+
 ## 0.0.42 - 2026-05-21
 
 ### Fixed

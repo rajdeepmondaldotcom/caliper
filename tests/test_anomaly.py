@@ -149,3 +149,50 @@ def test_detect_project_daily_anomalies_requires_project_history():
         _event(session=f"s{i}", ts=base + dt.timedelta(days=i), cwd="/tmp/sparse") for i in range(3)
     ]
     assert detect_project_daily_anomalies(events, _card(), "UTC") == []
+
+
+# ---------------------------------------------------------------------------
+# Conservative-detector regression tests — guard against the 354,210σ bug.
+# ---------------------------------------------------------------------------
+
+
+def test_detect_daily_anomalies_does_not_explode_on_sparse_data():
+    """The old detector produced 354,210σ for a $300 spike against a sea
+    of zero-cost days because median collapsed and the scale fallback
+    became < $0.001. The new detector caps σ and floors the scale so
+    sparse-series spikes register as a sane "≥20σ extreme" instead.
+    """
+    rows = [_daily(f"d{i}", 0.0) for i in range(28)]
+    rows.append(_daily("spike", 307.87))
+    rows.append(_daily("tiny", 0.001))
+    anomalies = detect_daily_anomalies(rows)
+    assert len(anomalies) >= 1
+    spike = next(a for a in anomalies if a.label == "spike")
+    # The cap is 20.0; anything beyond is "extreme", not a real number.
+    assert spike.z_score <= 20.0
+    assert spike.baseline_scale >= 1.0  # $1 absolute floor
+
+
+def test_detect_daily_anomalies_requires_minimum_dollar_impact():
+    """A 4× spike worth $0.40 isn't worth interrupting the user."""
+    rows = [_daily(f"d{i}", 0.10) for i in range(8)]
+    rows.append(_daily("petty", 0.40))  # 4× but only $0.30 above baseline
+    assert detect_daily_anomalies(rows) == []
+
+
+def test_detect_daily_anomalies_requires_3x_fold_change():
+    """A 2× spike on a regular day isn't a spike — it's normal drift."""
+    rows = [_daily(f"d{i}", 10.0) for i in range(8)]
+    rows.append(_daily("drift", 20.0))  # exactly 2× — below the 3× gate
+    assert detect_daily_anomalies(rows) == []
+
+
+def test_detect_daily_anomalies_caps_displayed_sigma():
+    """Even a real 50× spike should report ≤ 20σ for display sanity."""
+    rows = [_daily(f"d{i}", 1.0) for i in range(8)]
+    rows.append(_daily("huge", 500.0))  # 500× the baseline
+    anomalies = detect_daily_anomalies(rows)
+    assert anomalies
+    assert anomalies[0].z_score <= 20.0
+    # Impact is still the real dollar delta, only σ is capped.
+    assert anomalies[0].impact_usd_exact > Decimal("400")

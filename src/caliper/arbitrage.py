@@ -6,7 +6,12 @@ from decimal import Decimal
 from caliper.aggregation import event_cost
 from caliper.arbitrage_rules import HEURISTICS_VERSION, RULES
 from caliper.models import UsageEvent, decimal_string
-from caliper.pricing import RateCard
+from caliper.pricing import MODELS_BY_NAME, RateCard, normalize_model
+
+# Threshold for "materially cheaper" sibling — input price ≤ 1/3 of the
+# source. Matches the spirit of the anomaly fold-change gate so the
+# advisor doesn't recommend a marginal swap that users will ignore.
+_CHEAPER_RATIO = 1.0 / 3.0
 
 
 @dataclass(frozen=True)
@@ -115,10 +120,24 @@ class _RecommendationBucket:
         )
 
 
-def suggest(events: list[UsageEvent], threshold: float = 0.6) -> list[ArbitrageSuggestion]:
+def suggest(
+    events: list[UsageEvent],
+    threshold: float = 0.6,
+    *,
+    rate_card: RateCard | None = None,
+) -> list[ArbitrageSuggestion]:
+    """Yield individual heuristic flags (the pre-aggregated form).
+
+    ``rate_card`` is optional so that legacy callers without a built
+    catalog still work — when omitted, the function loads a default
+    rate card. The default carries the built-in :data:`MODELS_BY_NAME`
+    table which is enough to know that Opus is more expensive than
+    Haiku.
+    """
+    card = rate_card if rate_card is not None else RateCard.load(None, "model")
     suggestions: list[ArbitrageSuggestion] = []
     for event in events:
-        suggestions.extend(_event_suggestions(event))
+        suggestions.extend(_event_suggestions(event, card))
     return sorted(
         [item for item in suggestions if item.confidence >= threshold],
         key=lambda item: (-item.confidence, item.rule_id),
@@ -134,10 +153,10 @@ def recommend(
 ) -> list[ArbitrageRecommendation]:
     buckets: dict[tuple[str, str, str], _RecommendationBucket] = {}
     for event in events:
-        for suggestion in _event_suggestions(event):
+        for suggestion in _event_suggestions(event, rate_card):
             if suggestion.confidence < threshold:
                 continue
-            target_model, target_tier = _target_for(suggestion.rule_id, event)
+            target_model, target_tier = _target_for(suggestion.rule_id, event, rate_card)
             key = (suggestion.rule_id, target_model, target_tier)
             bucket = buckets.setdefault(
                 key,
@@ -176,10 +195,18 @@ def explain(rule_id: str) -> dict[str, str]:
     }
 
 
-def _event_suggestions(event: UsageEvent) -> list[ArbitrageSuggestion]:
+def _event_suggestions(event: UsageEvent, rate_card: RateCard) -> list[ArbitrageSuggestion]:
+    """Yield raw heuristic flags for ``event``.
+
+    "Premium" is no longer a hard-coded list — a model is premium iff
+    the rate card holds a materially-cheaper sibling in the same
+    family. That means new top-tier models automatically flow into
+    these rules as soon as they show up in the catalog.
+    """
     suggestions: list[ArbitrageSuggestion] = []
     model = event.model.lower()
-    if _is_premium(model) and event.usage.input_tokens < 2_000:
+    cheaper = _cheapest_in_family(model, rate_card)
+    if cheaper and event.usage.input_tokens < 2_000:
         suggestions.append(
             ArbitrageSuggestion(
                 rule_id="premium-short-context",
@@ -195,7 +222,7 @@ def _event_suggestions(event: UsageEvent) -> list[ArbitrageSuggestion]:
                 evidence=_evidence(event) | {"output_tokens": event.usage.output_tokens},
             )
         )
-    if "opus" in model and event.usage.reasoning_output_tokens == 0:
+    if "opus" in model and event.usage.reasoning_output_tokens == 0 and cheaper:
         suggestions.append(
             ArbitrageSuggestion(
                 rule_id="opus-no-reasoning",
@@ -206,19 +233,97 @@ def _event_suggestions(event: UsageEvent) -> list[ArbitrageSuggestion]:
     return suggestions
 
 
-def _is_premium(model: str) -> bool:
-    return "opus" in model or model in {"gpt-5.5", "gpt-5.4"}
+def _model_family(name: str) -> str:
+    """Return the family slug of a canonical model name.
+
+    ``claude-opus-4.7`` → ``"claude"``; ``gpt-5.5`` → ``"gpt"``;
+    ``gemini-2.5-flash`` → ``"gemini"``. Empty string for unknown
+    names so callers can short-circuit.
+    """
+    if not name:
+        return ""
+    head, _, _ = name.partition("-")
+    return head
 
 
-def _target_for(rule_id: str, event: UsageEvent) -> tuple[str, str]:
-    model = event.model.lower()
+def _input_rate(model: str, rate_card: RateCard) -> float | None:
+    """Lookup the per-1M-token *input* price for a model.
+
+    Reads the runtime rate card first (which picks up local overrides
+    and the Portkey/LiteLLM catalog) and falls back to the built-in
+    :data:`pricing.MODELS_BY_NAME` table so the function still works
+    when callers pass a default-loaded :class:`RateCard`.
+    """
+    canonical = normalize_model(model)
+    if not canonical:
+        return None
+    card = rate_card.catalog_cards.get(canonical) or MODELS_BY_NAME.get(canonical)
+    if card is None or card.api_rates is None:
+        return None
+    rate = card.api_rates.input
+    if rate is None:
+        return None
+    try:
+        return float(rate)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cheapest_in_family(model: str, rate_card: RateCard) -> str:
+    """Find the cheapest catalog sibling that's materially cheaper.
+
+    Two siblings are in the same family iff
+    :func:`_model_family` returns the same slug. "Materially cheaper"
+    means the candidate's input rate is ≤ ``_CHEAPER_RATIO`` of the
+    source's (≈ 3× cheaper). Returns the canonical name of the winner,
+    or ``""`` when no qualifying alternative exists.
+
+    This is the heart of the "recommend the latest cheap model"
+    behaviour — when Anthropic ships Claude Haiku 4.5 (or anything
+    cheaper), it lands in the catalog and starts being recommended
+    automatically.
+    """
+    src = normalize_model(model)
+    if not src:
+        return ""
+    family = _model_family(src)
+    if not family:
+        return ""
+    src_rate = _input_rate(src, rate_card)
+    if src_rate is None or src_rate <= 0:
+        return ""
+    threshold = src_rate * _CHEAPER_RATIO
+    candidates: list[tuple[float, str]] = []
+    # Walk both the runtime catalog (Portkey/LiteLLM data) and the
+    # built-in MODELS_BY_NAME table — neither alone is authoritative.
+    seen: set[str] = set()
+    for name in list(rate_card.catalog_cards) + list(MODELS_BY_NAME):
+        if name == src or name in seen:
+            continue
+        seen.add(name)
+        if _model_family(name) != family:
+            continue
+        rate = _input_rate(name, rate_card)
+        if rate is None or rate <= 0 or rate > threshold:
+            continue
+        candidates.append((rate, name))
+    if not candidates:
+        return ""
+    candidates.sort()  # cheapest first; tie-break by name for stability
+    return candidates[0][1]
+
+
+def _target_for(rule_id: str, event: UsageEvent, rate_card: RateCard) -> tuple[str, str]:
+    """Resolve the ``(target_model, target_tier)`` for a suggestion.
+
+    Model targets come from the live rate card, never a hard-coded list.
+    That keeps recommendations current as cheaper models ship without
+    touching this file.
+    """
     if rule_id == "fast-tier-low-output":
         return "", "standard"
-    if "opus" in model:
-        return "claude-sonnet-4.6", ""
-    if model in {"gpt-5.5", "gpt-5.4"}:
-        return "gpt-5.4-mini", ""
-    return "", ""
+    cheaper = _cheapest_in_family(event.model, rate_card)
+    return cheaper, ""
 
 
 def _estimated_savings(

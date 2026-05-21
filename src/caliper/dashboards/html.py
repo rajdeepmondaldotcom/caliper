@@ -418,6 +418,55 @@ p, h1, h2, h3 { text-wrap: pretty; }
   .cal-advisor-row:hover { background: var(--panel-hover); }
 }
 
+/* Terminal masthead — three zones with hairline dividers, monospace,
+   icon prominent. Keeps the brand / stats / badges from kissing each
+   other on narrow viewports. */
+.cal-terminal-mast {
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--panel);
+  padding: 14px 28px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 20px;
+  align-items: center;
+  font-family: var(--mono);
+}
+.cal-terminal-mast .cal-terminal-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 20px;
+  border-right: 1px solid var(--border);
+}
+.cal-terminal-mast .cal-terminal-stats {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--mute);
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.cal-terminal-mast .cal-terminal-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
+}
+[data-viewport="mobile"] .cal-terminal-mast {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+[data-viewport="mobile"] .cal-terminal-mast .cal-terminal-brand,
+[data-viewport="mobile"] .cal-terminal-mast .cal-terminal-badges {
+  border: 0;
+  padding: 0;
+  justify-content: flex-start;
+}
+
 /* Disable any hover transforms during actual print so the PDF is static. */
 @media print {
   .cal-stat-card:hover { transform: none !important; box-shadow: none !important; }
@@ -1875,6 +1924,20 @@ def _section_insights(d: Dashboard, *, dense: bool, rhythm: str) -> str:
     return _section_wrap("insights", rhythm=rhythm, body=body)
 
 
+def _fmt_sigma(z: float) -> str:
+    """Clamp the σ display so math artifacts don't render as wild numbers.
+
+    The anomaly detector already caps σ at :data:`anomaly.SIGMA_DISPLAY_CAP`
+    before populating the payload, but this guard handles legacy data
+    paths (e.g. JSON snapshots from earlier versions) too. Anything past
+    the cap reads as ``≥20σ extreme`` so the user sees "this is off the
+    scale" instead of "354210.2σ" which reads as a bug.
+    """
+    if z >= 20.0:
+        return "≥20σ extreme"
+    return f"{z:.1f}σ"
+
+
 def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str) -> str:
     if not d.anomalies:
         return ""
@@ -1884,13 +1947,18 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str) -> str:
         tone_color = "var(--bad)" if a.tone == "critical" else "var(--warn)"
         evidence_tone = "good" if a.evidence_status == "exact" else "warn"
         top = "none" if i == 0 else "1px solid var(--border)"
+        # Sigma chip width widens when the label says "extreme" so the
+        # text doesn't get visually cramped against the row's left rail.
+        sigma_label = _fmt_sigma(a.z_score)
+        sigma_min_width = 84 if "extreme" in sigma_label else 56
         rows_html.append(
             f'<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;'
             f"align-items:baseline;padding:{pad};border-left:3px solid {tone_color};"
             f'border-top:{top}">'
             f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;'
-            f'color:{tone_color};text-transform:uppercase;font-weight:600;min-width:56px">'
-            f"{a.z_score:.1f}σ</span>"
+            f"color:{tone_color};text-transform:uppercase;font-weight:600;"
+            f'min-width:{sigma_min_width}px">'
+            f"{sigma_label}</span>"
             '<div style="min-width:0">'
             f'<div style="color:var(--ink);font-size:13px;font-weight:500">'
             f'{_esc(a.kind)} · <span style="font-family:var(--mono);color:var(--ink-2)">{_esc(a.label)}</span></div>'
@@ -2327,20 +2395,28 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
 
 
 def _terminal_masthead(d: Dashboard) -> str:
+    """Top status bar for the Terminal rhythm.
+
+    Three zones, separated by hairlines so the eye reads them cleanly:
+
+    * **Brand** — Caliper icon (26px, matching the Receipt header) +
+      wordmark + version. Right-padded so the wordmark doesn't kiss
+      the divider.
+    * **Stats** — OFFLINE indicator, vendor count, generated-at,
+      timezone. Center-aligned, monospace, baseline-aligned.
+    * **Badges** — Evidence-quality chip + window range.
+    """
     ev = d.quality_score
     badge = _evidence_badge(ev) if ev and ev.score > 0 else ""
     gen_short = (d.generated_at or "").replace("T", " ")[:16]
     return (
-        '<div style="border-bottom:1px solid var(--border-strong);background:var(--panel);'
-        "padding:12px 28px;display:grid;grid-template-columns:auto 1fr auto;gap:24px;"
-        'align-items:center;font-family:var(--mono)">'
-        '<div style="display:flex;align-items:center;gap:12px">'
-        f"{_caliper_mark(20)}"
+        '<div class="cal-terminal-mast">'
+        '<div class="cal-terminal-brand">'
+        f"{_caliper_mark(26)}"
         '<span style="font-size:16px;font-weight:700;letter-spacing:.05em;color:var(--ink)">CALIPER</span>'
         f'<span style="font-size:11px;color:var(--ghost);letter-spacing:.10em">v{_esc(d.caliper.version)} · schema {_esc(d.caliper.schema_version)}</span>'
         "</div>"
-        '<div style="display:flex;align-items:center;gap:18px;font-size:11px;'
-        'color:var(--mute);justify-content:center">'
+        '<div class="cal-terminal-stats">'
         '<span style="display:flex;align-items:center;gap:6px">'
         '<span style="width:6px;height:6px;border-radius:50%;background:var(--ok)"></span>'
         '<span style="color:var(--ok)">OFFLINE</span></span>'
@@ -2349,8 +2425,11 @@ def _terminal_masthead(d: Dashboard) -> str:
         '<span style="color:var(--ghost)">·</span>'
         f"<span>GENERATED {_esc(gen_short)}</span>"
         '<span style="color:var(--ghost)">·</span>'
-        f"<span>{_esc(d.window.timezone)}</span></div>"
-        f'<div style="text-align:right;display:flex;gap:8px;align-items:center">{badge}{_window_badge(d.window)}</div>'
+        f"<span>{_esc(d.window.timezone)}</span>"
+        "</div>"
+        '<div class="cal-terminal-badges">'
+        f"{badge}{_window_badge(d.window)}"
+        "</div>"
         "</div>"
     )
 
