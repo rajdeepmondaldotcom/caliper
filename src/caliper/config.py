@@ -84,6 +84,209 @@ class TuiConfig:
         return replace(self, theme=theme)
 
 
+VALID_DASHBOARD_THEMES = ("dark", "light", "print")
+VALID_DASHBOARD_RHYTHMS = ("receipt", "terminal")
+VALID_DASHBOARD_DENSITIES = ("comfortable", "compact")
+VALID_DASHBOARD_PRIVACY = ("off", "print-only", "always")
+
+
+@dataclass(frozen=True)
+class DashboardConfig:
+    """User-tweakable defaults for ``caliper dashboard``.
+
+    Lives under a ``[dashboard]`` section in the Caliper config file
+    (``~/.config/caliper/config.toml`` or a project-local ``.caliper.toml``).
+    CLI flags always win — these values populate the defaults the user
+    sees when no flag is passed.
+
+    The ``output_dir`` + ``filename_template`` pair governs where a
+    generated dashboard is saved when ``--output`` is omitted. The
+    template can include any of the following placeholders:
+
+    * ``{timestamp}`` — formatted using ``timestamp_format`` (strftime).
+    * ``{privacy}`` — ``off``, ``print-only``, or ``always``.
+    * ``{theme}``, ``{rhythm}``, ``{density}`` — the same values as the
+      corresponding flags.
+    """
+
+    theme: str = "dark"
+    rhythm: str = "receipt"
+    density: str = "comfortable"
+    # Default: original format — real names everywhere. Privacy redaction
+    # is opt-in via the ``--privacy`` flag (print-only | always) or the
+    # corresponding key in ``[dashboard]``.
+    privacy: str = "off"
+    show_paths: bool = False
+    output_dir: str = "~/Downloads"
+    # ``{privacy_suffix}`` is "" when privacy is off and ``-privacy-<mode>``
+    # otherwise — keeps the default filename clean while still tagging
+    # redacted exports for traceability. Plain ``{privacy}`` is also
+    # accepted for users who want the explicit tag.
+    filename_template: str = "caliper-dashboard-{timestamp}{privacy_suffix}.html"
+    timestamp_format: str = "%Y-%m-%d-%H-%M"
+    open_after: bool = True
+    default_days: int = 14
+    # Interactive playground: when True the generated HTML embeds both
+    # rhythms + a floating toggle panel + a "Save snapshot" button so the
+    # recipient can flip between Receipt/Terminal and Dark/Light/Safe Share
+    # without re-running the CLI.
+    interactive: bool = True
+
+
+def _coerce_choice(value: object, choices: tuple[str, ...], default: str) -> str:
+    """Return ``value`` if it's a valid choice, else ``default``.
+
+    Config-file typos shouldn't crash the CLI — silently fall back so the
+    user sees the dashboard render with sensible defaults and can edit
+    the file later.
+    """
+    if not isinstance(value, str):
+        return default
+    candidate = value.strip().lower()
+    return candidate if candidate in choices else default
+
+
+def load_dashboard_config(loaded: dict) -> DashboardConfig:
+    """Project a previously loaded TOML dict's ``[dashboard]`` section.
+
+    Falls back to :class:`DashboardConfig` defaults for any missing or
+    invalid field.
+    """
+    section = loaded.get("dashboard") or {}
+    defaults = DashboardConfig()
+    return DashboardConfig(
+        theme=_coerce_choice(section.get("theme"), VALID_DASHBOARD_THEMES, defaults.theme),
+        rhythm=_coerce_choice(section.get("rhythm"), VALID_DASHBOARD_RHYTHMS, defaults.rhythm),
+        density=_coerce_choice(section.get("density"), VALID_DASHBOARD_DENSITIES, defaults.density),
+        privacy=_coerce_choice(section.get("privacy"), VALID_DASHBOARD_PRIVACY, defaults.privacy),
+        show_paths=bool(section.get("show_paths", defaults.show_paths)),
+        output_dir=str(section.get("output_dir", defaults.output_dir)),
+        filename_template=str(section.get("filename_template", defaults.filename_template)),
+        timestamp_format=str(section.get("timestamp_format", defaults.timestamp_format)),
+        open_after=bool(section.get("open_after", defaults.open_after)),
+        default_days=int(section.get("default_days", defaults.default_days)),
+        interactive=bool(section.get("interactive", defaults.interactive)),
+    )
+
+
+def derive_dashboard_output_path(
+    cfg: DashboardConfig,
+    *,
+    now: dt.datetime | None = None,
+    theme: str | None = None,
+    rhythm: str | None = None,
+    density: str | None = None,
+    privacy: str | None = None,
+) -> Path:
+    """Render the ``output_dir / filename_template`` pair into a concrete path.
+
+    Used when the user runs ``caliper dashboard`` with no ``--output`` flag.
+    The ``timestamp_format`` is applied to ``now`` (defaulting to the local
+    wall clock). Any keyword argument that's ``None`` falls back to the
+    corresponding config value, so the caller can pass through the
+    already-resolved CLI choices without repeating the merge logic.
+    """
+    moment = now or dt.datetime.now()
+    resolved_privacy = privacy or cfg.privacy
+    placeholders = {
+        "timestamp": moment.strftime(cfg.timestamp_format),
+        "theme": theme or cfg.theme,
+        "rhythm": rhythm or cfg.rhythm,
+        "density": density or cfg.density,
+        "privacy": resolved_privacy,
+        # Auto-tag suffix: empty when privacy is the default ``off`` mode,
+        # so the filename stays clean. ``-privacy-<mode>`` when redacted so
+        # the recipient knows what they're holding.
+        "privacy_suffix": ("" if resolved_privacy == "off" else f"-privacy-{resolved_privacy}"),
+    }
+    # The template is user-controlled — surface a friendly error instead of
+    # propagating the raw KeyError when an unknown placeholder is used.
+    try:
+        name = cfg.filename_template.format(**placeholders)
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown placeholder {exc.args[0]!r} in filename_template; "
+            f"known placeholders: {sorted(placeholders)}"
+        ) from exc
+    return (Path(cfg.output_dir).expanduser() / name).resolve()
+
+
+DASHBOARD_CONFIG_TEMPLATE = """\
+# Caliper dashboard defaults. CLI flags always override these values.
+# Run `caliper dashboard --init-defaults` to regenerate this section.
+
+[dashboard]
+# Visual layout
+theme = "dark"                # dark | light | print
+rhythm = "receipt"            # receipt | terminal
+density = "comfortable"       # comfortable | compact
+
+# Privacy / redaction (opt-in)
+# off         — original format: real project names, session labels, paths
+# print-only  — show real names on screen, swap to indexed placeholders
+#               (Project 1, Session 2, [path]) when printing
+# always      — indexed placeholders everywhere
+#
+# Default is "off". Switch with the CLI flag --privacy <mode> or by
+# editing this line.
+privacy = "off"
+show_paths = false            # show full filesystem paths in the projects table
+
+# File output (used when --output is not passed on the CLI)
+output_dir = "~/Downloads"
+# Placeholders: {timestamp}, {theme}, {rhythm}, {density}, {privacy},
+# {privacy_suffix}. {privacy_suffix} is "" when privacy=off and
+# "-privacy-<mode>" otherwise — keeps default filenames clean.
+filename_template = "caliper-dashboard-{timestamp}{privacy_suffix}.html"
+timestamp_format = "%Y-%m-%d-%H-%M"
+open_after = true             # auto-open the generated file in a browser
+
+# Interactive playground: embed both rhythms + a floating toggle panel +
+# a "Save snapshot" button. Off-by-default for CI/CD, on-by-default for
+# humans. The toggle lets the recipient flip between Receipt/Terminal and
+# Dark/Light/Safe Share without re-running this CLI.
+interactive = true
+
+# Data window
+default_days = 14
+"""
+
+
+def write_dashboard_defaults(*, path: Path | None = None, force: bool = False) -> Path:
+    """Write a starter ``[dashboard]`` section to the user config.
+
+    If ``path`` is omitted the user-level :data:`USER_CONFIG` is used.
+    Refuses to overwrite an existing ``[dashboard]`` section unless
+    ``force=True`` — that way existing TUI / pricing sections aren't
+    blown away by accident.
+
+    Returns the file path that was written.
+    """
+    target = (path or USER_CONFIG).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        target.write_text(DASHBOARD_CONFIG_TEMPLATE)
+        return target
+
+    existing = target.read_text()
+    if "[dashboard]" in existing and not force:
+        raise FileExistsError(
+            f"{target} already contains a [dashboard] section. "
+            f"Pass --force to overwrite, or edit the file by hand."
+        )
+    if "[dashboard]" in existing and force:
+        # Crude but reliable: keep everything before the [dashboard] header
+        # and append the fresh template. The TOML parser doesn't tolerate
+        # duplicate sections, so this also fixes any prior corruption.
+        head = existing.split("[dashboard]", 1)[0].rstrip() + "\n\n"
+        target.write_text(head + DASHBOARD_CONFIG_TEMPLATE)
+        return target
+    # No [dashboard] section yet — append.
+    sep = "" if existing.endswith("\n") else "\n"
+    target.write_text(existing + sep + "\n" + DASHBOARD_CONFIG_TEMPLATE)
+    return target
+
+
 def load_tui_config(loaded: dict) -> TuiConfig:
     """Read a previously loaded TOML dict and project its ``[tui]`` section."""
     section = loaded.get("tui") or {}

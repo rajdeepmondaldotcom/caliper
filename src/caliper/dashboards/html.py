@@ -1,6502 +1,2610 @@
 """
-Caliper dashboard — HTML renderer.
+Caliper dashboard — HTML renderer (v2 redesign).
 
-Generates the entire dashboard as one self-contained HTML string. No template
-engine; pure string concatenation + f-strings. The shape contract lives in
-`data_models.py`; the data adapter that maps `LoadResult` to it lives in
-`adapter.py`. Source-of-truth CSS lives in `styles.css` and is mirrored into
-`INLINE_STYLES` below (kept byte-identical by `tests/test_handoff_styles.py`).
+Produces a single, offline HTML report from a populated :class:`Dashboard`.
+The renderer is a 1:1 port of the approved design prototype
+(``caliper-design-handoff/``). It emits pure HTML + CSS + inline SVG — no
+JavaScript, no external resources.
 
-Public entrypoint:
+Two layout *rhythms* share the same section bodies:
 
-    render_dashboard(dashboard: Dashboard) -> str
+* ``receipt`` — engineer-grade receipt (default).
+* ``terminal`` — Bloomberg/audit-terminal feel with a sticky left index rail
+  and a top ticker.
 
-Render plan (top to bottom):
-    1. <head> with inline <style>          ← see styles.css
-    2. Page header (wordmark, window badge, meta, serial)
-    3. Optional banner (vendor coverage or stale pricing)
-    4. Dashboard navigation + metric glossary
-    5. Summary cards row (Cost / Cache / Tokens / Sessions)
-    6. § 01 Command center         (first-read operational summary)
-    7. § 02 Usage windows          (7 / 30 / 90 day rollups)
-    8. § 03 Impact                 (risk and leverage cards)
-    9. § 04 Cost over time         (chart + dominant-shape strip)
-   10. § 05 Activity               (yearly heatmap)
-   11. § 06 Recap                  (hour-of-week heatmap + stats)
-   12. § 07 Session shape          (top tools + category distribution)
-   13. § 08 Usage mix              (vendor/model/tier/source shares)
-   14. § 09 Agents & overhead      (direct, logged-agent, overhead rows)
-   15. § 10 Skills & workflows     (estimated structural attribution)
-   16. § 11 Inefficiencies         (evidence-labelled findings)
-   17. § 12 Forecast drivers       (independent 30-day driver projections)
-   18. § 13 Savings advisor        (estimated optimization checks)
-   19. § 14 Highest-cost sessions  (highest-impact sessions)
-   20. § 15 Models & tiers         (table)
-   21. § 16 Projects               (cost, cadence, projection)
-   22. § 17 Anomalies              (sample-size gated spike checks)
-   23. § 18 Rate limits            (pressure and reset signal)
-   24. § 19 Insights               (severity rails)
-   25. § 20 Forecast               (linear + EWMA cards with band)
-   26. § 21 Evidence               (status table)
-   27. Page footer
+Themes (dark / light / print) are CSS classes stamped on the root.
+Density (comfortable / compact) is a CSS class stamped on the root.
+``@media print`` forces print tokens regardless of selected theme so
+``Cmd+P`` always prints clean.
 
-Every section degrades to a per-section empty placeholder. Rich and empty
-states share this same renderer; the data is what differs.
+This module exports:
+
+* :data:`INLINE_STYLES` — byte-equivalent of ``styles.css``. The on-disk file
+  is the source the designer edits; this constant is the inlined copy that
+  ships in the report. ``tests/test_handoff_styles.py`` guards the equality.
+* :func:`render_dashboard` — public entrypoint.
+* Small formatting helpers (``fmt_money``, ``fmt_tokens``, ``fmt_int``,
+  ``fmt_pct``) — kept module-level so tests and external scripts can import.
+* :func:`render_models`, :func:`render_projects` — table renderers exposed
+  for unit tests; both return self-contained HTML fragments.
 """
 
 from __future__ import annotations
 
-import dataclasses
-import datetime as dt
-import hashlib
 import html
-import json
-from datetime import datetime
+import math
+from collections.abc import Iterable, Sequence
+from typing import Any
 
-from caliper.dashboards.data_models import (
+from .data_models import (
     AdvisorRecommendation,
-    AgentRow,
-    AnomalyRow,
     Banner,
     BriefFinding,
-    CacheLeverageRow,
-    CohortDeltaRow,
-    CommandCenterCard,
-    ComparisonSignal,
-    DailyPoint,
     Dashboard,
-    DecisionQueueItem,
-    EvidenceRow,
-    ExecutiveBrief,
     Forecast,
-    ForecastDriverRow,
-    ImpactCard,
-    InefficiencyRow,
     Insight,
-    LongContextHistogram,
-    MetricContext,
-    MixRow,
-    ModelForecastRow,
     ModelRow,
-    Outlook,
     ProjectRow,
     QualityScore,
-    RateLimitForecastBand,
     RateLimitPressure,
     Recap,
-    SeasonalitySection,
     SessionRow,
     SessionShape,
-    SkillRow,
-    TierProvenance,
     Totals,
-    UsageWindow,
     WindowMeta,
-    YearlyHeatmap,
 )
 
-# ===========================================================================
-# Constants — keep in sync with `styles.css` design tokens
-# ===========================================================================
-
-# Tool category → CSS custom property (mirrors :root in styles.css)
-CAT_COLOR = {
-    "explore": "var(--explore)",
-    "execute": "var(--execute)",
-    "diagnose": "var(--diagnose)",
-    "mixed": "var(--mixed)",
-}
-
-# Section shape name → tool category (so daily.shape maps to a color)
-SHAPE_TO_CAT = {
-    "exploration": "explore",
-    "execution": "execute",
-    "diagnostic": "diagnose",
-    "mixed": "mixed",
-    "no-tools": "mixed",
-}
-
-# Sections labelled "§ 01" through "§ 21". Order is binding.
-SECTION_NUMBERS = {
-    "command-center": "01",
-    "usage-windows": "02",
-    "impact": "03",
-    "cost-over-time": "04",
-    "activity-heatmap": "05",
-    "recap": "06",
-    "session-shape": "07",
-    "usage-mix": "08",
-    "agents": "09",
-    "skills": "10",
-    "inefficiencies": "11",
-    "forecast-drivers": "12",
-    "advisor": "13",
-    "top-sessions": "14",
-    "models": "15",
-    "projects": "16",
-    "anomalies": "17",
-    "rate-limits": "18",
-    "insights": "19",
-    "forecast": "20",
-    "evidence": "21",
-}
-
-LENSES = (
-    ("executive", "Executive"),
-    ("engineer", "Engineer"),
-    ("finance", "Finance"),
-    ("audit", "Audit"),
-)
-
-METRIC_CONTEXTS = {
-    "summary.cost": MetricContext(
-        label="Cost",
-        scope="Selected report window",
-        formula="Sum of event cost_usd after parser dedupe",
-        source="Provider usage logs priced with Caliper's rate card when exact billed cost is unavailable",
-        caveat="Costs can be estimated when logs omit billing fields or pricing coverage is partial.",
-        status="estimated",
-    ),
-    "summary.cache": MetricContext(
-        label="Estimated cache savings",
-        scope="Selected report window",
-        formula="Cached input tokens priced as uncached input minus their cached-input price",
-        source="Parsed cache token counters plus the active rate card",
-        caveat="This is an estimated rate-card saving, not a guaranteed provider bill credit.",
-        status="estimated",
-    ),
-    "summary.tokens": MetricContext(
-        label="Tokens",
-        scope="Selected report window",
-        formula="Sum of parsed total_tokens across deduped usage events",
-        source="Provider or local tool usage logs",
-        caveat="Breakdown shows cached input, uncached input, and output tokens when the source records them.",
-        status="exact",
-    ),
-    "summary.sessions": MetricContext(
-        label="Sessions",
-        scope="Selected report window",
-        formula="Distinct parser session IDs with at least one usage event",
-        source="Session identifiers in local AI coding logs",
-        caveat="Turns and tool-call shape depend on the source log carrying turn facts.",
-        status="exact",
-    ),
-    "windows": MetricContext(
-        label="Rolling usage windows",
-        scope="Overlapping 7, 30, and 90 day windows ending at the dashboard end date",
-        formula="Each window is independently filtered, deduped, and aggregated",
-        source="The same parsed events as the selected report window",
-        caveat="Windows overlap by design, so their values should not be added together.",
-        status="exact",
-    ),
-    "mix.share": MetricContext(
-        label="Share",
-        scope="Selected report window",
-        formula="Row cost divided by selected-window total cost",
-        source="Aggregated table rows and selected-window total cost",
-        caveat="Top-N tables include an Other row when omitted cost exists.",
-        status="estimated",
-    ),
-    "advisor": MetricContext(
-        label="Largest savings candidate",
-        scope="Selected report window",
-        formula="Largest evidence-labelled inefficiency finding or advisor recommendation",
-        source="Caliper rate-card what-if checks and quantified inefficiency finders",
-        caveat=("Candidates can overlap; treat this as a review queue, not an additive total."),
-        status="estimated",
-    ),
-    "rate_limits": MetricContext(
-        label="Peak rate-limit usage",
-        scope="Selected report window",
-        formula="Highest primary or secondary usage percentage seen in rate-limit samples or events",
-        source="Rate-limit samples and usage event metadata",
-        caveat="No samples means the dashboard cannot infer rate-limit pressure.",
-        status="partial",
-    ),
-    "forecast": MetricContext(
-        label="Forecast",
-        scope="Current calendar month after the selected window",
-        formula="Daily mean projection plus EWMA recency-weighted projection",
-        source="Selected-window daily costs",
-        caveat="Projection is directional and assumes recent usage remains representative.",
-        status="estimated",
-    ),
-    "anomalies": MetricContext(
-        label="Anomalies",
-        scope="Selected report window",
-        formula="Positive cost deviations above robust per-scope median baseline",
-        source="Selected-window daily, session, model-day, and project-day cost aggregates",
-        caveat=(
-            "No row means no spike crossed the sample-size and sigma thresholds, "
-            "not proof that usage was risk-free."
-        ),
-        status="estimated",
-    ),
-    "evidence": MetricContext(
-        label="Evidence quality",
-        scope="Whole dashboard payload",
-        formula="Average evidence status score minus parser, pricing, and attribution penalties",
-        source="Parser diagnostics, evidence dimensions, and aggregate pricing coverage",
-        caveat="Use this to decide which dashboard numbers deserve manual review.",
-        status="partial",
-    ),
-}
-
-COMMAND_CONTEXT_BY_LABEL = {
-    "Budget posture": MetricContext(
-        label="Budget posture",
-        scope="Configured budget period",
-        formula="Actual or projected spend divided by configured budget",
-        source="Budget configuration and selected usage aggregates",
-        caveat="Shows No budgets until a budget is configured.",
-        status="estimated",
-    ),
-    "Spend velocity": MetricContext(
-        label="Spend velocity",
-        scope="Last 7 days compared with Last 30 days",
-        formula="Last 7 day cost per day compared with Last 30 day cost per day",
-        source="Rolling usage windows",
-        caveat="Needs enough 30 day history to show a trend.",
-        status="estimated",
-    ),
-    "Largest savings candidate": METRIC_CONTEXTS["advisor"],
-    "Anomaly findings": METRIC_CONTEXTS["anomalies"],
-    "Highest-cost session": MetricContext(
-        label="Highest-cost session",
-        scope="Selected report window",
-        formula="Session with the largest total cost after session aggregation",
-        source="Deduped session rollups",
-        caveat="Use it as a drilldown starting point, not a blame signal.",
-        status="estimated",
-    ),
-    "Peak rate-limit usage": METRIC_CONTEXTS["rate_limits"],
-    "Evidence quality": METRIC_CONTEXTS["evidence"],
-}
-
-
-# ===========================================================================
-# Formatters — keep in sync with `fmt` object in `components.jsx`
-# ===========================================================================
-
-
-def fmt_money(n: float | None) -> str:
-    """`$42.18` under $1,000; `$1,243` at/above."""
-    if n is None:
-        return "—"
-    if n == 0:
-        return "$0"
-    if abs(n) >= 1000:
-        return f"${round(n):,}"
-    return f"${n:.2f}"
-
-
-def fmt_tokens(n: int | None) -> str:
-    """`8,400` / `12.4K` / `1.2M` / `1.2B`."""
-    if n is None:
-        return "—"
-    if n >= 1_000_000_000:
-        return f"{n / 1_000_000_000:.1f}B"
-    if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    if n >= 10_000:
-        return f"{n / 1_000:.1f}K"
-    return f"{n:,}"
-
-
-def fmt_pct(p: float | None) -> str:
-    if p is None:
-        return "—"
-    return f"{p * 100:.1f}%"
-
-
-def fmt_pct_round(p: float | None) -> str:
-    if p is None:
-        return "—"
-    return f"{round(p * 100)}%"
-
-
-def fmt_int(n: int | None) -> str:
-    return f"{(n or 0):,}"
-
-
-def esc(s: str) -> str:
-    """Always-escape user-derived strings."""
-    return html.escape(str(s), quote=True)
-
-
-# ===========================================================================
-# Atomic primitives
-# ===========================================================================
-
-
-def sparkline(values: list[float], color: str, aria: str, width: int = 84, height: int = 22) -> str:
-    """Inline SVG sparkline. Same geometry as `<Sparkline>` in components.jsx."""
-    if not values:
-        return '<span class="spark-empty" aria-hidden="true">—</span>'
-
-    vmax = max(values + [0.0001])
-    vmin = min(values + [0.0])
-    vrange = (vmax - vmin) or 1
-    n = len(values)
-    step_x = width / max(n - 1, 1)
-    pts = [
-        (i * step_x, height - 2 - ((v - vmin) / vrange) * (height - 4))
-        for i, v in enumerate(values)
-    ]
-    line = " ".join(("M" if i == 0 else "L") + f"{x:.1f} {y:.1f}" for i, (x, y) in enumerate(pts))
-    area = f"{line} L{width:.1f} {height} L0 {height} Z"
-    lx, ly = pts[-1]
-
-    return (
-        f'<svg class="spark" viewBox="0 0 {width} {height}" width="{width}" '
-        f'height="{height}" role="img" aria-label="{esc(aria)}" '
-        f'preserveAspectRatio="none">'
-        f'<path d="{area}" fill="{color}" opacity="0.12"/>'
-        f'<path d="{line}" fill="none" stroke="{color}" stroke-width="1.25" '
-        f'stroke-linecap="round" stroke-linejoin="round"/>'
-        f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="1.6" fill="{color}"/>'
-        f"</svg>"
-    )
-
-
-def delta_chip(value: float | None, polarity: str = "more-is-bad") -> str:
-    """
-    polarity:
-      "more-is-bad"  — used for cost (up = bad/red)
-      "more-is-good" — used for cached-input share (up = good/green)
-      "neutral"      — never colored
-    """
-    if value is None:
-        return ""
-    tip = "vs. previous equal window"
-    if value == 0:
-        return (
-            f'<span class="delta delta-flat" data-tip="flat &mdash; {esc(tip)}">·&nbsp;0.0%</span>'
-        )
-    up = value > 0
-    if polarity == "neutral" or polarity == "more-is-good":
-        good = up
-    else:  # more-is-bad
-        good = not up
-    cls = "delta-ok" if good else "delta-bad"
-    arrow = "↑" if up else "↓"
-    sign = "+" if value > 0 else ""
-    direction = "up" if up else "down"
-    return (
-        f'<span class="delta {cls}" '
-        f'data-tip="{direction} {sign}{value * 100:.1f}% {esc(tip)}">'
-        f"{arrow}&nbsp;{sign}{value * 100:.1f}%</span>"
-    )
-
-
-_SEVERITY_TIPS = {
-    "info": "info — worth knowing",
-    "warn": "warn — review when convenient",
-    "critical": "critical — needs attention",
-}
-_STATUS_TIPS = {
-    "exact": "exact — sourced from the underlying log",
-    "estimated": "estimated — inferred when the log is silent",
-    "partial": "partial — some events lack this detail",
-    "unsupported": "unsupported — this vendor does not record it",
-}
-
-
-def severity_pill(severity: str) -> str:
-    label = "CRIT" if severity == "critical" else severity.upper()
-    tip = _SEVERITY_TIPS.get(severity, severity)
-    return f'<span class="sev sev-{esc(severity)}" data-tip="{esc(tip)}">{label}</span>'
-
-
-def status_word(status: str) -> str:
-    tip = _STATUS_TIPS.get(status, status)
-    return f'<span class="status status-{esc(status)}" data-tip="{esc(tip)}">{esc(status)}</span>'
-
-
-def metric_context_details(ctx: MetricContext, *, summary: str = "Definition") -> str:
-    """Expandable metric source/formula block."""
-    rows = [
-        ("Scope", ctx.scope),
-        ("Formula", ctx.formula),
-        ("Source", ctx.source),
-    ]
-    if ctx.caveat:
-        rows.append(("Note", ctx.caveat))
-    rows_html = "".join(
-        f"<div><dt>{esc(label)}</dt><dd>{esc(value)}</dd></div>" for label, value in rows
-    )
-    status_html = status_word(ctx.status) if ctx.status else ""
-    return (
-        f'<details class="metric-context">'
-        f"<summary><span>{esc(summary)}</span>{status_html}</summary>"
-        f"<dl>{rows_html}</dl>"
-        f"</details>"
-    )
-
-
-def metric_inline_note(ctx: MetricContext) -> str:
-    return f'<div class="metric-inline-note">{esc(ctx.scope)} · {esc(ctx.formula)}</div>'
-
-
-def section_note(text: str, ctx: MetricContext | None = None) -> str:
-    details = metric_context_details(ctx) if ctx else ""
-    return f'<div class="section-note"><p>{esc(text)}</p>{details}</div>'
-
-
-def trace_link(anchor: str, label: str = "Inspect") -> str:
-    if not anchor:
-        return ""
-    return (
-        f'<a class="trace-link" href="#{esc(anchor)}" '
-        f'data-trace-target="{esc(anchor)}">{esc(label)}</a>'
-    )
-
-
-def lens_scope_attr(lens: str) -> str:
-    if not lens or lens == "all":
-        return ' data-lens-scope="all"'
-    return f' data-lens-scope="{esc(lens)}"'
-
-
-def vendor_badge(vendor: str) -> str:
-    return f'<span class="vendor-badge" data-tip="vendor: {esc(vendor)}">{esc(vendor)}</span>'
-
-
-def category_legend() -> str:
-    parts = []
-    for cat, label in [
-        ("explore", "explore"),
-        ("execute", "execute"),
-        ("diagnose", "diagnose"),
-        ("mixed", "mixed"),
-    ]:
-        parts.append(
-            f'<span class="legend-chip">'
-            f'<span class="dot" style="background:{CAT_COLOR[cat]}"></span>'
-            f"{label}</span>"
-        )
-    return f'<div class="legend" aria-label="Tool categories">{"".join(parts)}</div>'
-
-
-def meter_row(name: str, count: int, max_count: int, category: str) -> str:
-    pct = (count / max_count * 100) if max_count > 0 else 0
-    color = CAT_COLOR.get(category, "var(--accent)")
-    tip = f"{name} · {count:,} calls · {category}"
-    return (
-        f'<div class="meter-row" data-tip="{esc(tip)}">'
-        f'<div class="meter-name">'
-        f'<span class="dot" style="background:{color}"></span>{esc(name)}'
-        f"</div>"
-        f'<div class="meter-track">'
-        f'<span style="width:{pct:.4f}%;background:{color}"></span>'
-        f"</div>"
-        f'<div class="meter-count">{count}</div>'
-        f"</div>"
-    )
-
-
-def mini_bar(name: str, count: int, max_count: int, category: str) -> str:
-    """Mini meter used in Projects table → top tools column."""
-    pct = max(8, (count / max_count * 100)) if max_count > 0 else 0
-    color = CAT_COLOR.get(category, "var(--accent)")
-    tip = f"{name} · {count:,} ({category})"
-    return (
-        f'<span class="mini-bar" data-tip="{esc(tip)}">'
-        f'<span class="mini-bar-name">{esc(name)}</span>'
-        f'<span class="mini-bar-track">'
-        f'<span style="width:{pct:.4f}%;background:{color}"></span>'
-        f"</span></span>"
-    )
-
-
-def inline_share_bar(share: float, basis_label: str = "selected-window cost") -> str:
-    """The right-aligned share cell in tables."""
-    pct = share * 100
-    return (
-        f'<span class="inline-bar" data-tip="{pct:.1f}% of {esc(basis_label)}" '
-        f'aria-label="{pct:.1f}% of {esc(basis_label)}">'
-        f'<span class="inline-bar-track">'
-        f'<span style="width:{pct:.4f}%"></span>'
-        f"</span>"
-        f'<span class="inline-bar-label">{round(pct)}%</span>'
-        f"</span>"
-    )
-
-
-# ===========================================================================
-# Sections
-# ===========================================================================
-
-
-def section_head(section_id: str, title: str, hint: str = "") -> str:
-    """Standard <header> block with § number + title + optional right-side hint."""
-    num = SECTION_NUMBERS.get(section_id, "")
-    num_html = f'<span class="sec-num">§&nbsp;{num}</span>' if num else ""
-    hint_html = f'<span class="sec-hint">{esc(hint)}</span>' if hint else ""
-    return (
-        f'<header class="sec-head">'
-        f'<div class="sec-head-left">'
-        f"{num_html}"
-        f'<h2 class="sec-title">{esc(title)}</h2>'
-        f"</div>"
-        f"{hint_html}"
-        f"</header>"
-    )
-
-
-# CSS-only tooltip can't measure its rendered width, so it can't avoid
-# clipping near the page edges on its own. We pick a horizontal anchor at
-# render time based on the trigger's position within its row/strip:
-#
-#   pos < 0.15  → anchor LEFT  (tooltip extends to the right of the trigger)
-#   pos > 0.85  → anchor RIGHT (tooltip extends to the left of the trigger)
-#   otherwise   → anchor CENTER (default in CSS, no attribute emitted)
-#
-# Returns an attribute fragment ready to splice into a tag: either an
-# empty string or ` data-tip-anchor="left"`/`"right"`.
-def _tip_anchor(pos: float) -> str:
-    if pos < 0.15:
-        return ' data-tip-anchor="left"'
-    if pos > 0.85:
-        return ' data-tip-anchor="right"'
-    return ""
-
-
-# 1. Page header --------------------------------------------------------------
-
-
-def render_header(d: Dashboard) -> str:
-    """Wordmark, window badge, meta line, receipt-style serial."""
-    w = d.window
-    t = datetime.fromisoformat(d.generated_at)
-    # Prefer the window's IANA timezone over Python's tzname() — on 3.11+
-    # fromisoformat returns "UTC-07:00" style names, which read worse than
-    # "America/Los_Angeles" in a receipt header.
-    date = t.strftime("%Y-%m-%d")
-    time = t.strftime("%H:%M")
-    tz = w.timezone or t.tzname() or "UTC"
-    stamp = f"{date} {time} {tz}"
-    serial = f"caliper-{date.replace('-', '')}-{time.replace(':', '')}"
-
-    return (
-        f'<header class="page-head">'
-        f'<div class="page-head-left">'
-        f'<div class="wordmark">{wordmark_svg()}'
-        f'<span class="wordmark-text">Caliper</span>'
-        f'<span class="wordmark-version">v{esc(d.caliper.version)}</span>'
-        f"</div>"
-        f'<div class="page-head-tagline">'
-        f"cost layer for AI-assisted development · offline, auditable, no login"
-        f"</div>"
-        f"</div>"
-        f'<div class="page-head-right">'
-        f'<span class="window-badge">'
-        f'<span class="window-badge-label">{esc(w.label)}</span>'
-        f'<span class="window-badge-sep">·</span>'
-        f'<span class="window-badge-range">{esc(w.range)}</span>'
-        f"</span>"
-        f'<div class="page-meta">'
-        f"<span>Generated {esc(stamp)}</span>"
-        f'<span class="dot-sep">·</span>'
-        f'<span class="meta-offline" title="No external resources, no fetches.">'
-        f'<span class="meta-dot"></span>offline'
-        f"</span>"
-        f'<span class="dot-sep">·</span>'
-        f"<span>{len(w.vendors_active)} of {w.vendor_count_total} vendors</span>"
-        f'<span class="dot-sep">·</span>'
-        f"<span>Installed v{esc(d.caliper.version)}</span>"
-        f"</div>"
-        f'<div class="serial">{esc(serial)}</div>'
-        f"</div>"
-        f"</header>"
-    )
-
-
-def wordmark_svg() -> str:
-    """The Caliper jaw mark. 24px square, inherits color."""
-    return (
-        '<svg viewBox="0 0 28 28" width="24" height="24" aria-hidden="true">'
-        '<rect x="3" y="6" width="22" height="2" fill="currentColor" opacity="0.85"/>'
-        '<rect x="3" y="20" width="22" height="2" fill="currentColor" opacity="0.85"/>'
-        '<rect x="3" y="6" width="2" height="8" fill="currentColor" opacity="0.85"/>'
-        '<rect x="23" y="14" width="2" height="8" fill="currentColor" opacity="0.85"/>'
-        '<g fill="currentColor" opacity="0.55">'
-        '<rect x="7"  y="13" width="1" height="3"/>'
-        '<rect x="11" y="13" width="1" height="3"/>'
-        '<rect x="15" y="13" width="1" height="3"/>'
-        '<rect x="19" y="13" width="1" height="3"/>'
-        "</g>"
-        "</svg>"
-    )
-
-
-# 2. Banner -------------------------------------------------------------------
-
-
-def render_share_safe_banner(share_safe: bool) -> str:
-    """Visible "redacted" affordance above the dashboard chrome.
-
-    Renders when ``share_safe=True`` so users understand why project
-    names show as ``Project 1`` / sessions as ``Session 1`` / agents
-    as ``Agent 1`` instead of their real identifiers.
-    """
-    if not share_safe:
-        return ""
-    return (
-        '<div class="share-safe-banner" data-section="share-safe-banner" role="note">'
-        '<span class="share-safe-icon" aria-hidden="true">🔒</span>'
-        '<div class="share-safe-copy">'
-        "<strong>Share-safe view.</strong> Project, session, agent, "
-        "and skill names are redacted (e.g. <code>Project 1</code>, "
-        "<code>Session 1</code>) so this HTML is safe to forward. "
-        '<span class="mute">Re-run with <code>--no-share-safe</code> '
-        "to see real labels locally.</span>"
-        "</div>"
-        "</div>"
-    )
-
-
-def render_banner(b: Banner | None) -> str:
-    if b is None:
-        return ""
-    return (
-        f'<div class="banner banner-{esc(b.kind)}" role="status">'
-        f'<span class="banner-bar"></span>'
-        f'<span class="banner-label">{esc(b.label)}</span>'
-        # `text` may contain inline <code>; do NOT escape here. Caller is
-        # responsible for ensuring banner content is safe.
-        f'<span class="banner-text">{b.text}</span>'
-        f"</div>"
-    )
-
-
-# 3. Summary cards ------------------------------------------------------------
-
-
-def _spark_period_label(window: WindowMeta, values: list[float]) -> str:
-    try:
-        start = dt.date.fromisoformat(window.start)
-        end = dt.date.fromisoformat(window.end)
-        days = max(1, (end - start).days)
-    except ValueError:
-        days = len(values)
-    if days > 0:
-        return f"{days}-day selected window"
-    if values:
-        return f"{len(values)}-point selected window"
-    return "selected window"
-
-
-def render_cards(t: Totals, empty: bool, window: WindowMeta | None = None) -> str:
-    if empty:
-        cards = []
-        for label in ("Cost", "Estimated cache savings", "Tokens", "Sessions"):
-            cards.append(
-                f'<div class="card stat" role="group" aria-label="{esc(label)}">'
-                f'<div class="stat-label">{label}</div>'
-                f'<div class="stat-value stat-empty">—</div>'
-                f'<div class="stat-sub">no data for this window</div>'
-                f"</div>"
-            )
-        return f'<div class="cards">{"".join(cards)}</div>'
-
-    def card(
-        accent,
-        label,
-        value,
-        sub,
-        tip,
-        delta,
-        polarity,
-        spark,
-        spark_color,
-        spark_label,
-        ctx,
-        anchor,
-    ):
-        return (
-            f'<div class="card stat" data-accent="{accent}" '
-            f'data-tip="{esc(tip)}" data-tip-pos="bottom" '
-            f'role="group" aria-label="{esc(label)}">'
-            f'<div class="stat-label">{label}</div>'
-            f'<div class="stat-value">{esc(value)}</div>'
-            f'<div class="stat-sub">{esc(sub)}</div>'
-            f"{metric_inline_note(ctx)}"
-            f"{metric_context_details(ctx)}"
-            f'<div class="stat-foot">'
-            f"{delta_chip(delta, polarity)}"
-            f"{trace_link(anchor)}"
-            f"{sparkline(spark, spark_color, spark_label)}"
-            f"</div>"
-            f"</div>"
-        )
-
-    spark_period = (
-        _spark_period_label(window, t.daily_cost_sparkline) if window else "selected-window"
-    )
-    cost_tip = (
-        f"Selected-window spend after parser dedupe. Deduped usage events: {fmt_int(t.events)}."
-    )
-    cache_tip = (
-        "Estimated rate-card savings from cached input tokens. "
-        f"Cached-input share: {fmt_pct(t.cache_hit_rate)}."
-    )
-    tokens_tip = (
-        f"Parsed total tokens. Cached input: "
-        f"{fmt_tokens(t.cached_input_tokens)} · uncached: "
-        f"{fmt_tokens(t.uncached_input_tokens)} · output: "
-        f"{fmt_tokens(t.output_tokens)}."
-    )
-    sessions_tip = (
-        f"Distinct sessions in window. Turns: {t.turns} · tools/turn: {t.tools_per_turn:.2f}."
-    )
-
-    return (
-        '<div class="cards">'
-        + card(
-            "cost",
-            "Cost",
-            fmt_money(t.cost_usd),
-            f"{fmt_int(t.events)} deduped usage events",
-            cost_tip,
-            t.delta_cost_pct,
-            "more-is-bad",
-            t.daily_cost_sparkline,
-            "var(--accent)",
-            f"{spark_period} daily cost",
-            METRIC_CONTEXTS["summary.cost"],
-            "cost-over-time",
-        )
-        + card(
-            "cache",
-            "Estimated cache savings",
-            fmt_money(t.cache_savings_usd),
-            f"{fmt_pct(t.cache_hit_rate)} cached input",
-            cache_tip,
-            t.delta_cache_pct,
-            "more-is-good",
-            t.daily_cache_sparkline,
-            "var(--ok)",
-            f"{spark_period} cached-input share",
-            METRIC_CONTEXTS["summary.cache"],
-            "usage-mix",
-        )
-        + card(
-            "tokens",
-            "Tokens",
-            fmt_tokens(t.total_tokens),
-            f"{fmt_tokens(t.cached_input_tokens)} cached",
-            tokens_tip,
-            t.delta_tokens_pct,
-            "neutral",
-            t.daily_token_sparkline,
-            "var(--accent)",
-            f"{spark_period} token volume",
-            METRIC_CONTEXTS["summary.tokens"],
-            "usage-mix",
-        )
-        + card(
-            "sessions",
-            "Sessions",
-            str(t.sessions),
-            f"{t.turns} turns · {t.tools_per_turn:.2f}/turn",
-            sessions_tip,
-            t.delta_sessions_pct,
-            "neutral",
-            t.daily_session_sparkline,
-            "var(--mute)",
-            f"{spark_period} sessions",
-            METRIC_CONTEXTS["summary.sessions"],
-            "top-sessions",
-        )
-        + "</div>"
-    )
-
-
-# 4. Dashboard nav ------------------------------------------------------------
-
-
-def render_dashboard_nav(d: Dashboard) -> str:
-    groups = [
-        (
-            "Overview",
-            [
-                ("executive-brief", "Brief", True),
-                ("command-center", "Command", bool(d.command_center)),
-                ("metric-glossary", "Glossary", True),
-                ("usage-windows", "Windows", bool(d.usage_windows)),
-                ("impact", "Impact", bool(d.impact_cards)),
-            ],
-        ),
-        (
-            "Spend",
-            [
-                ("cost-over-time", "Cost", bool(d.daily)),
-                ("usage-mix", "Mix", bool(d.usage_mix)),
-                ("agents", "Agents", bool(d.agents)),
-                ("skills", "Skills", bool(d.skills)),
-                ("inefficiencies", "Inefficiencies", bool(d.inefficiencies)),
-                ("forecast-drivers", "Drivers", bool(d.forecast_drivers)),
-                ("advisor", "Advisor", True),
-            ],
-        ),
-        (
-            "Usage",
-            [
-                ("top-sessions", "Sessions", bool(d.top_sessions)),
-                ("models", "Models", bool(d.by_model)),
-                ("projects", "Projects", bool(d.by_project)),
-            ],
-        ),
-        (
-            "Audit",
-            [
-                ("anomalies", "Anomalies", d.totals.events > 0),
-                ("rate-limits", "Limits", d.rate_limit_pressure is not None),
-                ("evidence", "Evidence", bool(d.evidence or d.quality_score)),
-            ],
-        ),
-    ]
-    body_parts: list[str] = []
-    for group, links in groups:
-        body_parts.append(f'<span class="dash-nav-group">{esc(group)}</span>')
-        body_parts.extend(
-            f'<a class="dash-nav-link{" is-muted" if not enabled else ""}" href="#{esc(anchor)}">'
-            f"{esc(label)}</a>"
-            for anchor, label, enabled in links
-        )
-    body = "".join(body_parts)
-    return f'<nav class="dash-nav" aria-label="Dashboard sections">{body}</nav>'
-
-
-def render_metric_glossary() -> str:
-    keys = [
-        "summary.cost",
-        "summary.cache",
-        "summary.tokens",
-        "summary.sessions",
-        "windows",
-        "mix.share",
-        "advisor",
-        "rate_limits",
-        "forecast",
-        "anomalies",
-        "evidence",
-    ]
-    rows = "".join(
-        f'<article class="glossary-item" id="metric-{esc(key.replace(".", "-"))}">'
-        f'<div class="glossary-label">{esc(METRIC_CONTEXTS[key].label)}</div>'
-        f'<div class="glossary-copy">{esc(METRIC_CONTEXTS[key].formula)}</div>'
-        f"</article>"
-        for key in keys
-    )
-    return (
-        f'<details class="metric-glossary" id="metric-glossary">'
-        f"<summary>Metric glossary <span>definitions, formulas, and source notes</span></summary>"
-        f'<div class="glossary-grid">{rows}</div>'
-        f"</details>"
-    )
-
-
-def render_lens_controls(default_lens: str) -> str:
-    buttons = "".join(
-        f'<button class="lens-button{" is-active" if key == default_lens else ""}" '
-        f'type="button" data-lens="{esc(key)}">{esc(label)}</button>'
-        for key, label in LENSES
-    )
-    return (
-        f'<div class="lens-bar" role="group" aria-label="Dashboard audience lens">'
-        f'<span class="lens-label">View as</span>'
-        f"{buttons}"
-        f"</div>"
-    )
-
-
-def render_executive_brief(
-    brief: ExecutiveBrief | None,
-    queue: list[DecisionQueueItem],
-    comparisons: list[ComparisonSignal],
-    *,
-    empty: bool,
-) -> str:
-    if brief is None:
-        if empty:
-            brief = ExecutiveBrief(
-                title="No AI usage detected",
-                verdict="Setup or date range needs review",
-                subtitle="The selected window has no deduped usage events.",
-                tone="warn",
-                findings=[
-                    BriefFinding(
-                        "Verify data sources",
-                        "Run caliper doctor and confirm vendor log locations.",
-                        "No reportable usage",
-                        "warn",
-                        "metric-glossary",
-                        "executive",
-                    )
-                ],
-            )
-        else:
-            return ""
-    findings = "".join(
-        f'<article class="brief-finding brief-finding-{esc(finding.tone)}"'
-        f"{lens_scope_attr(finding.lens)}>"
-        f'<div class="brief-finding-top">'
-        f"<h3>{esc(finding.title)}</h3>"
-        f"<span>{esc(finding.impact)}</span>"
-        f"</div>"
-        f"<p>{esc(finding.detail)}</p>"
-        f"{trace_link(finding.anchor)}"
-        f"</article>"
-        for finding in brief.findings[:5]
-    )
-    queue_items = "".join(
-        f'<li class="decision-item decision-item-{esc(item.tone)}"'
-        f"{lens_scope_attr(item.lens)}>"
-        f'<span class="decision-rank">{item.rank}</span>'
-        f'<div class="decision-copy">'
-        f'<div class="decision-head">'
-        f"<h3>{esc(item.title)}</h3>"
-        f'<span class="decision-evidence">{esc(item.evidence)}</span>'
-        f"</div>"
-        f"<p>{esc(item.detail)}</p>"
-        f'<div class="decision-action">{esc(item.action)}</div>'
-        f"</div>"
-        f"{trace_link(item.anchor)}"
-        f"</li>"
-        for item in queue[:7]
-    )
-    comparison_cards = "".join(
-        f'<article class="comparison-card comparison-card-{esc(item.tone)}"'
-        f"{lens_scope_attr(item.lens)}>"
-        f'<div class="comparison-label">{esc(item.label)}</div>'
-        f'<div class="comparison-value">{esc(item.value)}</div>'
-        f'<div class="comparison-detail">{esc(item.detail)}</div>'
-        f"{trace_link(item.anchor, 'Trace')}"
-        f"</article>"
-        for item in comparisons[:8]
-    )
-    decision_panel = (
-        f'<div class="decision-panel">'
-        f'<div class="premium-panel-head">'
-        f"<h3>Decision queue</h3>"
-        f"<span>{len(queue):,} ranked item{'s' if len(queue) != 1 else ''}</span>"
-        f"</div>"
-        f'<ol class="decision-list">{queue_items}</ol>'
-        f"</div>"
-        if queue
-        else ""
-    )
-    comparisons_panel = (
-        f'<div class="comparison-grid">{comparison_cards}</div>' if comparison_cards else ""
-    )
-    return (
-        f'<section class="premium-brief premium-brief-{esc(brief.tone)}" id="executive-brief">'
-        f'<div class="brief-main">'
-        f'<div class="brief-kicker">Executive brief</div>'
-        f"<h2>{esc(brief.title)}</h2>"
-        f'<p class="brief-verdict">{esc(brief.verdict)}</p>'
-        f'<p class="brief-subtitle">{esc(brief.subtitle)}</p>'
-        f"</div>"
-        f'<div class="brief-findings">{findings}</div>'
-        f"{decision_panel}"
-        f"{comparisons_panel}"
-        f"</section>"
-    )
-
-
-def render_empty_report_guide() -> str:
-    cards = [
-        (
-            "Usage source missing",
-            "No vendor usage records matched this window.",
-            "Run caliper doctor to verify local log locations.",
-        ),
-        (
-            "Comparisons unavailable",
-            "Baselines need current and previous-window usage.",
-            "Widen the date range or wait for more usage history.",
-        ),
-        (
-            "Savings advisor unavailable",
-            "Savings checks need billable model and token events.",
-            "Once matching usage appears, recommendations can appear here.",
-        ),
-        (
-            "Evidence pending",
-            "Quality scoring needs parsed usage, pricing, and attribution signals.",
-            "Check parser and pricing status before sharing a report.",
-        ),
-    ]
-    body = "".join(
-        f'<article class="readiness-card">'
-        f"<h3>{esc(title)}</h3>"
-        f"<p>{esc(detail)}</p>"
-        f"<span>{esc(action)}</span>"
-        f"</article>"
-        for title, detail, action in cards
-    )
-    return (
-        f'<section class="sec report-readiness" id="report-readiness">'
-        f"{section_head('report-readiness', 'Report readiness')}"
-        f'<div class="sec-body">'
-        f'<div class="readiness-grid">{body}</div>'
-        f"</div></section>"
-    )
-
-
-# 5. Command center -----------------------------------------------------------
-
-
-def render_command_center(cards: list[CommandCenterCard]) -> str:
-    sec_id = "command-center"
-    if not cards:
-        return ""
-    body_parts: list[str] = []
-    anchors = {
-        "Budget posture": "impact",
-        "Spend velocity": "usage-windows",
-        "Largest savings candidate": "inefficiencies",
-        "Anomaly findings": "anomalies",
-        "Highest-cost session": "top-sessions",
-        "Peak rate-limit usage": "rate-limits",
-        "Evidence quality": "evidence",
-    }
-    for card in cards:
-        ctx = COMMAND_CONTEXT_BY_LABEL.get(card.label)
-        context = metric_context_details(ctx) if ctx else ""
-        body_parts.append(
-            f'<article class="command-card command-card-{esc(card.tone)}">'
-            f'<div class="command-top">'
-            f'<span class="command-label">{esc(card.label)}</span>'
-            f'<span class="command-metric">{esc(card.metric)}</span>'
-            f"</div>"
-            f'<div class="command-value">{esc(card.value)}</div>'
-            f'<div class="command-detail">{esc(card.detail)}</div>'
-            f"{context}"
-            f"{trace_link(anchors.get(card.label, ''), 'Trace')}"
-            f"</article>"
-        )
-    body = "".join(body_parts)
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Command center', 'what needs attention first')}"
-        f'<div class="sec-body">'
-        f"{section_note('Start here: each card points to the report area most likely to need review.')}"
-        f'<div class="command-grid">{body}</div>'
-        f"</div></section>"
-    )
-
-
-# 6. Rolling usage windows ----------------------------------------------------
-
-
-def render_usage_windows(windows: list[UsageWindow]) -> str:
-    sec_id = "usage-windows"
-    if not windows:
-        return ""
-    cards: list[str] = []
-    for window in sorted(windows, key=lambda item: (item.days, item.label)):
-        has_events = window.events > 0
-        meta = (
-            f"{fmt_tokens(window.total_tokens)} tokens · "
-            f"{fmt_int(window.events)} events · {fmt_int(window.sessions)} sessions"
-            if has_events
-            else "no usage in this rolling window"
-        )
-        tip = (
-            f"{window.label} · {window.range} · "
-            f"{fmt_money(window.cost_usd)} · {fmt_tokens(window.total_tokens)} tokens"
-        )
-        cards.append(
-            f'<article class="usage-window-card" data-tip="{esc(tip)}" data-tip-pos="bottom">'
-            f'<div class="usage-window-top">'
-            f'<div class="usage-window-label">{esc(window.label)}</div>'
-            f'<div class="usage-window-range">{esc(window.range)}</div>'
-            f"</div>"
-            f'<div class="usage-window-value">{fmt_money(window.cost_usd)}</div>'
-            f'<div class="usage-window-meta">{esc(meta)}</div>'
-            f'<div class="usage-window-stats">'
-            f"<span>{fmt_pct_round(window.cache_hit_rate)} cached input</span>"
-            f"<span>{fmt_int(window.active_days)} active days</span>"
-            f"</div>"
-            f'<div class="usage-window-foot">'
-            f"{sparkline(window.daily_cost_sparkline, 'var(--accent)', window.label + ' cost')}"
-            f"{sparkline(window.daily_token_sparkline, 'var(--mute)', window.label + ' tokens')}"
-            f"</div>"
-            f"</article>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Usage windows', '7d → 30d → 90d · deduped')}"
-        f'<div class="sec-body">'
-        f"{section_note('These rolling windows overlap and are independently deduped; compare them for trend, do not add them together.', METRIC_CONTEXTS['windows'])}"
-        f'<div class="usage-window-grid">{"".join(cards)}</div>'
-        f"</div></section>"
-    )
-
-
-# 5. Impact cards -------------------------------------------------------------
-
-
-def render_impact_cards(cards: list[ImpactCard]) -> str:
-    sec_id = "impact"
-    if not cards:
-        return ""
-    tone_order = {"critical": 0, "warn": 1, "good": 2, "neutral": 3}
-    label_order = {
-        "Budget risk": 0,
-        "Cost driver": 1,
-        "Estimated cache savings": 2,
-        "Usage rhythm": 3,
-        "Dedupe": 4,
-    }
-    ordered_cards = sorted(
-        cards,
-        key=lambda card: (
-            label_order.get(card.label, 99),
-            tone_order.get(card.tone, 3),
-            card.label,
-        ),
-    )
-    body = "".join(
-        f'<article class="impact-card impact-card-{esc(card.tone)}">'
-        f'<div class="impact-label">{esc(card.label)}</div>'
-        f'<div class="impact-value">{esc(card.value)}</div>'
-        f'<div class="impact-detail">{esc(card.detail)}</div>'
-        f"</article>"
-        for card in ordered_cards
-    )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Impact', 'risk, drivers, leverage')}"
-        f'<div class="sec-body">'
-        f"{section_note('Impact cards translate the raw usage numbers into risk, concentration, cache leverage, and data hygiene signals.')}"
-        f'<div class="impact-grid">{body}</div>'
-        f"</div></section>"
-    )
-
-
-# 6. Cost over time -----------------------------------------------------------
-
-
-def _nice_max(v: float) -> float:
-    """Round up to a nice Y-axis ceiling: 1, 2, 5, 10 × 10^k."""
-    if v <= 0:
-        return 1
-    exp = 10 ** int(_log10(v))
-    f = v / exp
-    if f <= 1:
-        nice = 1
-    elif f <= 2:
-        nice = 2
-    elif f <= 5:
-        nice = 5
-    else:
-        nice = 10
-    return nice * exp
-
-
-def _log10(v: float) -> float:
-    import math
-
-    return math.floor(math.log10(v))
-
-
-def render_cost_over_time(daily: list[DailyPoint], empty: bool) -> str:
-    sec_id = "cost-over-time"
-    if empty or not daily:
-        return (
-            f'<section class="sec" id="{sec_id}">'
-            f"{section_head(sec_id, 'Cost over time')}"
-            f'<div class="sec-body">'
-            f'<div class="panel empty-panel">'
-            f"No events for this window. Run <code>caliper doctor</code> to "
-            f"verify your local setup."
-            f"</div></div></section>"
-        )
-
-    W, H = 1000, 220
-    PAD_L, PAD_R, PAD_T, PAD_B = 60, 24, 14, 28
-    plot_w = W - PAD_L - PAD_R
-    plot_h = H - PAD_T - PAD_B
-    n = len(daily)
-    max_cost = max((d.cost_usd for d in daily), default=1)
-    y_max = _nice_max(max(max_cost, 1))
-    total = sum(d.cost_usd for d in daily)
-    mean = total / n
-    mean_y = PAD_T + plot_h - (mean / y_max) * plot_h
-    peak = max(daily, key=lambda d: d.cost_usd)
-
-    bar_gap = 4
-    slot_w = plot_w / n
-    bar_w = max(4, slot_w - bar_gap)
-
-    parts = [
-        f'<svg class="chart cost-chart" viewBox="0 0 {W} {H}" '
-        f'preserveAspectRatio="none" role="img" aria-label="Daily cost over {n} days">'
-    ]
-
-    # Gridlines at 25/50/75% of yMax (per spec)
-    for p in (0.25, 0.5, 0.75):
-        y = PAD_T + plot_h - p * plot_h
-        parts.append(
-            f'<g><line x1="{PAD_L}" y1="{y:.2f}" x2="{W - PAD_R}" y2="{y:.2f}" '
-            f'stroke="var(--grid)" stroke-dasharray="2 4"/>'
-            f'<text x="{PAD_L - 10}" y="{y + 4:.2f}" text-anchor="end" '
-            f'fill="var(--mute)" font-size="11" font-family="ui-monospace, '
-            f'SF Mono, Menlo, Consolas, monospace">{fmt_money(p * y_max)}</text>'
-            f"</g>"
-        )
-
-    # Baseline
-    parts.append(
-        f'<line x1="{PAD_L}" y1="{PAD_T + plot_h}" x2="{W - PAD_R}" '
-        f'y2="{PAD_T + plot_h}" stroke="var(--border-strong)"/>'
-    )
-    # Top edge (y-max label)
-    parts.append(
-        f'<line x1="{PAD_L}" y1="{PAD_T}" x2="{W - PAD_R}" y2="{PAD_T}" '
-        f'stroke="var(--border)"/>'
-        f'<text x="{PAD_L - 10}" y="{PAD_T + 4}" text-anchor="end" '
-        f'fill="var(--mute)" font-size="11" font-family="ui-monospace, '
-        f'SF Mono, Menlo, Consolas, monospace">{fmt_money(y_max)}</text>'
-    )
-
-    # Bars
-    for i, d in enumerate(daily):
-        h = (d.cost_usd / y_max) * plot_h
-        x = PAD_L + i * slot_w + bar_gap / 2
-        y = PAD_T + plot_h - h
-        fill = "var(--accent-strong)" if d is peak else "var(--accent)"
-        parts.append(
-            f"<g><title>{esc(d.day)} · {fmt_money(d.cost_usd)} · "
-            f"{d.events} events · {esc(d.shape)}</title>"
-            # ghost full-height bar — keeps empty days legible
-            f'<rect x="{x:.2f}" y="{PAD_T}" width="{bar_w:.2f}" height="{plot_h}" '
-            f'fill="var(--bar-ghost)" opacity="0.35" rx="1"/>'
-        )
-        if h > 0:
-            parts.append(
-                f'<rect x="{x:.2f}" y="{y:.2f}" width="{bar_w:.2f}" '
-                f'height="{h:.2f}" fill="{fill}" rx="1.5"/>'
-            )
-            if d is peak:
-                parts.append(
-                    f'<rect x="{x - 0.5:.2f}" y="{y - 0.5:.2f}" '
-                    f'width="{bar_w + 1:.2f}" height="{h + 1:.2f}" '
-                    f'fill="none" stroke="var(--accent-strong)" '
-                    f'stroke-width="0.5" opacity="0.6" rx="1.5"/>'
-                )
-        parts.append("</g>")
-
-    # X-axis labels: first / mid / last
-    for i in (0, n // 2, n - 1):
-        d = daily[i]
-        x = PAD_L + i * slot_w + slot_w / 2
-        parts.append(
-            f'<text x="{x:.2f}" y="{H - 10}" text-anchor="middle" '
-            f'fill="var(--mute)" font-size="11" font-family="ui-monospace, '
-            f'SF Mono, Menlo, Consolas, monospace">{esc(d.day[5:])}</text>'
-        )
-
-    # Daily mean reference line (drawn after bars so it stays visible)
-    parts.append(
-        f'<line x1="{PAD_L}" y1="{mean_y:.2f}" x2="{W - PAD_R}" '
-        f'y2="{mean_y:.2f}" stroke="var(--accent)" stroke-dasharray="3 4" '
-        f'stroke-width="1.25" opacity="0.7"/>'
-        f'<rect class="mean-label-bg" x="{W - PAD_R - 138:.0f}" '
-        f'y="{mean_y - 16:.2f}" width="134" '
-        f'height="14" fill="var(--panel)" stroke="var(--border-strong)" '
-        f'stroke-width="0.5" rx="3"/>'
-        f'<text class="mean-label-text" x="{W - PAD_R - 6}" '
-        f'y="{mean_y - 5:.2f}" text-anchor="end" '
-        f'fill="var(--accent)" font-size="10" font-weight="600" '
-        f'font-family="ui-monospace, SF Mono, Menlo, Consolas, monospace">'
-        f"mean&nbsp;{fmt_money(mean)}&nbsp;/&nbsp;day</text>"
-    )
-    parts.append("</svg>")
-
-    # Per-day dominant-shape strip
-    _strip_n = max(1, len(daily) - 1)
-    cells = "".join(
-        f'<span class="shape-cell shape-{SHAPE_TO_CAT.get(d.shape, "mixed")}"'
-        f"{_tip_anchor(i / _strip_n)}"
-        f' data-tip="{esc(d.day)} · {esc(d.shape)} · {fmt_money(d.cost_usd)}"></span>'
-        for i, d in enumerate(daily)
-    )
-
-    # HTML hit-overlay so each daily bar gets a styled tooltip on hover.
-    # The SVG uses preserveAspectRatio="none" → both axes stretch to fill the
-    # container. We map x/width from viewBox units to percentages so the
-    # hit-zones stay aligned at any container width.
-    hit_zones: list[str] = []
-    for i, d in enumerate(daily):
-        zone_left = (PAD_L + i * slot_w) / W * 100
-        zone_w = slot_w / W * 100
-        zone_center = zone_left + zone_w / 2
-        events_label = f"{d.events:,} event{'s' if d.events != 1 else ''}"
-        peak_tag = " · peak" if d is peak else ""
-        tip = f"{d.day} · {fmt_money(d.cost_usd)} · {events_label} · {d.shape}{peak_tag}"
-        anchor = _tip_anchor(zone_center / 100.0)
-        hit_zones.append(
-            f'<div class="chart-hit" data-tip="{esc(tip)}"'
-            f"{anchor}"
-            f' style="left:{zone_left:.4f}%;width:{zone_w:.4f}%"></div>'
-        )
-
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Cost over time', f'peak {fmt_money(peak.cost_usd)} · {peak.day}')}"
-        f'<div class="sec-body">'
-        f"{section_note('Bars show daily selected-window cost after dedupe; the dashed line is mean daily cost for the same window.', METRIC_CONTEXTS['summary.cost'])}"
-        f'<div class="chart-panel">'
-        f'<div class="chart-wrap">'
-        + "".join(parts)
-        + '<div class="chart-hit-layer" aria-hidden="true">'
-        + "".join(hit_zones)
-        + "</div>"
-        + "</div>"
-        + f'<div class="shape-strip" role="img" aria-label="Daily dominant work shape">'
-        f"{cells}</div>"
-        f'<div class="shape-strip-row">'
-        f'<span class="label">dominant work per day</span>'
-        f'<div class="shape-strip-legend">'
-        f'<span class="leg-explore"><span class="dot"></span>explore</span>'
-        f'<span class="leg-execute"><span class="dot"></span>execute</span>'
-        f'<span class="leg-diagnose"><span class="dot"></span>diagnose</span>'
-        f'<span class="leg-mixed"><span class="dot"></span>mixed</span>'
-        f"</div></div>"
-        f"</div></div></section>"
-    )
-
-
-# 5. Activity heatmap (yearly contribution grid) ------------------------------
-
-
-_MONTH_LETTERS = ("J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D")
-
-
-def render_yearly_heatmap(h: YearlyHeatmap | None) -> str:
-    """GitHub-style 53×7 contribution grid with bottom stats.
-
-    Rendered as a CSS grid of HTML divs (not SVG) so each cell can carry a
-    styled hover tooltip via the [data-tip] system.
-    """
-    sec_id = "activity-heatmap"
-    if h is None or not h.cells:
-        return ""
-
-    # Pad the head with blanks so day-of-week rows align with the calendar
-    # grid (Monday-first). The cells then flow column-by-column via CSS
-    # grid-auto-flow: column.
-    first_date = dt.date.fromisoformat(h.cells[0].date)
-    lead_blanks = first_date.weekday()  # 0..6
-    total_with_padding = lead_blanks + len(h.cells)
-    weeks = -(-total_with_padding // 7)  # ceil
-
-    # Determine which week-column each calendar month begins on so we can
-    # place the month letters above the right columns.
-    month_marks: dict[int, int] = {}
-    for i, cell in enumerate(h.cells):
-        slot = lead_blanks + i
-        week = slot // 7
-        date_obj = dt.date.fromisoformat(cell.date)
-        if date_obj.day <= 7 and date_obj.month not in month_marks.values():
-            month_marks[week] = date_obj.month
-
-    # Month label row (placed at the right column via grid-column-start)
-    month_labels: list[str] = []
-    for week, month in sorted(month_marks.items()):
-        letter = _MONTH_LETTERS[month - 1]
-        month_labels.append(
-            f'<span class="heat-month" style="grid-column:{week + 1}">{letter}</span>'
-        )
-
-    # Cells (lead blanks first, then real cells)
-    cell_html: list[str] = []
-    for _ in range(lead_blanks):
-        cell_html.append('<div class="heat-cell heat-cell-blank"></div>')
-    weeks_denom = max(1, weeks - 1)
-    for i, cell in enumerate(h.cells):
-        date_obj = dt.date.fromisoformat(cell.date)
-        tip = (
-            f"{date_obj.strftime('%A, %B')} {date_obj.day}, {date_obj.year} · "
-            f"{cell.value:,} {h.metric_label.lower()}"
-        )
-        week = (lead_blanks + i) // 7
-        anchor = _tip_anchor(week / weeks_denom)
-        cell_html.append(
-            f'<div class="heat-cell heat-level-{cell.level}"{anchor} data-tip="{esc(tip)}"></div>'
-        )
-    # Trailing blanks so the last column always has 7 rows
-    remainder = (lead_blanks + len(h.cells)) % 7
-    if remainder:
-        for _ in range(7 - remainder):
-            cell_html.append('<div class="heat-cell heat-cell-blank"></div>')
-
-    # Day-of-week labels (M, W, F at rows 1, 3, 5 — Monday-first)
-    dow_labels = "".join(
-        f'<span class="heat-dow" style="grid-row:{row}">{letter}</span>'
-        for row, letter in ((1, "M"), (3, "W"), (5, "F"))
-    )
-
-    # Legend
-    legend_levels = "".join(
-        f'<span class="heat-cell heat-level-{level}"></span>' for level in range(5)
-    )
-
-    svg = (
-        f'<div class="heat-grid-wrap">'
-        f'<div class="heat-month-row" style="grid-template-columns:repeat({weeks}, 1fr)">'
-        f"{''.join(month_labels)}"
-        f"</div>"
-        f'<div class="heat-dow-col">{dow_labels}</div>'
-        f'<div class="heat-grid" '
-        f'style="grid-template-columns:repeat({weeks}, 1fr)">'
-        f"{''.join(cell_html)}"
-        f"</div>"
-        f'<div class="heat-legend">'
-        f'<span class="heat-legend-label">Fewer</span>'
-        f"{legend_levels}"
-        f'<span class="heat-legend-label">More</span>'
-        f"</div>"
-        f"</div>"
-    )
-
-    # Bottom stats
-    stat_cells = [
-        ("Most active month", h.most_active_month),
-        ("Most active day", h.most_active_day),
-        ("Longest streak", f"{h.longest_streak}d"),
-        ("Current streak", f"{h.current_streak}d"),
-    ]
-    stat_html = "".join(
-        '<div class="heat-stat">'
-        f'<div class="heat-stat-label">{esc(label)}</div>'
-        f'<div class="heat-stat-value">{esc(value)}</div>'
-        "</div>"
-        for label, value in stat_cells
-    )
-
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Activity', f'{h.metric_total:,} {h.metric_label.lower()} · last 365 days')}"
-        f'<div class="sec-body">'
-        f'<div class="panel heat-panel">'
-        f'<div class="heat-header">'
-        f'<div class="heat-headline">'
-        f'<div class="heat-headline-label">{esc(h.metric_label)}</div>'
-        f'<div class="heat-headline-value">{h.metric_total:,}</div>'
-        f"</div>"
-        f"</div>"
-        f"{svg}"
-        f'<div class="heat-stats">{stat_html}</div>'
-        f"</div>"
-        f"</div></section>"
-    )
-
-
-# 6. Recap card (hour-of-week heatmap + 2x4 stat grid + comparison) -----------
-
-
-_DAY_OF_WEEK_FULL = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
-
-def render_recap(recap: Recap | None) -> str:
-    sec_id = "recap"
-    if recap is None or not recap.hours:
-        return ""
-
-    # 2x4 stat grid
-    stat_html = "".join(
-        '<div class="recap-stat">'
-        f'<div class="recap-stat-label">{esc(s.label)}</div>'
-        f'<div class="recap-stat-value">{esc(s.value)}</div>'
-        "</div>"
-        for s in recap.stats[:8]
-    )
-
-    # 7×24 hour-of-week heatmap rendered as a CSS grid of divs so each cell
-    # carries a styled hover tooltip.
-    hour_cells: list[str] = []
-    # Order cells by (day_of_week, hour) for row-major grid flow.
-    by_key = {(c.day_of_week, c.hour): c for c in recap.hours}
-    for dow in range(7):
-        for hour in range(24):
-            c = by_key.get((dow, hour))
-            level = c.level if c else 0
-            value = c.value if c else 0
-            tip_value = f"{value:,} event{'s' if value != 1 else ''}" if value else "no events"
-            hour_label = (
-                "12 AM"
-                if hour == 0
-                else "12 PM"
-                if hour == 12
-                else f"{hour} AM"
-                if hour < 12
-                else f"{hour - 12} PM"
-            )
-            tip = f"{_DAY_OF_WEEK_FULL[dow]} · {hour_label} · {tip_value}"
-            anchor = _tip_anchor(hour / 23.0)
-            hour_cells.append(
-                f'<div class="hour-cell hour-level-{level}"{anchor} data-tip="{esc(tip)}"></div>'
-            )
-
-    # Day labels (left column): M T W T F S S
-    day_labels = "".join(
-        f'<span class="hour-dow">{_DAY_OF_WEEK_FULL[dow][:1]}</span>' for dow in range(7)
-    )
-
-    # Hour labels (top row): 12 AM / 6 AM / 12 PM / 6 PM placed at grid cols 1/7/13/19
-    hour_labels_list = []
-    for hour, label in ((0, "12 AM"), (6, "6 AM"), (12, "12 PM"), (18, "6 PM")):
-        hour_labels_list.append(
-            f'<span class="hour-axis" style="grid-column:{hour + 1}">{label}</span>'
-        )
-
-    svg = (
-        f'<div class="hour-grid-wrap">'
-        f'<div class="hour-axis-row">'
-        f"{''.join(hour_labels_list)}"
-        f"</div>"
-        f'<div class="hour-dow-col">{day_labels}</div>'
-        f'<div class="hour-grid">'
-        f"{''.join(hour_cells)}"
-        f"</div>"
-        f"</div>"
-    )
-
-    # The card carries the larger recap title; the section header keeps the
-    # dashboard's scan pattern consistent with the surrounding sections.
-    sec_anchor = section_head(sec_id, "Recap")
-    panel_header = (
-        '<div class="recap-header">'
-        f'<h3 class="recap-headline">{esc(recap.title)}</h3>'
-        '<div class="recap-comparison-inline">'
-        f"{esc(recap.comparison)}"
-        "</div>"
-        "</div>"
-    )
-
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{sec_anchor}"
-        f'<div class="sec-body">'
-        f'<div class="panel recap-panel">'
-        f"{panel_header}"
-        f'<div class="recap-stat-grid">{stat_html}</div>'
-        f"{svg}"
-        f"</div>"
-        f"</div></section>"
-    )
-
-
-# 7. Session shape ------------------------------------------------------------
-
-
-def render_session_shape(shape: SessionShape | None, empty: bool) -> str:
-    sec_id = "session-shape"
-    if empty or shape is None or shape.total_sessions == 0:
-        return (
-            f'<section class="sec" id="{sec_id}">'
-            f"{section_head(sec_id, 'Session shape')}"
-            f'<div class="sec-body">'
-            f'<div class="panel empty-panel">'
-            f"No tool-use signal yet in this window. Session shape is "
-            f"currently extracted from Claude Code only."
-            f"</div></div></section>"
-        )
-
-    max_tool = max((t.count for t in shape.top_tools), default=1)
-    meters = "".join(meter_row(t.name, t.count, max_tool, t.category) for t in shape.top_tools)
-
-    stacked_segs = "".join(
-        f'<span class="stacked-seg seg-{SHAPE_TO_CAT.get(c.category, "mixed")}" '
-        f'title="{esc(c.label)} · {fmt_pct_round(c.share)}" '
-        f'style="width:{c.share * 100:.4f}%">'
-        f"{fmt_pct_round(c.share) if c.share >= 0.10 else ''}</span>"
-        for c in shape.categories
-    )
-
-    cat_rows = "".join(
-        f"<tr><td>"
-        f'<span class="dot dot-inline" style="background:{CAT_COLOR[SHAPE_TO_CAT.get(c.category, "mixed")]}"></span>'
-        f'<span class="cat-label">{esc(c.label)}</span></td>'
-        f'<td class="num">{c.sessions}</td>'
-        f'<td class="num mute">{fmt_pct_round(c.share)}</td></tr>'
-        for c in shape.categories
-    )
-
-    partial = shape.coverage_events < shape.coverage_total_events
-    footnote = (
-        f'<div class="sec-foot">Coverage: {shape.coverage_events} of '
-        f"{shape.coverage_total_events} events carry tool-use detail "
-        f"(Claude Code only today).</div>"
-        if partial
-        else ""
-    )
-
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Session shape', f'{shape.total_sessions} sessions · {shape.total_turns} turns')}"
-        f'<div class="sec-body">'
-        f"{section_note('Tool and turn metrics come from source logs that expose turn facts; coverage below states how complete that signal is.')}"
-        f'<div class="shape-grid">'
-        # Top tools panel
-        f'<div class="panel shape-tools">'
-        f'<div class="panel-head">'
-        f'<h3 class="panel-title">Top tools</h3>'
-        f"{category_legend()}"
-        f"</div>"
-        f'<div class="meters">{meters}</div>'
-        f"</div>"
-        # Categories panel
-        f'<div class="panel shape-cats">'
-        f'<h3 class="panel-title">Shape distribution</h3>'
-        f'<div class="stacked" role="img" aria-label="{esc(", ".join(c.category + " " + fmt_pct_round(c.share) for c in shape.categories))}">'
-        f"{stacked_segs}"
-        f"</div>"
-        f'<table class="tight"><tbody>{cat_rows}</tbody></table>'
-        f"</div>"
-        f"</div>"
-        f"{footnote}"
-        f"</div></section>"
-    )
-
-
-# 8. Usage mix ----------------------------------------------------------------
-
-
-_MIX_DIMENSION_LABELS = {
-    "vendor": "Vendor",
-    "model/tier": "Model / tier",
-    "tier": "Tier",
-    "source": "Source",
-}
-
-
-def render_usage_mix(rows: list[MixRow]) -> str:
-    sec_id = "usage-mix"
-    if not rows:
-        return ""
-    dimension_order = ["vendor", "model/tier", "tier", "source"]
-    filters = [
-        '<button class="mix-filter is-active" type="button" data-mix-filter="all">All</button>'
-    ]
-    for dim in dimension_order:
-        if any(row.dimension == dim for row in rows):
-            filters.append(
-                f'<button class="mix-filter" type="button" data-mix-filter="{esc(dim)}">'
-                f"{esc(_MIX_DIMENSION_LABELS.get(dim, dim.title()))}</button>"
-            )
-
-    panels: list[str] = []
-    for dim in dimension_order:
-        group = sorted(
-            [row for row in rows if row.dimension == dim],
-            key=lambda row: (-row.cost_usd, -row.total_tokens, -row.events, row.label),
-        )
-        if not group:
-            continue
-        items = []
-        for row in group:
-            items.append(
-                f'<div class="mix-row" data-mix-dimension="{esc(dim)}">'
-                f'<div class="mix-main">'
-                f'<div class="mix-label">{esc(row.label)}</div>'
-                f'<div class="mix-meta">{fmt_money(row.cost_usd)} · '
-                f"{fmt_tokens(row.total_tokens)} tokens · {fmt_int(row.events)} events</div>"
-                f"</div>"
-                f'<div class="mix-spark">'
-                f"{sparkline(row.daily_cost_sparkline, 'var(--accent)', row.label + ' cost')}"
-                f"</div>"
-                f'<div class="mix-share">'
-                f"{inline_share_bar(row.share, 'selected-window cost')}"
-                f"</div>"
-                f"</div>"
-            )
-        panels.append(
-            f'<article class="mix-panel" data-mix-panel="{esc(dim)}">'
-            f'<header class="mix-panel-head">'
-            f'<h3 class="panel-title">{esc(_MIX_DIMENSION_LABELS.get(dim, dim.title()))}</h3>'
-            f'<span class="mix-count">{len(group)} rows</span>'
-            f"</header>"
-            f'<div class="mix-list">{"".join(items)}</div>'
-            f"</article>"
-        )
-
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Usage mix', 'model, tier, vendor, source')}"
-        f'<div class="sec-body">'
-        f"{section_note('Every share bar is row cost divided by selected-window total cost, so categories can be compared on one denominator.', METRIC_CONTEXTS['mix.share'])}"
-        f'<div class="mix-controls" role="group" aria-label="Usage mix filter">'
-        f"{''.join(filters)}</div>"
-        f'<div class="mix-grid">{"".join(panels)}</div>'
-        f"</div></section>"
-    )
-
-
-def render_agents(rows: list[AgentRow]) -> str:
-    sec_id = "agents"
-    if not rows:
-        return ""
-    ordered = sorted(rows, key=lambda row: (-row.cost_usd, row.source_category, row.agent_id))
-    body = []
-    for row in ordered:
-        spark_html = sparkline(
-            list(row.daily_cost_sparkline),
-            "var(--accent)",
-            f"{row.agent_id} daily cost",
-        )
-        body.append(
-            f"<tr>"
-            f'<td><span class="session-label">{esc(row.agent_id)}</span>'
-            f'<div class="mono mute">{esc(row.kind)}</div></td>'
-            f"<td>{esc(row.source_category)}</td>"
-            f'<td><span class="reason-chip">{esc(row.evidence_status)}</span></td>'
-            f'<td class="num strong" data-value="{row.cost_usd:.8f}">{fmt_money(row.cost_usd)}</td>'
-            f'<td class="num" data-section="agent-sparkline">{spark_html}</td>'
-            f'<td class="num" data-value="{row.total_tokens}">{fmt_tokens(row.total_tokens)}</td>'
-            f'<td class="num" data-value="{row.events}">{fmt_int(row.events)}</td>'
-            f'<td class="num" data-value="{row.tool_calls}">{fmt_int(row.tool_calls)}</td>'
-            f'<td class="num" data-value="{row.sessions}">{fmt_int(row.sessions)}</td>'
-            f"<td>{esc(row.reason)}</td>"
-            f"</tr>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Agents & overhead', 'direct sessions, logged agents, and background automation')}"
-        f'<div class="sec-body">'
-        f"{section_note('Agent rows keep measured costs separate from attribution evidence. Direct rows mean the source did not expose explicit agent metadata.')}"
-        f'<div class="panel pad-0 table-scroll">'
-        f'<table class="data data-sortable agent-table">'
-        f"<thead><tr>"
-        f'<th data-sort="text">Agent</th>'
-        f'<th data-sort="text">Source</th>'
-        f'<th data-sort="text">Evidence</th>'
-        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
-        f'<th class="num">Daily trend</th>'
-        f'<th class="num" data-sort="number">Tokens</th>'
-        f'<th class="num" data-sort="number">Events</th>'
-        f'<th class="num" data-sort="number">Tools</th>'
-        f'<th class="num" data-sort="number">Sessions</th>'
-        f'<th data-sort="text">Method</th>'
-        f"</tr></thead>"
-        f"<tbody>{''.join(body)}</tbody>"
-        f"</table></div></div></section>"
-    )
-
-
-def render_skills(rows: list[SkillRow]) -> str:
-    sec_id = "skills"
-    if not rows:
-        return ""
-    ordered = sorted(rows, key=lambda row: (-row.estimated_cost_usd, row.name))
-    body = []
-    for row in ordered:
-        body.append(
-            f"<tr>"
-            f'<td><span class="session-label">{esc(row.name)}</span>'
-            f'<div class="mono mute">{esc(row.attribution_method)}</div></td>'
-            f'<td><span class="reason-chip">{esc(row.evidence_status)}</span></td>'
-            f'<td class="num strong" data-value="{row.estimated_cost_usd:.8f}">est. {fmt_money(row.estimated_cost_usd)}</td>'
-            f'<td class="num" data-value="{row.median_cost_per_invocation_usd:.8f}">est. {fmt_money(row.median_cost_per_invocation_usd)}</td>'
-            f'<td class="num" data-value="{row.invocations}">{fmt_int(row.invocations)}</td>'
-            f'<td class="num" data-value="{row.sessions}">{fmt_int(row.sessions)}</td>'
-            f'<td class="num" data-value="{row.total_tokens}">{fmt_tokens(row.total_tokens)}</td>'
-            f"</tr>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Skills & workflows', 'estimated attribution by structural signal')}"
-        f'<div class="sec-body">'
-        f"{section_note('Skill/workflow rows are estimated unless the source exposes explicit skill invocation boundaries. Unsupported events are omitted rather than guessed.')}"
-        f'<div class="panel pad-0 table-scroll">'
-        f'<table class="data data-sortable skill-table">'
-        f"<thead><tr>"
-        f'<th data-sort="text">Skill / workflow</th>'
-        f'<th data-sort="text">Evidence</th>'
-        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Est. cost <span class="sort-glyph">↓</span></th>'
-        f'<th class="num" data-sort="number">Median / invocation</th>'
-        f'<th class="num" data-sort="number">Invocations</th>'
-        f'<th class="num" data-sort="number">Sessions</th>'
-        f'<th class="num" data-sort="number">Tokens</th>'
-        f"</tr></thead>"
-        f"<tbody>{''.join(body)}</tbody>"
-        f"</table></div></div></section>"
-    )
-
-
-def render_inefficiencies(rows: list[InefficiencyRow]) -> str:
-    sec_id = "inefficiencies"
-    if not rows:
-        return (
-            f'<section class="sec" id="{sec_id}">'
-            f"{section_head(sec_id, 'Inefficiencies', 'evidence-labelled findings only')}"
-            f'<div class="sec-body">'
-            f"{section_note('No quantified inefficiency finding met the sample-size and evidence thresholds for this window.')}"
-            f'<div class="panel empty-panel">No evidence-labelled inefficiency findings.</div>'
-            f"</div></section>"
-        )
-    cards = []
-    for row in sorted(rows, key=lambda item: (-item.impact_usd, item.code)):
-        curve_html = ""
-        if row.curve:
-            curve_values = [float(v) for v in row.curve]
-            curve_html = (
-                f'<div class="rot-curve" data-section="prompt-rot-curve" '
-                f'data-finding-code="{esc(row.code)}">'
-                f'<span class="mute">median per-turn input</span>'
-                f"{sparkline(curve_values, 'var(--accent)', 'prompt rot curve', width=120, height=24)}"
-                f"</div>"
-            )
-        cards.append(
-            f'<article class="advisor-card advisor-card-{"warn" if row.severity in {"warn", "fail"} else "neutral"}">'
-            f'<div class="advisor-card-top">'
-            f'<h3 class="advisor-title">{esc(row.title)}</h3>'
-            f'<span class="advisor-value">{fmt_money(row.impact_usd)}</span>'
-            f"</div>"
-            f'<p class="advisor-detail">{esc(row.detail)}</p>'
-            f"{curve_html}"
-            f'<div class="advisor-meta">'
-            f"<span>{esc(row.evidence_status)}</span>"
-            f"<span>{esc(row.confidence)} confidence</span>"
-            f"<span>{fmt_int(row.sample_size)} samples</span>"
-            f"</div>"
-            f'<div class="advisor-detail">{esc(row.baseline)}</div>'
-            f'<code class="advisor-command">{esc(row.action)}</code>'
-            f"</article>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Inefficiencies', 'ranked by quantified impact')}"
-        f'<div class="sec-body">'
-        f"{section_note('Rows appear only when Caliper can name a measured impact and evidence status. Estimated rows are advisory, not invoice facts.')}"
-        f'<div class="advisor-grid">{"".join(cards)}</div>'
-        f"</div></section>"
-    )
-
-
-def render_forecast_drivers(rows: list[ForecastDriverRow]) -> str:
-    sec_id = "forecast-drivers"
-    if not rows:
-        return ""
-    body = []
-    for row in sorted(rows, key=lambda item: (-item.projected_30d_cost_usd, item.dimension)):
-        body.append(
-            f'<div class="mix-row" data-mix-dimension="{esc(row.dimension)}">'
-            f'<div class="mix-main">'
-            f'<div class="mix-label">{esc(row.label)}</div>'
-            f'<div class="mix-meta">{esc(row.dimension)} · {esc(row.driver)} · {esc(row.evidence_status)}</div>'
-            f"</div>"
-            f'<div class="mix-share">{inline_share_bar(row.share, "projected 30d driver mix")}</div>'
-            f'<div class="mix-main">'
-            f'<div class="mix-meta">30d {fmt_money(row.projected_30d_cost_usd)} · {fmt_money(row.daily_mean_cost_usd)}/day</div>'
-            f"</div>"
-            f"</div>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Forecast drivers', '30-day projection by dimension')}"
-        f'<div class="sec-body">'
-        f"{section_note('Each driver independently scales selected-window spend to 30 days. Dimensions overlap, so driver rows should not be summed together; estimated and partial attribution remains visibly labelled.')}"
-        f'<article class="mix-panel"><div class="mix-list">{"".join(body)}</div></article>'
-        f"</div></section>"
-    )
-
-
-# 9. Savings advisor ----------------------------------------------------------
-
-
-def render_advisor(rows: list[AdvisorRecommendation]) -> str:
-    sec_id = "advisor"
-    if not rows:
-        return (
-            f'<section class="sec" id="{sec_id}">'
-            f"{section_head(sec_id, 'Savings advisor', 'model and tier swap checks')}"
-            f'<div class="sec-body">'
-            f"{section_note('Savings recommendations are heuristic what-if estimates. No row means Caliper found no high-confidence swap in this window.', METRIC_CONTEXTS['advisor'])}"
-            f'<div class="panel empty-panel">No high-confidence savings recommendations.</div>'
-            f"</div></section>"
-        )
-    cards = []
-    for row in sorted(rows, key=lambda item: (-item.savings_usd, -item.confidence, -item.events)):
-        cards.append(
-            f'<article class="advisor-card advisor-card-{esc(row.tone)}">'
-            f'<div class="advisor-card-top">'
-            f'<h3 class="advisor-title">{esc(row.title)}</h3>'
-            f'<span class="advisor-value">est. {esc(row.value)}</span>'
-            f"</div>"
-            f'<p class="advisor-detail">{esc(row.detail)}</p>'
-            f'<div class="advisor-meta">'
-            f"<span>{fmt_pct_round(row.confidence)} confidence</span>"
-            f"<span>{fmt_int(row.events)} events</span>"
-            f"<span>{fmt_int(row.sessions)} sessions</span>"
-            f"</div>"
-            f'<code class="advisor-command">{esc(row.action)}</code>'
-            f"</article>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Savings advisor', 'estimated savings candidates')}"
-        f'<div class="sec-body">'
-        f"{section_note('Savings are estimated what-if checks over matching usage. Treat them as review candidates before changing model or tier routing.', METRIC_CONTEXTS['advisor'])}"
-        f'<div class="advisor-grid">{"".join(cards)}</div>'
-        f"</div></section>"
-    )
-
-
-# 10. Highest-cost sessions ---------------------------------------------------
-
-
-def render_top_sessions(rows: list[SessionRow]) -> str:
-    sec_id = "top-sessions"
-    if not rows:
-        return ""
-    body = []
-    ordered = sorted(
-        rows,
-        key=lambda row: (-row.cost_usd, -row.total_tokens, -row.tool_calls, -row.events, row.label),
-    )
-    for row in ordered:
-        body.append(
-            f"<tr>"
-            f'<td><span class="session-label">{esc(row.label)}</span>'
-            f'<div class="mono mute">{esc(row.started_at)}</div></td>'
-            f'<td class="num strong" data-value="{row.cost_usd:.8f}">{fmt_money(row.cost_usd)}</td>'
-            f'<td class="num" data-value="{row.total_tokens}">{fmt_tokens(row.total_tokens)}</td>'
-            f'<td class="num" data-value="{row.events}">{fmt_int(row.events)}</td>'
-            f'<td class="num" data-value="{row.tool_calls}">{fmt_int(row.tool_calls)}</td>'
-            f"<td>{esc(row.project)}</td>"
-            f'<td><span class="reason-chip">{esc(row.reason)}</span></td>'
-            f'<td class="mono mute">{esc(", ".join(row.models) or "—")}</td>'
-            f"</tr>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Highest-cost sessions', 'sorted by spend impact')}"
-        f'<div class="sec-body">'
-        f"{section_note('Rows are deduped session rollups. Reason explains why the session is worth opening first.')}"
-        f'<div class="panel pad-0 table-scroll">'
-        f'<table class="data data-sortable session-table">'
-        f"<thead><tr>"
-        f'<th data-sort="text">Session</th>'
-        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
-        f'<th class="num" data-sort="number">Tokens</th>'
-        f'<th class="num" data-sort="number">Events</th>'
-        f'<th class="num" data-sort="number">Tools</th>'
-        f'<th data-sort="text">Project</th>'
-        f'<th data-sort="text">Reason</th>'
-        f'<th data-sort="text">Models</th>'
-        f"</tr></thead>"
-        f"<tbody>{''.join(body)}</tbody>"
-        f"</table></div></div></section>"
-    )
-
-
-# 13. Rate limits -------------------------------------------------------------
-
-
-def render_rate_limits(pressure: RateLimitPressure | None) -> str:
-    sec_id = "rate-limits"
-    if pressure is None:
-        return ""
-    peak = max(
-        [
-            value
-            for value in (pressure.peak_primary_pct, pressure.peak_secondary_pct)
-            if value is not None
-        ],
-        default=None,
-    )
-    stats = [
-        ("Peak pressure", fmt_pct_round(peak) if peak is not None else "No samples"),
-        ("Latest primary", fmt_pct_round(pressure.latest_primary_pct)),
-        ("Latest secondary", fmt_pct_round(pressure.latest_secondary_pct)),
-        ("Reached", fmt_int(pressure.reached_count)),
-    ]
-    stat_html = "".join(
-        f'<div class="limit-stat"><div class="limit-label">{esc(label)}</div>'
-        f'<div class="limit-value">{esc(value)}</div></div>'
-        for label, value in stats
-    )
-    meta = " · ".join(
-        part
-        for part in (
-            pressure.latest_limit_name,
-            pressure.latest_plan_type,
-            f"resets {pressure.latest_resets_at}" if pressure.latest_resets_at else "",
-        )
-        if part
-    )
-    forecast_html = render_rate_limit_forecasts(pressure.forecasts)
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Rate limits', 'pressure and reset signal')}"
-        f'<div class="sec-body">'
-        f"{section_note('Pressure percentages are normalized from rate-limit samples and event metadata; missing samples mean pressure is unknown, not zero.', METRIC_CONTEXTS['rate_limits'])}"
-        f'<div class="panel limit-panel limit-panel-{esc(pressure.tone)}">'
-        f'<div class="limit-panel-head">'
-        f'<div><h3 class="panel-title">Peak rate-limit usage</h3>'
-        f'<div class="limit-sub">{esc(meta or "No rate-limit samples in this window.")}</div></div>'
-        f'<span class="limit-samples">{fmt_int(pressure.sample_count)} samples</span>'
-        f"</div>"
-        f'<div class="limit-stats">{stat_html}</div>'
-        f"{forecast_html}"
-        f"</div></div></section>"
-    )
-
-
-def render_rate_limit_forecasts(
-    forecasts: tuple[RateLimitForecastBand, ...] | list[RateLimitForecastBand],
-) -> str:
-    """ETA-to-100% band per rate-limit window.
-
-    Rendered inside ``render_rate_limits`` as a sub-block under the
-    pressure-stats grid. Confidence chip + sample count make the band
-    self-explanatory; ``confidence == "low"`` swaps the ETA for a
-    "needs more samples" message.
-    """
-    if not forecasts:
-        return ""
-    items: list[str] = []
-    for band in forecasts:
-        label = band.limit_name or band.window
-        confidence = (band.confidence or "low").lower()
-        if band.eta_mid_hours is None or confidence == "low":
-            eta_body = (
-                '<div class="eta-empty mute">needs more samples '
-                f"({fmt_int(band.samples)} so far)</div>"
-            )
-        else:
-            mid = _fmt_eta_hours(band.eta_mid_hours)
-            low = _fmt_eta_hours(band.eta_low_hours)
-            high = _fmt_eta_hours(band.eta_high_hours)
-            range_html = ""
-            if band.eta_low_hours is not None and band.eta_high_hours is not None:
-                range_html = (
-                    f'<div class="eta-range mute" data-section="rate-limit-eta-range">'
-                    f"({esc(low)} → {esc(high)})</div>"
-                )
-            eta_body = (
-                f'<div class="eta-mid"><span class="eta-value">{esc(mid)}</span>'
-                f'<span class="eta-unit mute">to 100%</span></div>'
-                f"{range_html}"
-            )
-        burn_html = ""
-        if band.burn_rate_per_hour is not None:
-            burn_html = (
-                f'<div class="eta-burn mute">{band.burn_rate_per_hour * 100:.1f}% / hr burn</div>'
-            )
-        items.append(
-            f'<div class="eta-card eta-confidence-{esc(confidence)}" '
-            f'data-section="rate-limit-eta" data-window="{esc(band.window)}" '
-            f'data-confidence="{esc(confidence)}">'
-            f'<div class="eta-head">'
-            f'<span class="eta-window">{esc(label)}</span>'
-            f'<span class="eta-confidence-chip">{esc(confidence)}</span>'
-            f"</div>"
-            f"{eta_body}"
-            f"{burn_html}"
-            f'<div class="eta-samples mute">{fmt_int(band.samples)} samples</div>'
-            f"</div>"
-        )
-    return (
-        f'<div class="limit-forecasts" data-section="rate-limit-forecasts">'
-        f'<h4 class="limit-forecasts-title">Time to exhaustion</h4>'
-        f'<div class="eta-grid">{"".join(items)}</div>'
-        f"</div>"
-    )
-
-
-def _fmt_eta_hours(hours: float | None) -> str:
-    if hours is None:
-        return "—"
-    if hours < 1:
-        return f"{round(hours * 60)} min"
-    if hours < 24:
-        return f"{hours:.1f} h"
-    days = hours / 24
-    if days < 14:
-        return f"{days:.1f} d"
-    return f"{round(days)} d"
-
-
-# 11. Models & tiers -----------------------------------------------------------
-
-
-def render_models(rows: list[ModelRow], total_cost: float) -> str:
-    sec_id = "models"
-    if not rows:
-        return ""  # section hidden when empty (per spec)
-    body = []
-    ordered_rows = sorted(
-        rows,
-        key=lambda row: (-row.cost_usd, -row.tokens, -row.events, row.vendor, row.model, row.tier),
-    )
-    for r in ordered_rows:
-        share = r.cost_usd / total_cost if total_cost > 0 else 0
-        spark_html = sparkline(
-            list(r.daily_cost_sparkline),
-            "var(--accent)",
-            f"{r.model} daily cost",
-        )
-        body.append(
-            f"<tr>"
-            f"<td>{vendor_badge(r.vendor)}</td>"
-            f'<td><span class="mono">{esc(r.model)}</span>'
-            f'<span class="mute"> · {esc(r.tier)}</span></td>'
-            f'<td class="num strong" data-value="{r.cost_usd:.8f}">{fmt_money(r.cost_usd)}</td>'
-            f'<td class="num">{inline_share_bar(share, "selected-window cost")}</td>'
-            f'<td class="num model-spark" data-section="model-sparkline">{spark_html}</td>'
-            f'<td class="num" data-value="{r.events}">{r.events}</td>'
-            f'<td class="num" data-value="{r.tokens}">{fmt_tokens(r.tokens)}</td>'
-            f'<td class="num" data-value="{r.cache_hit_rate:.8f}">{fmt_pct_round(r.cache_hit_rate)}</td>'
-            f"</tr>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Models & tiers', 'sorted by cost')}"
-        f'<div class="sec-body">'
-        f"{section_note('Rows are sorted by selected-window cost. Share is each model/tier cost divided by selected-window total cost.', METRIC_CONTEXTS['mix.share'])}"
-        f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
-        f"<thead><tr>"
-        f'<th class="th-vendor" data-sort="text">Vendor</th>'
-        f'<th class="th-model" data-sort="text">Model · tier</th>'
-        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
-        f'<th class="num">Share of window</th>'
-        f'<th class="num">Daily trend</th>'
-        f'<th class="num" data-sort="number">Events</th>'
-        f'<th class="num" data-sort="number">Tokens</th>'
-        f'<th class="num th-cache" data-sort="number">Cache</th>'
-        f"</tr></thead>"
-        f"<tbody>{''.join(body)}</tbody>"
-        f"</table></div></div></section>"
-    )
-
-
-# 7. Projects -----------------------------------------------------------------
-
-
-def render_projects(
-    rows: list[ProjectRow],
-    show_paths: bool,
-    total_cost: float | None = None,
-) -> str:
-    sec_id = "projects"
-    if not rows:
-        return ""
-    ordered_rows = sorted(
-        rows,
-        key=lambda row: (-row.cost_usd, -row.events, -row.sessions, row.name, row.path or ""),
-    )
-    # Global tool max so mini-bars are comparable across rows
-    max_tool = max((t.count for r in ordered_rows for t in r.top_tools), default=1)
-    shown_total = sum(r.cost_usd for r in ordered_rows)
-    total = total_cost if total_cost is not None and total_cost > 0 else shown_total
-    basis_label = (
-        "selected-window cost"
-        if total_cost is not None and total_cost > 0
-        else "shown project cost"
-    )
-
-    body = []
-    for r in ordered_rows:
-        share = r.cost_usd / total if total > 0 else 0
-        path_html = (
-            f'<div class="mono mute proj-path">{esc(r.path)}</div>' if show_paths and r.path else ""
-        )
-        tools_html = "".join(mini_bar(t.name, t.count, max_tool, t.category) for t in r.top_tools)
-        activity_html = (
-            f'<div class="project-activity">'
-            f"<span>{fmt_int(r.active_days)} active days</span>"
-            f"{sparkline(r.daily_cost_sparkline, 'var(--accent)', r.name + ' daily cost')}"
-            f'<div class="mono mute">last {esc(r.last_seen or "unknown")}</div>'
-            f"</div>"
-        )
-        trend_label = r.trend_label or "needs history"
-        trend_html = (
-            f'<span class="reason-chip reason-chip-{esc(r.trend_tone)}">{esc(trend_label)}</span>'
-        )
-        body.append(
-            f"<tr>"
-            f'<td><span class="proj-name">{esc(r.name)}</span>{path_html}</td>'
-            f'<td class="num strong" data-value="{r.cost_usd:.8f}">{fmt_money(r.cost_usd)}</td>'
-            f'<td class="num">{inline_share_bar(share, basis_label)}</td>'
-            f'<td class="num" data-value="{r.active_days}">{activity_html}</td>'
-            f'<td class="num" data-value="{r.daily_mean_cost_usd:.8f}">{fmt_money(r.daily_mean_cost_usd)}</td>'
-            f'<td class="num" data-value="{r.projected_30d_cost_usd:.8f}" data-section="project-forecast-cell">'
-            f"{_project_forecast_cell(r)}</td>"
-            f'<td>{trend_html}<div class="mono mute">{fmt_int(r.events)} events · {fmt_int(r.sessions)} sessions</div></td>'
-            f'<td class="col-tools">{tools_html}</td>'
-            f"</tr>"
-        )
-    omitted_cost = max(0.0, total - shown_total)
-    if omitted_cost > 0.005:
-        share = omitted_cost / total if total > 0 else 0
-        body.append(
-            f'<tr class="summary-row">'
-            f'<td><span class="proj-name">Other selected-window usage</span>'
-            f'<div class="mono mute proj-path">Cost not represented by the visible project rows.</div></td>'
-            f'<td class="num strong" data-value="{omitted_cost:.8f}">{fmt_money(omitted_cost)}</td>'
-            f'<td class="num">{inline_share_bar(share, basis_label)}</td>'
-            f'<td class="num" data-value="0">—</td>'
-            f'<td class="num" data-value="0">—</td>'
-            f'<td class="num" data-value="0">—</td>'
-            f"<td>—</td>"
-            f'<td class="col-tools">—</td>'
-            f"</tr>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Projects', 'cost, cadence, and selected-window projection')}"
-        f'<div class="sec-body">'
-        f"{section_note('Project cost, events, sessions, and active days are measured from the selected window. The 30-day value is selected-window daily mean × 30, labelled as an estimate and not a committed future bill.', METRIC_CONTEXTS['mix.share'])}"
-        f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
-        f"<thead><tr>"
-        f'<th data-sort="text">Project</th>'
-        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Cost <span class="sort-glyph">↓</span></th>'
-        f'<th class="num">Share of window</th>'
-        f'<th class="num" data-sort="number">Activity</th>'
-        f'<th class="num" data-sort="number">Avg/day</th>'
-        f'<th class="num" data-sort="number">Est. 30d</th>'
-        f'<th data-sort="text">Trend</th>'
-        f'<th class="th-tools">Top tools</th>'
-        f"</tr></thead>"
-        f"<tbody>{''.join(body)}</tbody>"
-        f"</table></div></div></section>"
-    )
-
-
-def render_cache_leverage(rows: list[CacheLeverageRow]) -> str:
-    """Top-N sessions ranked by realised cache savings, with hit-rate chip."""
-    if not rows:
-        return ""
-    sec_id = "cache-leverage"
-    vmax = max(r.savings_usd for r in rows) or 1.0
-    body: list[str] = []
-    for row in rows:
-        share = row.savings_usd / vmax if vmax else 0
-        bar_width = max(2.0, share * 100)
-        body.append(
-            f'<div class="cl-row" data-section="cache-leverage-row" '
-            f'data-session="{esc(row.session_label)}">'
-            f'<div class="cl-head">'
-            f'<span class="cl-session mono">{esc(row.session_label)}</span>'
-            f'<span class="cl-savings">{fmt_money(row.savings_usd)}</span>'
-            f"</div>"
-            f'<div class="cl-bar"><div class="cl-bar-fill" '
-            f'style="width: {bar_width:.1f}%"></div></div>'
-            f'<div class="cl-meta mute">{fmt_pct_round(row.hit_rate)} hit rate · '
-            f"{fmt_tokens(row.cached_input_tokens)} cached · "
-            f"{fmt_tokens(row.uncached_input_tokens)} paid input</div>"
-            f"</div>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}" data-section="cache-leverage">'
-        f"{section_head(sec_id, 'Cache leverage', 'top sessions by realised cache savings')}"
-        f'<div class="sec-body">'
-        f"{section_note('Sessions ranked by the dollars cached input avoided. Hit rate is cached input / total input — read it next to the bar to spot under-leveraged sessions.')}"
-        f'<div class="cl-list">{"".join(body)}</div>'
-        f"</div></section>"
-    )
-
-
-def render_long_context_histogram(hist: LongContextHistogram | None) -> str:
-    """Distribution of per-event input tokens vs the LC threshold."""
-    if hist is None or hist.total_events == 0:
-        return ""
-    sec_id = "lc-histogram"
-    cmax = max(hist.counts) or 1
-    labels = ("<1k", "1–4k", "4–16k", "16–64k", "64–200k", "200k–1M", "1M+")
-    bars: list[str] = []
-    for idx, count in enumerate(hist.counts):
-        height_pct = (count / cmax) * 100
-        label = labels[idx] if idx < len(labels) else f"{hist.bins[idx]:,}"
-        tip = f"{label} · {count:,} events"
-        threshold_marker = ""
-        if (
-            hist.threshold_tokens
-            and idx < len(hist.bins)
-            and hist.bins[idx] >= hist.threshold_tokens
-        ):
-            threshold_marker = ' data-above-threshold="true"'
-        bars.append(
-            f'<div class="lc-col"{threshold_marker} data-tip="{esc(tip)}">'
-            f'<div class="lc-bar" style="height: {height_pct:.1f}%"></div>'
-            f'<div class="lc-label mono">{esc(label)}</div>'
-            f"</div>"
-        )
-    above_marker = (
-        f'<div class="lc-threshold-line" data-section="lc-threshold-line" '
-        f'data-threshold="{hist.threshold_tokens}">'
-        f"LC threshold · {fmt_tokens(hist.threshold_tokens)}</div>"
-    )
-    return (
-        f'<section class="sec" id="{sec_id}" data-section="lc-histogram">'
-        f"{section_head(sec_id, 'Input-token distribution', 'long-context misfire heatmap')}"
-        f'<div class="sec-body">'
-        f"{section_note(f'Log-spaced bins of per-event input tokens. {fmt_pct_round(hist.share_above_threshold)} of events ({fmt_pct_round(hist.cost_share_above_threshold)} of spend) crossed the long-context threshold.')}"
-        f'<div class="lc-chart">{"".join(bars)}</div>'
-        f"{above_marker}"
-        f"</div></section>"
-    )
-
-
-def _project_forecast_cell(row: ProjectRow) -> str:
-    """Per-project 30d projection w/ optional ±σ band + confidence chip."""
-    base = f"est. {fmt_money(row.projected_30d_cost_usd)}"
-    if row.forecast_confidence and (row.projected_30d_low or row.projected_30d_high):
-        band = (
-            f'<div class="proj-band mute" data-section="project-band">'
-            f"({fmt_money(row.projected_30d_low)} – {fmt_money(row.projected_30d_high)})"
-            f"</div>"
-        )
-        chip = (
-            f'<span class="forecast-chip forecast-chip-{esc(row.forecast_confidence)}" '
-            f'data-confidence="{esc(row.forecast_confidence)}">'
-            f"{esc(row.forecast_confidence)}</span>"
-        )
-        return f'<div class="proj-est">{base}{chip}</div>{band}'
-    return f'<div class="proj-est">{base}<span class="forecast-chip mute">—</span></div>'
-
-
-def render_model_forecasts(rows: list[ModelForecastRow]) -> str:
-    """Per-model demand forecast strip — small-multiples grid."""
-    if not rows:
-        return ""
-    sec_id = "model-forecasts"
-    cards: list[str] = []
-    for row in rows:
-        spark = sparkline(
-            list(row.daily_cost_sparkline),
-            "var(--accent)",
-            f"{row.model} daily cost",
-        )
-        band_html = ""
-        if row.projected_30d_low or row.projected_30d_high:
-            band_html = (
-                f'<div class="mf-band mute" data-section="model-forecast-band">'
-                f"{fmt_money(row.projected_30d_low)} – {fmt_money(row.projected_30d_high)}"
-                f"</div>"
-            )
-        cards.append(
-            f'<div class="mf-card" data-section="model-forecast" data-model="{esc(row.model)}">'
-            f'<div class="mf-head">'
-            f'<span class="mf-vendor">{esc(row.vendor)}</span>'
-            f'<span class="mf-trend reason-chip reason-chip-{esc(row.trend_tone)}">{esc(row.trend_label)}</span>'
-            f"</div>"
-            f'<div class="mf-model mono">{esc(row.model)}</div>'
-            f'<div class="mf-spark">{spark}</div>'
-            f'<div class="mf-figures">'
-            f'<div><span class="mute">30d est.</span>'
-            f'<span class="mf-figure">{fmt_money(row.projected_30d_cost_usd)}</span></div>'
-            f'<div><span class="mute">EWMA 30d</span>'
-            f'<span class="mf-figure">{fmt_money(row.ewma_30d_cost_usd)}</span></div>'
-            f"</div>"
-            f"{band_html}"
-            f'<div class="mf-meta mute">{row.days_analyzed} day history · '
-            f"{fmt_money(row.daily_mean_cost_usd)}/day mean</div>"
-            f"</div>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}" data-section="model-forecasts">'
-        f"{section_head(sec_id, 'Model demand forecasts', 'top by selected-window cost')}"
-        f'<div class="sec-body">'
-        f"{section_note('Per-model 30-day projections from OLS trend over the analysed daily cost series. The ±band scales with daily-cost stdev × √30 days.')}"
-        f'<div class="mf-grid">{"".join(cards)}</div>'
-        f"</div></section>"
-    )
-
-
-def render_outlook(outlook: Outlook | None) -> str:
-    """Portfolio 30-day + 90-day side-by-side forward outlook."""
-    if outlook is None:
-        return ""
-    sec_id = "outlook"
-
-    def horizon_card(label: str, h, *, tone: str) -> str:
-        return (
-            f'<div class="outlook-card outlook-card-{esc(tone)}" data-section="outlook-{h.days}d" '
-            f'data-horizon="{h.days}d">'
-            f'<div class="outlook-head"><span class="outlook-label">{esc(label)}</span>'
-            f'<span class="outlook-days mute">{h.days} days</span></div>'
-            f'<div class="outlook-mid">{fmt_money(h.linear_total)}</div>'
-            f'<div class="outlook-range mute">'
-            f"({fmt_money(max(0.0, h.linear_low))} – {fmt_money(h.linear_high)})"
-            f"</div>"
-            f'<div class="outlook-ewma mute">EWMA {fmt_money(h.ewma_total)}</div>'
-            f"</div>"
-        )
-
-    cards = horizon_card("30-day outlook", outlook.horizon_30d, tone="neutral") + horizon_card(
-        "90-day outlook", outlook.horizon_90d, tone="warn"
-    )
-    return (
-        f'<section class="sec" id="{sec_id}" data-section="outlook">'
-        f"{section_head(sec_id, 'Portfolio outlook', 'forward 30-day + 90-day spend bands')}"
-        f'<div class="sec-body">'
-        f"{section_note(f'Outlook projects forward from the latest {outlook.days_analyzed} days of activity. Linear midpoint plus ±1σ band; EWMA reacts faster to recent acceleration.')}"
-        f'<div class="outlook-grid">{cards}</div>'
-        f"</div></section>"
-    )
-
-
-def render_cohort_deltas(rows: list[CohortDeltaRow]) -> str:
-    """Side-by-side selected window vs. prior equal window."""
-    if not rows:
-        return ""
-    sec_id = "cohort-deltas"
-    body: list[str] = []
-    for row in rows:
-        if row.delta_pct is None:
-            delta_html = '<span class="cohort-delta mute">—</span>'
-        else:
-            sign = "+" if row.delta_pct > 0 else ""
-            delta_html = (
-                f'<span class="cohort-delta cohort-delta-{esc(row.tone)}" '
-                f'data-tone="{esc(row.tone)}">{sign}{row.delta_pct * 100:.1f}%</span>'
-            )
-        body.append(
-            f'<tr data-section="cohort-delta-row" data-tone="{esc(row.tone)}">'
-            f'<td class="cohort-label">{esc(row.label)}</td>'
-            f'<td class="num strong">{esc(row.current_value)}</td>'
-            f'<td class="num mute">{esc(row.previous_value)}</td>'
-            f'<td class="num">{delta_html}</td>'
-            f"</tr>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}" data-section="cohort-deltas">'
-        f"{section_head(sec_id, 'Cohort delta', 'selected window vs. prior equal window')}"
-        f'<div class="sec-body">'
-        f"{section_note('Side-by-side comparison against the immediately preceding window of the same length. Empty when the prior window has no recorded activity.')}"
-        f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
-        f'<thead><tr><th>Metric</th><th class="num">Current</th>'
-        f'<th class="num">Previous</th><th class="num">Δ</th></tr></thead>'
-        f"<tbody>{''.join(body)}</tbody>"
-        f"</table></div></div></section>"
-    )
-
-
-def render_anomalies(rows: list[AnomalyRow]) -> str:
-    sec_id = "anomalies"
-    if not rows:
-        return (
-            f'<section class="sec" id="{sec_id}">'
-            f"{section_head(sec_id, 'Anomalies', 'sample-size gated spike checks')}"
-            f'<div class="sec-body">'
-            f"{section_note('No anomaly crossed the sample-size and sigma thresholds for this window. That is a statistical non-finding, not proof that every event was normal.', METRIC_CONTEXTS['anomalies'])}"
-            f'<div class="panel empty-panel">No dashboard anomaly finding.</div>'
-            f"</div></section>"
-        )
-    body = []
-    for row in sorted(rows, key=lambda item: (-item.z_score, -item.impact_usd, item.kind)):
-        body.append(
-            f"<tr>"
-            f'<td><span class="session-label">{esc(row.kind)}</span>'
-            f'<div class="mono mute">{esc(row.timestamp)}</div></td>'
-            f"<td>{esc(row.label)}</td>"
-            f'<td class="num strong" data-value="{row.observed_usd:.8f}">{fmt_money(row.observed_usd)}</td>'
-            f'<td class="num" data-value="{row.baseline_usd:.8f}">{fmt_money(row.baseline_usd)}</td>'
-            f'<td class="num" data-value="{row.impact_usd:.8f}">{fmt_money(row.impact_usd)}</td>'
-            f'<td class="num" data-value="{row.z_score:.8f}">{row.z_score:.1f}σ</td>'
-            f"<td>{status_word(row.evidence_status)}</td>"
-            f"</tr>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Anomalies', 'daily, project, model, and session spikes')}"
-        f'<div class="sec-body">'
-        f"{section_note('Anomalies are estimated statistical findings over measured cost aggregates. Baselines use robust medians, and sparse scopes are omitted instead of guessed.', METRIC_CONTEXTS['anomalies'])}"
-        f'<div class="panel pad-0 table-scroll"><table class="data data-sortable">'
-        f"<thead><tr>"
-        f'<th data-sort="text">Scope</th>'
-        f'<th data-sort="text">Label</th>'
-        f'<th class="num th-cost" data-sort="number" aria-sort="descending">Observed <span class="sort-glyph">↓</span></th>'
-        f'<th class="num" data-sort="number">Baseline</th>'
-        f'<th class="num" data-sort="number">Impact</th>'
-        f'<th class="num" data-sort="number">Score</th>'
-        f'<th data-sort="text">Evidence</th>'
-        f"</tr></thead>"
-        f"<tbody>{''.join(body)}</tbody>"
-        f"</table></div></div></section>"
-    )
-
-
-# 8. Insights -----------------------------------------------------------------
-
-
-def render_insights(rows: list[Insight]) -> str:
-    sec_id = "insights"
-    if not rows:
-        return (
-            f'<section class="sec" id="{sec_id}">'
-            f"{section_head(sec_id, 'Insights')}"
-            f'<div class="sec-body">'
-            f'<div class="panel empty-panel">No insights for this window.</div>'
-            f"</div></section>"
-        )
-    items = []
-    for ins in rows:
-        impact = f'<span class="impact-chip">{esc(ins.impact)}</span>' if ins.impact else ""
-        items.append(
-            f'<li class="insight insight-{esc(ins.severity)}">'
-            f'<span class="insight-rail"></span>'
-            f'<div class="insight-head">'
-            f"{severity_pill(ins.severity)}"
-            f'<h3 class="insight-title">{esc(ins.title)}</h3>'
-            f"{impact}"
-            f"</div>"
-            f'<p class="insight-detail">{esc(ins.detail)}</p>'
-            f"</li>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Insights')}"
-        f'<div class="sec-body">'
-        f'<ul class="insight-list">{"".join(items)}</ul>'
-        f"</div></section>"
-    )
-
-
-# 9. Forecast -----------------------------------------------------------------
-
-
-def _forecast_band(
-    low: float,
-    high: float,
-    mid: float,
-    vmin: float,
-    vmax: float,
-    *,
-    accent: bool = False,
-    off_band: bool = False,
-) -> str:
-    """Render a single forecast band against a *shared* domain.
-
-    ``low`` / ``high`` are the ±1σ linear-projection edges; ``mid`` is the
-    estimate plotted on this card (linear or EWMA). ``vmin`` / ``vmax``
-    define the shared domain so both cards in the section render on the
-    same scale and their dots are directly comparable.
-
-    When ``mid`` falls outside ``[low, high]`` (``off_band``), the dot keeps
-    its true position on the shared axis and a dashed connector bridges
-    band-edge → dot.
-
-    The geometry is drawn in SVG (it stretches gracefully under
-    ``preserveAspectRatio="none"``) but the numeric labels are HTML —
-    SVG ``<text>`` would get squeezed/stretched non-uniformly when the
-    aspect ratio changes, leading to overlapping labels at narrow widths.
-    """
-    H = 22
-    TRACK_Y = 11
-    vspan = (vmax - vmin) or 1.0
-
-    def to_pct(v: float) -> float:
-        # clamp to [0, 100] in case mid pads beyond the visible domain.
-        t = max(0.0, min(1.0, (v - vmin) / vspan))
-        return t * 100.0
-
-    band_p1 = to_pct(low)
-    band_p2 = to_pct(high)
-    band_w_pct = max(0.5, band_p2 - band_p1)
-    mid_pct = to_pct(mid)
-    fill = "var(--accent-tint-2)" if accent else "var(--accent-tint)"
-
-    # SVG uses width=100, height=H, then stretches via CSS — preserves
-    # band positions cleanly across any container width.
-    svg_parts: list[str] = [
-        f'<svg viewBox="0 0 100 {H}" preserveAspectRatio="none" '
-        f'class="forecast-band-svg" role="img" '
-        f'aria-label="Forecast confidence band">',
-        # track baseline (full width)
-        f'<line x1="0" y1="{TRACK_Y}" x2="100" y2="{TRACK_Y}" '
-        f'stroke="var(--hairline)" stroke-width="0.4" '
-        f'vector-effect="non-scaling-stroke"/>',
-        # band rect
-        f'<rect x="{band_p1:.3f}" y="{TRACK_Y - 3}" width="{band_w_pct:.3f}" '
-        f'height="6" rx="3" fill="{fill}"/>',
-        # edge ticks
-        f'<line x1="{band_p1:.3f}" y1="{TRACK_Y - 6}" x2="{band_p1:.3f}" '
-        f'y2="{TRACK_Y + 6}" stroke="var(--border-strong)" stroke-width="0.8" '
-        f'vector-effect="non-scaling-stroke" opacity="0.85"/>',
-        f'<line x1="{band_p2:.3f}" y1="{TRACK_Y - 6}" x2="{band_p2:.3f}" '
-        f'y2="{TRACK_Y + 6}" stroke="var(--border-strong)" stroke-width="0.8" '
-        f'vector-effect="non-scaling-stroke" opacity="0.85"/>',
-    ]
-    if off_band:
-        anchor = band_p1 if mid < low else band_p2
-        p1, p2 = sorted((anchor, mid_pct))
-        svg_parts.append(
-            f'<line x1="{p1:.3f}" y1="{TRACK_Y}" x2="{p2:.3f}" y2="{TRACK_Y}" '
-            f'stroke="var(--warn)" stroke-width="1" stroke-dasharray="2 2" '
-            f'vector-effect="non-scaling-stroke" opacity="0.8"/>'
-        )
-    svg_parts.append(
-        # We intentionally avoid using `r` on the dot — under
-        # `preserveAspectRatio="none"` it would render as an ellipse.
-        # Two thin rects centered at (mid_pct, TRACK_Y) read as a dot
-        # at any aspect ratio, but the visual would lose the round
-        # affordance. Instead, the dot is a CSS-positioned HTML
-        # element (see below) so it stays circular at any container
-        # width.
-        ""
-    )
-    svg_parts.append("</svg>")
-
-    # HTML overlay for the dot (true circle at any width) plus the two
-    # numeric labels below the track.
-    low_label = fmt_money(low)
-    high_label = fmt_money(high)
-
-    # Decide label layout. When the band edges land too close together on
-    # the shared scale, fold the labels into one centered range label.
-    LABEL_GAP_PCT = 18.0  # heuristic — leaves room for two ~7-char numbers
-    if band_w_pct < LABEL_GAP_PCT:
-        center_pct = (band_p1 + band_p2) / 2
-        label_html = (
-            f'<span class="forecast-band-label" '
-            f'style="left:{center_pct:.3f}%">{low_label}–{high_label}</span>'
-        )
-    else:
-        label_html = (
-            f'<span class="forecast-band-label" '
-            f'style="left:{band_p1:.3f}%">{low_label}</span>'
-            f'<span class="forecast-band-label" '
-            f'style="left:{band_p2:.3f}%">{high_label}</span>'
-        )
-
-    dot_cls = "forecast-dot" + (" is-warn" if off_band else "")
-    return (
-        '<div class="forecast-band">'
-        + "".join(svg_parts)
-        + f'<span class="{dot_cls}" style="left:{mid_pct:.3f}%"></span>'
-        + f'<div class="forecast-band-labels">{label_html}</div>'
-        + "</div>"
-    )
-
-
-def render_forecast(f: Forecast | None) -> str:
-    sec_id = "forecast"
-    if f is None:
-        return ""
-
-    # Shared domain across both cards so the dots are directly comparable.
-    # We use the band edges + both projection points as anchors and pad
-    # 10% on each side; we only force-include 0 if the data already sits
-    # near it (otherwise we'd waste most of the strip on empty headroom).
-    points = (f.linear_low, f.linear_high, f.linear_total, f.ewma_total)
-    vmin = min(points)
-    vmax = max(points)
-    if vmin > 0 and vmin < (vmax - vmin) * 0.5:
-        # Data is close enough to 0 that the reader will want it on-axis.
-        vmin = 0.0
-    span = (vmax - vmin) or 1.0
-    pad = span * 0.10
-    vmin -= pad
-    vmax += pad
-
-    linear_off = f.linear_total < f.linear_low or f.linear_total > f.linear_high
-    ewma_off = f.ewma_total < f.linear_low or f.ewma_total > f.linear_high
-
-    delta = f.ewma_total - f.linear_total
-    delta_pct = (delta / f.linear_total) * 100 if f.linear_total else 0
-    delta_cls = "delta-bad" if delta >= 0 else "delta-ok"
-    delta_arr = "↑" if delta >= 0 else "↓"
-    delta_sign = "+" if delta > 0 else ""
-
-    off_chip = (
-        '<span class="off-band-chip" title="EWMA falls outside the ±1σ '
-        'linear band — recent days diverge sharply from the window average.">'
-        "off-band</span>"
-        if ewma_off
-        else ""
-    )
-
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Forecast', f'based on {f.days_analyzed} days · projected through next {f.days_remaining} days')}"
-        f'<div class="sec-body">'
-        f"{section_note('Forecast cards are projections from selected-window daily spend, not committed future cost.', METRIC_CONTEXTS['forecast'])}"
-        f'<div class="cards forecast-cards">'
-        # Linear card
-        f'<div class="card forecast-card">'
-        f'<div class="forecast-card-head">'
-        f'<div class="stat-label">Projected linear total</div>'
-        f'<div class="forecast-tag">mean × days</div>'
-        f"</div>"
-        f'<div class="stat-value">est. {fmt_money(f.linear_total)}</div>'
-        f"{_forecast_band(f.linear_low, f.linear_high, f.linear_total, vmin, vmax, off_band=linear_off)}"
-        f'<div class="forecast-sub">'
-        f'<span class="forecast-sub-key">±1σ</span> '
-        f"{fmt_money(f.linear_low)} – {fmt_money(f.linear_high)}"
-        f"</div>"
-        f"</div>"
-        # EWMA card
-        f'<div class="card forecast-card">'
-        f'<div class="forecast-card-head">'
-        f'<div class="stat-label">Projected EWMA total</div>'
-        f'<div class="forecast-tag">α = 0.3</div>'
-        f"</div>"
-        f'<div class="stat-value">est. {fmt_money(f.ewma_total)}{off_chip}</div>'
-        f"{_forecast_band(f.linear_low, f.linear_high, f.ewma_total, vmin, vmax, accent=True, off_band=ewma_off)}"
-        f'<div class="forecast-sub">'
-        f'<span class="forecast-sub-key">daily</span> '
-        f"{fmt_money(f.daily_mean)}"
-        f'&nbsp;&nbsp;<span class="forecast-sub-key">σ</span> {fmt_money(f.daily_stdev)}'
-        f'<span class="delta {delta_cls} forecast-delta">'
-        f"{delta_arr}&nbsp;{delta_sign}{delta_pct:.1f}% vs linear</span>"
-        f"</div>"
-        f"</div>"
-        f"</div></div></section>"
-    )
-
-
-# 10. Evidence ----------------------------------------------------------------
-
-
-_DOW_LABELS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
-
-def render_seasonality(section: SeasonalitySection | None) -> str:
-    """Cost-weighted hour×dow + hour strip + dow strip.
-
-    Distinct from the event-count Recap heatmap — values are USD, the peak
-    callouts read "highest-spend hour/day," and the off-peak share quantifies
-    how concentrated spend is.
-    """
-    if section is None or section.total_cost_usd <= 0:
-        return ""
-    sec_id = "seasonality"
-    grid_cells: list[str] = []
-    flat = [v for row in section.by_dow_hour_cost_usd for v in row]
-    cell_max = max(flat) if flat else 0.0
-    for dow in range(7):
-        for hour in range(24):
-            value = section.by_dow_hour_cost_usd[dow][hour]
-            level = _intensity_level(value, cell_max)
-            tip = (
-                f"{_DOW_LABELS[dow]} {hour:02d}:00 · "
-                f"{fmt_money(value)} ({value / section.total_cost_usd * 100:.1f}%)"
-            )
-            grid_cells.append(
-                f'<div class="hod-cell hod-level-{level}" '
-                f'data-day="{dow}" data-hour="{hour}" '
-                f'data-tip="{esc(tip)}" role="img" aria-label="{esc(tip)}"></div>'
-            )
-    dow_labels_html = "".join(
-        f'<div class="hod-row-label">{esc(label)}</div>' for label in _DOW_LABELS
-    )
-    hour_labels_html = "".join(
-        f'<div class="hod-col-label">{hour:02d}</div>' for hour in range(0, 24, 3)
-    )
-    hour_max = max(section.by_hour_cost_usd) or 1.0
-    hour_strip = "".join(
-        f'<div class="strip-bar" style="height: {(v / hour_max) * 100:.1f}%" '
-        f'data-tip="{esc(f"{h:02d}:00 · {fmt_money(v)}")}" aria-label="hour {h}"></div>'
-        for h, v in enumerate(section.by_hour_cost_usd)
-    )
-    dow_max = max(section.by_dow_cost_usd) or 1.0
-    dow_strip = "".join(
-        f'<div class="strip-bar" style="height: {(v / dow_max) * 100:.1f}%" '
-        f'data-tip="{esc(f"{_DOW_LABELS[d]} · {fmt_money(v)}")}" '
-        f'aria-label="{esc(_DOW_LABELS[d])}"></div>'
-        for d, v in enumerate(section.by_dow_cost_usd)
-    )
-    callouts = (
-        f'<div class="seasonality-callouts">'
-        f'<div class="callout"><span class="callout-label">Peak hour</span>'
-        f'<span class="callout-value">{section.peak_hour:02d}:00</span></div>'
-        f'<div class="callout"><span class="callout-label">Peak day</span>'
-        f'<span class="callout-value">{esc(_DOW_LABELS[section.peak_dow])}</span></div>'
-        f'<div class="callout"><span class="callout-label">Off-peak share</span>'
-        f'<span class="callout-value">{fmt_pct_round(section.off_peak_share)}</span></div>'
-        f'<div class="callout"><span class="callout-label">Total in window</span>'
-        f'<span class="callout-value">{fmt_money(section.total_cost_usd)}</span></div>'
-        f"</div>"
-    )
-    return (
-        f'<section class="sec" id="{sec_id}" data-section="seasonality">'
-        f"{section_head(sec_id, 'Spend seasonality', 'cost-weighted hour × day-of-week')}"
-        f'<div class="sec-body">'
-        f"{section_note('Cells are dollar spend in local timezone (' + esc(section.timezone) + '). Use this to find sustained high-spend windows distinct from the event-count Recap heatmap.')}"
-        f'<div class="seasonality-grid-wrap">'
-        f'<div class="hod-row-labels">{dow_labels_html}</div>'
-        f'<div class="hod-grid" data-cells="168" style="grid-template-columns: repeat(24, 1fr);">{"".join(grid_cells)}</div>'
-        f"</div>"
-        f'<div class="hod-col-labels">{hour_labels_html}</div>'
-        f'<div class="seasonality-strips">'
-        f'<div class="strip"><div class="strip-title">Hour of day</div>'
-        f'<div class="strip-bars" data-section="seasonality-hour-strip">{hour_strip}</div></div>'
-        f'<div class="strip"><div class="strip-title">Day of week</div>'
-        f'<div class="strip-bars" data-section="seasonality-dow-strip">{dow_strip}</div></div>'
-        f"</div>"
-        f"{callouts}"
-        f"</div></section>"
-    )
-
-
-def _intensity_level(value: float, vmax: float) -> int:
-    if vmax <= 0 or value <= 0:
-        return 0
-    ratio = value / vmax
-    if ratio >= 0.75:
-        return 4
-    if ratio >= 0.5:
-        return 3
-    if ratio >= 0.25:
-        return 2
-    return 1
-
-
-def render_tier_provenance(provenance: TierProvenance | None) -> str:
-    """Horizontal stacked bar of where each event's service tier came from."""
-    if provenance is None or provenance.total_events <= 0:
-        return ""
-    sec_id = "tier-provenance"
-    total = provenance.total_events
-    segments: list[str] = []
-    legend: list[str] = []
-    for idx, (label, count) in enumerate(provenance.sources):
-        share = count / total if total else 0.0
-        slot = idx % 5
-        segments.append(
-            f'<div class="prov-seg prov-seg-{slot}" '
-            f'style="flex: {count} 0 0%;" '
-            f'data-tier-source="{esc(label)}" '
-            f'data-tip="{esc(f"{label} · {count:,} events · {share * 100:.1f}%")}"></div>'
-        )
-        legend.append(
-            f'<li class="prov-legend-item">'
-            f'<span class="prov-swatch prov-seg-{slot}"></span>'
-            f'<span class="prov-label">{esc(label)}</span>'
-            f'<span class="prov-count mute">{fmt_int(count)} ({fmt_pct_round(share)})</span>'
-            f"</li>"
-        )
-    return (
-        f'<section class="sec" id="{sec_id}" data-section="tier-provenance">'
-        f"{section_head(sec_id, 'Service-tier provenance', 'how each event tier was resolved')}"
-        f'<div class="sec-body">'
-        f"{section_note('Precedence: CLI override → JSON override → logged in event → codex config → assumed default. Lower-precedence sources should be a minority for high-confidence pricing.')}"
-        f'<div class="prov-bar" role="img" aria-label="Tier source distribution">'
-        f"{''.join(segments)}"
-        f"</div>"
-        f'<ul class="prov-legend">{"".join(legend)}</ul>'
-        f"</div></section>"
-    )
-
-
-def render_evidence(rows: list[EvidenceRow], quality: QualityScore | None = None) -> str:
-    sec_id = "evidence"
-    if not rows and quality is None:
-        return ""
-    quality_html = ""
-    if quality is not None:
-        signals = "".join(
-            f'<li class="quality-signal quality-signal-{esc(signal.tone)}">'
-            f'<span class="quality-signal-label">{esc(signal.label)}</span>'
-            f'<span class="quality-signal-status">{esc(signal.status)}</span>'
-            f'<span class="quality-signal-note">{esc(signal.note)}</span>'
-            f"</li>"
-            for signal in quality.signals
-        )
-        quality_html = (
-            f'<div class="quality-panel quality-panel-{esc(quality.tone)}">'
-            f'<div class="quality-score">'
-            f'<span class="quality-number">{quality.score}</span>'
-            f'<span class="quality-denom">/100</span>'
-            f"</div>"
-            f'<div class="quality-copy">'
-            f'<h3 class="panel-title">Evidence quality · {esc(quality.grade)}</h3>'
-            f'<ul class="quality-list">{signals}</ul>'
-            f"</div></div>"
-        )
-    body = "".join(
-        f"<tr>"
-        f'<td class="evidence-dim">{esc(r.label)}</td>'
-        f"<td>{status_word(r.status)}</td>"
-        f'<td class="mute evidence-note">{esc(r.note)}</td>'
-        f"</tr>"
-        for r in rows
-    )
-    return (
-        f'<section class="sec" id="{sec_id}">'
-        f"{section_head(sec_id, 'Evidence', 'how each number is supported')}"
-        f'<div class="sec-body">'
-        f"{section_note('Evidence tells you which numbers are exact, estimated, partial, or unsupported before you act on the report.', METRIC_CONTEXTS['evidence'])}"
-        f"{quality_html}"
-        f'<div class="panel pad-0">'
-        f'<table class="data evidence"><tbody>{body}</tbody></table>'
-        f"</div></div></section>"
-    )
-
-
-# 11. Footer ------------------------------------------------------------------
-
-
-def render_footer(d: Dashboard) -> str:
-    # Cosmetic "signed receipt" short hash. The engineer can swap in a real
-    # content hash if desired.
-    h = hashlib.sha256(
-        (
-            json.dumps(d.totals, default=lambda o: o.__dict__, sort_keys=True) + d.generated_at
-        ).encode()
-    ).hexdigest()[:8]
-    return (
-        f'<footer class="page-foot">'
-        f'<div class="page-foot-row">'
-        f'<div class="page-foot-left">'
-        f'<span class="page-foot-fact">No external resources</span>'
-        f'<span class="page-foot-sep">·</span>'
-        f'<span class="page-foot-fact">No telemetry</span>'
-        f'<span class="page-foot-sep">·</span>'
-        f'<span class="page-foot-fact">Inline controls only</span>'
-        f'<span class="page-foot-sep">·</span>'
-        f'<span class="page-foot-fact">Parsed locally from your AI coding logs</span>'
-        f"</div>"
-        f'<div class="page-foot-right">'
-        f'<span><span class="mute">caliper</span>&nbsp;&nbsp;'
-        f"v{esc(d.caliper.version)}&nbsp;&nbsp;"
-        f'<span class="mute">schema</span>&nbsp;{d.caliper.schema_version}</span>'
-        f"<span>{esc(d.generated_at)}</span>"
-        f'<span class="page-foot-checksum">sha&nbsp;{h}</span>'
-        f"</div></div></footer>"
-    )
-
-
-# ===========================================================================
-# Public entrypoint
-# ===========================================================================
-
-# Inline stylesheet. Source of truth on disk is `styles.css` next to this
-# module; the two are kept byte-identical by `tests/test_handoff_styles.py`.
-# Inlining preserves the offline invariant: no external resources, no file
-# I/O at render time, and ``pip install caliper-ai`` ships the styles even
-# when ``styles.css`` is not bundled as package_data.
-INLINE_SCRIPT = r"""
-(() => {
-  const toNumber = (cell) => {
-    const raw = cell ? (cell.dataset.value || cell.textContent || "") : "";
-    const cleaned = raw.replace(/[$,%\s]/g, "").replace(/[KMB]$/i, "");
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  document.querySelectorAll(".data-sortable th[data-sort]").forEach((th) => {
-    th.tabIndex = 0;
-    th.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        th.click();
-      }
-    });
-    th.addEventListener("click", () => {
-      const table = th.closest("table");
-      const tbody = table ? table.tBodies[0] : null;
-      if (!table || !tbody) return;
-      const headers = Array.from(th.parentElement.children);
-      const index = headers.indexOf(th);
-      const numeric = th.dataset.sort === "number";
-      const current = th.getAttribute("aria-sort") === "ascending" ? "ascending" : "descending";
-      const next = current === "ascending" ? "descending" : "ascending";
-      headers.forEach((header) => {
-        header.removeAttribute("aria-sort");
-        const glyph = header.querySelector(".sort-glyph");
-        if (glyph) glyph.textContent = "";
-      });
-      th.setAttribute("aria-sort", next);
-      const glyph = th.querySelector(".sort-glyph");
-      if (glyph) glyph.textContent = next === "ascending" ? "↑" : "↓";
-      const rows = Array.from(tbody.rows);
-      const summaryRows = rows.filter((row) => row.classList.contains("summary-row"));
-      const sortableRows = rows.filter((row) => !row.classList.contains("summary-row"));
-      sortableRows.sort((a, b) => {
-        const av = numeric ? toNumber(a.cells[index]) : (a.cells[index]?.textContent || "");
-        const bv = numeric ? toNumber(b.cells[index]) : (b.cells[index]?.textContent || "");
-        const result = numeric ? av - bv : String(av).localeCompare(String(bv));
-        return next === "ascending" ? result : -result;
-      });
-      sortableRows.concat(summaryRows).forEach((row) => tbody.appendChild(row));
-    });
-  });
-
-  const filterButtons = Array.from(document.querySelectorAll(".mix-filter"));
-  filterButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const filter = button.dataset.mixFilter || "all";
-      filterButtons.forEach((item) => {
-        item.classList.toggle("is-active", item === button);
-      });
-      document.querySelectorAll("[data-mix-panel]").forEach((panel) => {
-        const show = filter === "all" || panel.dataset.mixPanel === filter;
-        panel.hidden = !show;
-      });
-    });
-  });
-
-  const setLens = (lens) => {
-    document.documentElement.dataset.lens = lens;
-    document.querySelectorAll(".lens-button").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.lens === lens);
-    });
-    document.querySelectorAll("[data-lens-scope]").forEach((item) => {
-      const scope = item.dataset.lensScope || "all";
-      const match = scope === "all" || scope === lens;
-      item.classList.toggle("is-lens-match", match);
-      item.classList.toggle("is-lens-dim", !match);
-    });
-  };
-  const initialLens = document.documentElement.dataset.lens || "executive";
-  setLens(initialLens);
-  document.querySelectorAll(".lens-button").forEach((button) => {
-    button.addEventListener("click", () => setLens(button.dataset.lens || "executive"));
-  });
-
-  const highlightTarget = (id) => {
-    if (!id) return;
-    document.querySelectorAll(".is-trace-target").forEach((item) => {
-      item.classList.remove("is-trace-target");
-    });
-    const target = document.getElementById(id);
-    if (!target) return;
-    target.classList.add("is-trace-target");
-    window.setTimeout(() => target.classList.remove("is-trace-target"), 1800);
-  };
-  document.querySelectorAll("[data-trace-target]").forEach((link) => {
-    link.addEventListener("click", () => highlightTarget(link.dataset.traceTarget || ""));
-  });
-  window.addEventListener("hashchange", () => highlightTarget(location.hash.slice(1)));
-  if (location.hash) highlightTarget(location.hash.slice(1));
-
-  const navLinks = Array.from(document.querySelectorAll(".dash-nav-link[href^='#']"));
-  const sections = navLinks
-    .map((link) => document.getElementById(link.getAttribute("href").slice(1)))
-    .filter(Boolean);
-  if ("IntersectionObserver" in window && sections.length) {
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        navLinks.forEach((link) => {
-          link.classList.toggle("is-current", link.getAttribute("href") === `#${entry.target.id}`);
-        });
-      });
-    }, { rootMargin: "-35% 0px -60% 0px", threshold: 0.01 });
-    sections.forEach((section) => observer.observe(section));
-  }
-})();
-"""
-
-INLINE_STYLES = r"""
-/* ============================================================================
-   Caliper Dashboard — visual system v2 (premium)
-   System-stack typography honed with OpenType features.
-   Strict 8pt rhythm. Hairline borders. Audit-receipt elegance.
-   ========================================================================== */
+__all__ = [
+    "INLINE_STYLES",
+    "SECTION_NUMBERS",
+    "fmt_money",
+    "fmt_tokens",
+    "fmt_int",
+    "fmt_pct",
+    "render_dashboard",
+    "render_models",
+    "render_projects",
+]
+
+
+# ============================================================================
+# Inline stylesheet — must remain byte-equivalent to styles.css
+# ============================================================================
+
+INLINE_STYLES = """
+/* Caliper dashboard — CSS tokens (dark / light / print) + accent variants + density. */
 
 :root {
-  /* — Surface (dark) — slightly warmer, deeper for premium feel */
-  --bg:           #0a0d12;
-  --bg-2:         #0d1117;
-  --panel:        #12161e;
-  --panel-2:      #161b24;
-  --panel-hover:  #1a2029;
-  --border:       #1f242e;
-  --border-strong:#2a313c;
-  --grid:         rgba(255,255,255,0.045);
-  --bar-ghost:    rgba(255,255,255,0.022);
-  --hairline:     rgba(255,255,255,0.06);
-  /* Divider tone used inside coloured tracks (stacked bar, etc.) — must read
-     as a line on top of any tool-category fill, in any theme. */
-  --seg-divider:  rgba(0,0,0,0.32);
+  /* dark by default */
+  --bg: #0a0d12;
+  --bg-2: #0d1117;
+  --panel: #12161e;
+  --panel-2: #161b24;
+  --panel-hover: #1a2029;
+  --border: #1f242e;
+  --border-strong: #2a313c;
+  --grid: rgba(255,255,255,0.045);
+  --bar-ghost: rgba(255,255,255,0.022);
+  --hairline: rgba(255,255,255,0.06);
 
-  /* Ink — --ghost bumped from #545b67 (3.1:1) to clear WCAG AA on small text. */
-  --ink:    #e8eaef;
-  --ink-2:  #c4c9d3;
-  --mute:   #858d9b;
-  --ghost:  #6c7383;
+  --ink: #e8eaef;
+  --ink-2: #c4c9d3;
+  --mute: #858d9b;
+  --ghost: #6c7383;
 
-  /* Accent — same #7cc4ff but with broader tints */
-  --accent:        #7cc4ff;
+  --accent: #7cc4ff;
   --accent-strong: #54aef0;
-  --accent-soft:   #b3dcff;
-  --accent-tint:   rgba(124,196,255,0.10);
+  --accent-soft: #b3dcff;
+  --accent-tint: rgba(124,196,255,0.10);
   --accent-tint-2: rgba(124,196,255,0.18);
   --accent-tint-3: rgba(124,196,255,0.06);
 
-  /* Status — desaturated, audit-grade */
-  --ok:   #7be092;
+  --ok: #7be092;
   --warn: #f5c971;
-  --bad:  #f08585;
-
-  --ok-tint:   rgba(123,224,146,0.10);
+  --bad: #f08585;
+  --ok-tint: rgba(123,224,146,0.10);
   --warn-tint: rgba(245,201,113,0.10);
-  --bad-tint:  rgba(240,133,133,0.10);
+  --bad-tint: rgba(240,133,133,0.10);
 
-  /* Per-card accent hairlines — one source of truth, picked by [data-accent] */
-  --card-rail-cost:     var(--accent-tint-2);
-  --card-rail-cache:    rgba(123,224,146,0.22);
-  --card-rail-tokens:   var(--accent-tint-2);
-  --card-rail-sessions: rgba(167,139,250,0.22);
+  --card-rail-cost: var(--accent-tint-2);
+  --card-rail-cache: rgba(123,224,146,0.32);
+  --card-rail-tokens: var(--accent-tint-2);
+  --card-rail-sessions: rgba(167,139,250,0.32);
 
-  /* Tool categories */
-  --explore:  #7cc4ff;
-  --execute:  #a78bfa;
+  --explore: #7cc4ff;
+  --execute: #a78bfa;
   --diagnose: #f5c971;
-  --mixed:    #858d9b;
+  --mixed: #858d9b;
 
-  /* — Type — system stack tuned with OpenType features.
-     Engineer note: this is a target. Geist/Inter Tight/SF Pro substitute well. */
-  --font:  -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-           "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue",
-           sans-serif;
-  --mono:  ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code",
-           Menlo, Consolas, monospace;
+  /* Type stack — premium system fallback chain.
+     -apple-system → SF Pro (macOS), Segoe UI Variable → Windows 11,
+     system-ui → Linux/everywhere else. No CDN. */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+          "Segoe UI Variable Text", "Segoe UI", system-ui, "Helvetica Neue",
+          "Inter", Roboto, "Liberation Sans", sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code",
+          "Cascadia Mono", Menlo, Consolas, monospace;
 
-  /* OpenType */
-  --otf-text:    "cv11" 1, "ss01" 1, "cv02" 1, "kern" 1, "calt" 1, "liga" 1;
-  --otf-num:     "tnum" 1, "lnum" 1, "ss03" 1;
-
-  /* Strict 8pt rhythm */
-  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
-  --s6: 32px; --s7: 48px; --s8: 64px; --s9: 96px;
-
-  /* Numeric type scale — one ladder for every hero number on the page.
-     xl  → primary KPI cards
-     lg  → hero headlines (activity total)
-     md  → recap stat tiles
-     sm  → heatmap stat strip, table strong cell  */
-  --num-xl: 32px;
-  --num-lg: 26px;
-  --num-md: 20px;
+  --num-xl: 30px;
+  --num-lg: 24px;
+  --num-md: 19px;
   --num-sm: 15px;
 
-  /* Radii — small, audit-doc feeling */
-  --r-sm: 3px; --r-md: 5px; --r-lg: 7px;
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 7px;
 
-  /* Density (8pt-aligned) */
   --row-pad-y: 12px;
   --row-pad-x: 16px;
 }
 
-[data-density="compact"] {
-  --row-pad-y: 8px;
-  --row-pad-x: 12px;
-}
+/* Light theme */
+.theme-light {
+  --bg: #f6f7f9;
+  --bg-2: #fbfbfd;
+  --panel: #ffffff;
+  --panel-2: #fafbfc;
+  --panel-hover: #f3f5f8;
+  --border: #e6e8ec;
+  --border-strong: #cfd3da;
+  --grid: rgba(0,0,0,0.045);
+  --bar-ghost: rgba(0,0,0,0.025);
+  --hairline: rgba(0,0,0,0.07);
 
-/* — Light theme — Stripe-receipt clean */
-[data-theme="light"] {
-  --bg:           #f6f7f9;
-  --bg-2:         #fbfbfd;
-  --panel:        #ffffff;
-  --panel-2:      #fafbfc;
-  --panel-hover:  #f3f5f8;
-  --border:       #e6e8ec;
-  --border-strong:#cfd3da;
-  --grid:         rgba(0,0,0,0.045);
-  --bar-ghost:    rgba(0,0,0,0.025);
-  --hairline:     rgba(0,0,0,0.07);
-  --seg-divider:  rgba(255,255,255,0.55);
-
-  --ink:   #0e1116;
+  --ink: #0e1116;
   --ink-2: #353a44;
-  --mute:  #5a626e;
+  --mute: #5a626e;
   --ghost: #6d7585;
 
-  --accent:        #2563eb;
+  --accent: #2563eb;
   --accent-strong: #1d4ed8;
-  --accent-soft:   #93b8ff;
-  --accent-tint:   rgba(37,99,235,0.08);
+  --accent-soft: #93b8ff;
+  --accent-tint: rgba(37,99,235,0.08);
   --accent-tint-2: rgba(37,99,235,0.16);
-  --accent-tint-3: rgba(37,99,235,0.04);
 
-  --ok:   #16a34a;
+  --ok: #16a34a;
   --warn: #b45309;
-  --bad:  #b91c1c;
+  --bad: #b91c1c;
+  --ok-tint: rgba(22,163,74,0.08);
+  --warn-tint: rgba(180,83,9,0.08);
+  --bad-tint: rgba(185,28,28,0.08);
 
-  --ok-tint:   rgba(22,163,74,0.10);
-  --warn-tint: rgba(180,83,9,0.10);
-  --bad-tint:  rgba(185,28,28,0.10);
-
-  --card-rail-cost:     var(--accent-tint-2);
-  --card-rail-cache:    rgba(22,163,74,0.28);
-  --card-rail-tokens:   var(--accent-tint-2);
+  --card-rail-cost: var(--accent-tint-2);
+  --card-rail-cache: rgba(22,163,74,0.28);
+  --card-rail-tokens: var(--accent-tint-2);
   --card-rail-sessions: rgba(124,58,237,0.28);
 
-  --explore:  #2563eb;
-  --execute:  #7c3aed;
+  --explore: #2563eb;
+  --execute: #7c3aed;
   --diagnose: #b45309;
-  --mixed:    #6b7280;
+  --mixed: #6b7280;
 }
 
-/* — Print theme (preview) */
-[data-theme="print"] {
-  --bg:           #ffffff;
-  --bg-2:         #ffffff;
-  --panel:        #ffffff;
-  --panel-2:      #ffffff;
-  --panel-hover:  #ffffff;
-  --border:       #cccccc;
-  --border-strong:#888888;
-  --grid:         rgba(0,0,0,0.10);
-  --bar-ghost:    rgba(0,0,0,0.04);
-  --hairline:     rgba(0,0,0,0.18);
-  --seg-divider:  rgba(255,255,255,0.65);
+/* Print theme */
+.theme-print {
+  --bg: #ffffff;
+  --bg-2: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #fafafa;
+  --panel-hover: #ffffff;
+  --border: #cccccc;
+  --border-strong: #888888;
+  --grid: rgba(0,0,0,0.10);
+  --bar-ghost: rgba(0,0,0,0.04);
+  --hairline: rgba(0,0,0,0.18);
 
-  --ink:   #000000;
+  --ink: #000000;
   --ink-2: #1a1a1a;
-  --mute:  #4a4a4a;
+  --mute: #4a4a4a;
   --ghost: #6a6a6a;
 
-  --accent:        #0050b3;
+  --accent: #0050b3;
   --accent-strong: #003a82;
-  --accent-soft:   #2a72c2;
-  --accent-tint:   rgba(0,80,179,0.08);
+  --accent-soft: #2a72c2;
+  --accent-tint: rgba(0,80,179,0.08);
   --accent-tint-2: rgba(0,80,179,0.15);
 
-  --ok:   #0050b3;
-  --warn: #0050b3;
-  --warn-tint: rgba(0,80,179,0.08);
-  --bad:  #b00020;
+  --ok: #0050b3;
+  --warn: #8a5a00;
+  --bad: #b00020;
+  --ok-tint: rgba(0,80,179,0.06);
+  --warn-tint: rgba(138,90,0,0.06);
+  --bad-tint: rgba(176,0,32,0.06);
 
-  --card-rail-cost:     var(--accent-tint-2);
-  --card-rail-cache:    rgba(0,80,179,0.25);
-  --card-rail-tokens:   var(--accent-tint-2);
-  --card-rail-sessions: rgba(0,80,179,0.25);
+  --card-rail-cost: var(--accent-tint-2);
+  --card-rail-cache: rgba(0,80,179,0.20);
+  --card-rail-tokens: var(--accent-tint-2);
+  --card-rail-sessions: rgba(0,80,179,0.20);
 
-  --explore:  #0050b3;
-  --execute:  #6a4cb8;
+  --explore: #0050b3;
+  --execute: #6a4cb8;
   --diagnose: #8a5a00;
-  --mixed:    #4a4a4a;
+  --mixed: #4a4a4a;
 }
 
-/* — Base ----------------------------------------------------------------- */
+/* Accent variants — override colors without changing theme */
+.accent-blue   { --accent: #7cc4ff; --accent-strong: #54aef0; --explore: #7cc4ff; --accent-tint: rgba(124,196,255,0.10); --accent-tint-2: rgba(124,196,255,0.18); --card-rail-cost: var(--accent-tint-2); --card-rail-tokens: var(--accent-tint-2); }
+.accent-teal   { --accent: #5eead4; --accent-strong: #2dd4bf; --explore: #5eead4; --accent-tint: rgba(94,234,212,0.10); --accent-tint-2: rgba(94,234,212,0.20); --card-rail-cost: var(--accent-tint-2); --card-rail-tokens: var(--accent-tint-2); }
+.accent-purple { --accent: #c4b5fd; --accent-strong: #a78bfa; --explore: #c4b5fd; --accent-tint: rgba(196,181,253,0.10); --accent-tint-2: rgba(196,181,253,0.20); --card-rail-cost: var(--accent-tint-2); --card-rail-tokens: var(--accent-tint-2); }
+.accent-mono   { --accent: #e8eaef; --accent-strong: #c4c9d3; --explore: #e8eaef; --accent-tint: rgba(232,234,239,0.06); --accent-tint-2: rgba(232,234,239,0.12); --card-rail-cost: var(--accent-tint-2); --card-rail-tokens: var(--accent-tint-2); }
 
-* { box-sizing: border-box; }
+.theme-light.accent-blue   { --accent: #2563eb; --accent-strong: #1d4ed8; --explore: #2563eb; --accent-tint: rgba(37,99,235,0.08); --accent-tint-2: rgba(37,99,235,0.16); }
+.theme-light.accent-teal   { --accent: #0d9488; --accent-strong: #115e59; --explore: #0d9488; --accent-tint: rgba(13,148,136,0.08); --accent-tint-2: rgba(13,148,136,0.18); }
+.theme-light.accent-purple { --accent: #7c3aed; --accent-strong: #5b21b6; --explore: #7c3aed; --accent-tint: rgba(124,58,237,0.08); --accent-tint-2: rgba(124,58,237,0.16); }
+.theme-light.accent-mono   { --accent: #0e1116; --accent-strong: #000;    --explore: #0e1116; --accent-tint: rgba(14,17,22,0.05);  --accent-tint-2: rgba(14,17,22,0.12); }
 
-html { background: var(--bg); }
+/* Density variants */
+.density-compact {
+  --row-pad-y: 8px;
+  --row-pad-x: 12px;
+  --num-xl: 26px;
+  --num-lg: 20px;
+  --num-md: 17px;
+}
+.density-compact .cal-stat-card { padding: 12px !important; }
+.density-compact .cal-table th, .density-compact .cal-table td { padding: 7px 10px !important; }
+.density-compact .cal-insight-row { padding: 9px 12px !important; }
+.density-compact section { gap: 18px; }
+
+/* Base */
+html, body { background: var(--bg); margin: 0; padding: 0; }
 body {
-  margin: 0;
-  background: var(--bg);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.45;
   color: var(--ink);
-  font: 14px/1.5 var(--font);
-  font-feature-settings: var(--otf-text);
+  font-feature-settings: "kern" 1, "calt" 1, "liga" 1, "ss01" 1, "cv02" 1, "cv11" 1;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  font-variant-numeric: tabular-nums lining-nums;
   text-rendering: optimizeLegibility;
-  min-height: 100vh;
+}
+* { box-sizing: border-box; }
+*, *::before, *::after { font-variant-numeric: tabular-nums lining-nums; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
+code { font-family: var(--mono); font-size: 0.92em; }
+table { font-variant-numeric: tabular-nums lining-nums; }
+
+/* Hover on table rows */
+.cal-table tbody tr { transition: background-color 80ms ease-out; }
+.cal-table tbody tr:hover { background: var(--panel-hover); }
+
+/* Section spacing */
+section[id] { scroll-margin-top: 24px; }
+
+/* Terminal left-rail link hover + :target highlight when an anchor is active */
+.cal-rail-link:hover { color: var(--accent) !important; background: var(--accent-tint); }
+section[id]:target > [class*="cal-section-head"] {
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
-/* Frame the "page" so it feels like a discrete document */
-[data-theme="print"] body { background: #eceef2; }
+/* Mobile responsive — when wrapping element has data-viewport=mobile */
+[data-viewport="mobile"] .cal-summary-row { grid-template-columns: 1fr 1fr !important; }
+[data-viewport="mobile"] .cal-shape-grid,
+[data-viewport="mobile"] .cal-forecast-grid { grid-template-columns: 1fr !important; }
+[data-viewport="mobile"] .cal-table { font-size: 12px !important; }
+[data-viewport="mobile"] table th:nth-child(n+5),
+[data-viewport="mobile"] table td:nth-child(n+5) { display: none; }
+[data-viewport="mobile"] aside { display: none !important; }
+[data-viewport="mobile"] header { grid-template-columns: 1fr !important; }
+[data-viewport="mobile"] header > div:last-child { text-align: left !important; align-items: flex-start !important; }
+[data-viewport="mobile"] .cal-section-head.receipt { flex-wrap: wrap; row-gap: 4px; }
+[data-viewport="mobile"] [class*="cal-verdict"] { font-size: 13px; }
+[data-viewport="mobile"] main { padding: 16px 14px 48px !important; }
+[data-viewport="mobile"] [data-screen-label] { min-width: 0; }
+[data-viewport="mobile"] .cal-stat-card { padding: 12px !important; }
+[data-viewport="mobile"] .cal-stat-card > div:nth-child(2) { font-size: 22px !important; }
 
-.page-wrap {
-  min-height: 100vh;
-  background:
-    radial-gradient(1200px 600px at 50% -200px, rgba(124,196,255,0.025), transparent 70%),
-    var(--bg);
-}
-[data-theme="light"] .page-wrap {
-  background:
-    radial-gradient(1200px 600px at 50% -200px, rgba(37,99,235,0.025), transparent 70%),
-    var(--bg);
-}
-[data-theme="print"] .page-wrap { background: #eceef2; padding: 32px 0 64px; }
-
-.page {
-  max-width: 1180px;
+/* Mobile viewport: render at 390px wide in a phone-shaped frame */
+.viewport-mobile-frame {
+  width: 390px; min-height: 844px;
   margin: 0 auto;
-  /* 48 top / 32 sides / 48 bottom — sides bumped from 24 to breathe at 1180px */
-  padding: var(--s7) var(--s6) var(--s7);
-  position: relative;
-  min-width: 0;
-}
-[data-theme="print"] .page {
-  background: #fff;
-  border: 1px solid #d4d4d4;
-  box-shadow:
-    0 1px 0 rgba(0,0,0,0.02),
-    0 12px 40px rgba(0,0,0,0.08);
-  padding: 72px 72px 56px;
-  max-width: 920px;
+  border: 1px solid var(--border-strong);
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.25);
 }
 
-code, .mono {
-  font-family: var(--mono);
-  font-feature-settings: "zero" 1, "ss02" 1, "calt" 1;
+/* Print stylesheet (used when actually printing OR when theme-print is set) */
+.theme-print, .theme-print * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+@media print {
+  body { background: #fff !important; }
+  /* Force print tokens regardless of selected theme so Cmd+P always prints clean. */
+  :root, .theme-dark, .theme-light {
+    --bg: #ffffff !important;
+    --bg-2: #ffffff !important;
+    --panel: #ffffff !important;
+    --panel-2: #fafafa !important;
+    --panel-hover: #ffffff !important;
+    --border: #cccccc !important;
+    --border-strong: #888888 !important;
+    --grid: rgba(0,0,0,0.10) !important;
+    --bar-ghost: rgba(0,0,0,0.04) !important;
+    --hairline: rgba(0,0,0,0.18) !important;
+    --ink: #000000 !important;
+    --ink-2: #1a1a1a !important;
+    --mute: #4a4a4a !important;
+    --ghost: #6a6a6a !important;
+    --accent: #0050b3 !important;
+    --accent-strong: #003a82 !important;
+    --accent-tint: rgba(0,80,179,0.08) !important;
+    --accent-tint-2: rgba(0,80,179,0.15) !important;
+    --ok: #0050b3 !important;
+    --warn: #8a5a00 !important;
+    --bad: #b00020 !important;
+    --explore: #0050b3 !important;
+    --execute: #6a4cb8 !important;
+    --diagnose: #8a5a00 !important;
+    --mixed: #4a4a4a !important;
+  }
+  .tweaks-host, .preview-chrome, [class*="twk-"] { display: none !important; }
+  /* Hide stretch sections to make a 1-page receipt-style PDF */
+  section#heatmap, section#anomalies, section#sessions, section#advisor,
+  section#rate-limits, section#budgets { display: none !important; }
+  section { break-inside: avoid; }
+  .cal-stat-card, .cal-banner, .cal-table, [data-screen-label] { break-inside: avoid; }
+  body { font-size: 12pt !important; line-height: 1.5 !important; }
 }
-code { color: var(--accent); font-size: 0.92em; }
-.mute { color: var(--mute); }
-.strong { font-weight: 600; color: var(--ink); }
 
+/* Lift focus rings */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+/* Selection */
 ::selection { background: var(--accent-tint-2); color: var(--ink); }
 
-/* — Wordmark + Page header --------------------------------------------- */
-
-.page-head {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: end;
-  gap: var(--s5);
-  padding-bottom: var(--s5);
-  margin-bottom: var(--s7);
+/* Variant-aware section header underline for receipt */
+.cal-section-head.receipt {
+  position: relative;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
-  position: relative;
-}
-.page-head::after {
-  /* premium "double rule" — a hairline under the main rule */
-  content: "";
-  position: absolute;
-  left: 0; right: 0; bottom: -4px;
-  border-bottom: 1px solid var(--hairline);
 }
 
-.page-head-left {
-  display: flex; flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-.wordmark {
-  display: inline-flex; align-items: center;
-  gap: 12px;
-  color: var(--ink);
-  letter-spacing: -0.02em;
-}
-.wordmark-text {
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  line-height: 1;
-}
-.wordmark-version {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--mute);
-  margin-left: 4px;
-  letter-spacing: 0;
-  font-feature-settings: "tnum" 1;
-}
-.page-head-tagline {
-  font-size: 12px;
-  color: var(--mute);
-  letter-spacing: 0.01em;
-  margin-top: 2px;
-  overflow-wrap: anywhere;
-}
+/* Pretty wrap */
+p, h1, h2, h3 { text-wrap: pretty; }
 
-.page-head-right {
-  text-align: right;
-  display: flex; flex-direction: column; gap: 8px;
-  align-items: flex-end;
-  min-width: 0;
-}
-.window-badge {
-  display: inline-flex; align-items: center; gap: 10px;
-  padding: 6px 12px 6px 14px;
+/* Interactive playground — rhythm swap, tweaks panel, save button.
+   The renderer emits BOTH rhythm bodies when interactive mode is on, and
+   the active one is selected by a root-level data-rhythm attribute. */
+[data-rhythm="receipt"]  .cal-rhythm-terminal { display: none !important; }
+[data-rhythm="terminal"] .cal-rhythm-receipt  { display: none !important; }
+
+.cal-tweaks-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.32);
+  font-family: var(--font);
   font-size: 12px;
   color: var(--ink-2);
-  white-space: nowrap;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
 }
-.window-badge-label {
-  font-weight: 600; color: var(--ink);
-  letter-spacing: 0.01em;
-}
-.window-badge-sep { color: var(--ghost); }
-.window-badge-range {
-  font-family: var(--mono);
-  color: var(--mute);
-  font-size: 11.5px;
-  letter-spacing: 0.01em;
-}
-
-.page-meta {
-  font-size: 11.5px;
-  color: var(--mute);
-  font-family: var(--mono);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-  letter-spacing: 0.01em;
-}
-.dot-sep { color: var(--ghost); opacity: 0.7; }
-.meta-offline {
-  display: inline-flex; align-items: center; gap: 6px;
-  color: var(--ink-2);
-}
-.meta-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--ok);
-  box-shadow: 0 0 0 3px var(--ok-tint);
-}
-
-/* Receipt-style serial line, sits over the page-head's right side */
-.serial {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--ghost);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  overflow-wrap: anywhere;
-}
-
-/* — Banner -------------------------------------------------------------- */
-
-.banner {
-  display: flex; align-items: flex-start; gap: var(--s3);
-  margin-bottom: var(--s6);
-  /* Banner-bar is absolute-positioned at left:0; the left content offset is
-     absorbed by .banner-label's margin so the bar reads as a real left rail. */
-  padding: var(--s3) var(--s4) var(--s3) 0;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--ink-2);
-  overflow: hidden;
-  position: relative;
-}
-.banner code { font-size: 12px; }
-.banner-bar {
-  position: absolute; left: 0; top: 0; bottom: 0;
-  width: 3px;
-}
-.banner-warn .banner-bar { background: var(--warn); }
-.banner-crit .banner-bar { background: var(--bad); }
-.banner-label {
-  margin-left: var(--s4);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  font-family: var(--mono);
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-.banner-warn .banner-label { color: var(--warn); }
-.banner-crit .banner-label { color: var(--bad); }
-.banner-text { padding-right: var(--s2); }
-
-/* — Section ------------------------------------------------------------- */
-
-.sec {
-  margin-top: var(--s7);
-  position: relative;
-}
-.sec:first-of-type { margin-top: 0; }
-
-.sec-head {
-  display: flex; align-items: baseline; justify-content: space-between;
-  margin-bottom: var(--s4);
-  gap: var(--s5);
-  padding-bottom: var(--s3);
-  border-bottom: 1px solid var(--hairline);
-}
-.sec-head-left {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--s3);
-  flex-wrap: nowrap;
-  white-space: nowrap;
-}
-.sec-num {
+.cal-tweaks-panel .cal-tweaks-section { display: flex; align-items: center; gap: 6px; }
+.cal-tweaks-panel .cal-tweaks-label {
   font-family: var(--mono);
   font-size: 10px;
-  color: var(--ghost);
-  letter-spacing: 0.18em;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.sec-title {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  display: inline;
-}
-.sec-head.sec-head--bare {
-  border-bottom: 0;
-  padding-bottom: 0;
-  margin-bottom: var(--s3);
-}
-.sec-hint {
-  font-size: 12px;
-  color: var(--mute);
-  font-family: var(--mono);
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-.sec-foot {
-  margin-top: var(--s3);
-  font-size: 12px;
-  color: var(--mute);
-  font-style: italic;
-}
-.sec-body > * + * { margin-top: var(--s4); }
-
-.section-note {
-  display: grid;
-  gap: var(--s2);
-  padding: var(--s3) var(--s4);
-  color: var(--ink-2);
-  font-size: 12.5px;
-  line-height: 1.45;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-}
-.section-note p {
-  margin: 0;
-}
-
-.metric-context {
-  color: var(--mute);
-  font-size: 11.5px;
-}
-.metric-context summary {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s2);
-  color: var(--ink-2);
-  font-size: 11px;
-  font-weight: 650;
-  cursor: pointer;
-  list-style: none;
-}
-.metric-context summary::-webkit-details-marker { display: none; }
-.metric-context summary::before {
-  content: "i";
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 700;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
-}
-.metric-context[open] summary {
-  color: var(--ink);
-}
-.metric-context dl {
-  display: grid;
-  gap: var(--s2);
-  margin: var(--s2) 0 0;
-}
-.metric-context dl > div {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: var(--s3);
-  align-items: start;
-}
-.metric-context dt {
-  color: var(--ghost);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.metric-context dd {
-  margin: 0;
-  color: var(--ink-2);
-  overflow-wrap: anywhere;
-}
-
-.metric-inline-note {
-  margin-top: var(--s2);
-  color: var(--ghost);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.metric-glossary {
-  margin: var(--s4) 0 var(--s5);
-  padding: var(--s3) var(--s4);
-  background: var(--panel);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-}
-.metric-glossary > summary {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s4);
-  align-items: center;
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  list-style: none;
-}
-.metric-glossary > summary::-webkit-details-marker { display: none; }
-.metric-glossary > summary span {
-  color: var(--mute);
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-}
-.glossary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--s3);
-  margin-top: var(--s4);
-}
-.glossary-item {
-  min-width: 0;
-  padding: var(--s3);
-  background: var(--panel-2);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-}
-.glossary-label {
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 700;
-}
-.glossary-copy {
-  margin-top: 3px;
-  color: var(--mute);
-  font-size: 11.5px;
-  line-height: 1.4;
-}
-
-.lens-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2);
-  align-items: center;
-  margin: 0 0 var(--s4);
-  padding: var(--s2);
-  background: var(--panel);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-}
-.lens-label {
-  padding: 0 var(--s2);
-  color: var(--ghost);
-  font-size: 10px;
-  font-weight: 760;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.lens-button {
-  min-height: 30px;
-  padding: 0 var(--s3);
-  color: var(--ink-2);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.lens-button:hover,
-.lens-button.is-active {
-  color: var(--ink);
-  background: var(--panel-hover);
-  border-color: var(--border);
-}
-
-.premium-brief {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.35fr);
-  gap: var(--s4);
-  margin-bottom: var(--s4);
-  padding: var(--s5);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 64%),
-    var(--panel);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--r-lg);
-}
-.premium-brief-warn { border-left-color: var(--warn); }
-.premium-brief-critical { border-left-color: var(--bad); }
-.premium-brief-good { border-left-color: var(--ok); }
-.brief-main {
-  min-width: 0;
-}
-.brief-kicker {
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-.brief-main h2 {
-  margin: var(--s2) 0 0;
-  color: var(--ink);
-  font-size: clamp(26px, 3.4vw, 42px);
-  line-height: 1.02;
-  letter-spacing: 0;
-}
-.brief-verdict {
-  margin: var(--s3) 0 0;
-  color: var(--ink-2);
-  font-size: 15px;
-  line-height: 1.45;
-}
-.brief-subtitle {
-  margin: var(--s3) 0 0;
-  color: var(--mute);
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.5;
-}
-.brief-findings {
-  display: grid;
-  gap: var(--s3);
-}
-.brief-finding {
-  min-width: 0;
-  padding: var(--s3);
-  background: var(--panel-2);
-  border: 1px solid var(--hairline);
-  border-left: 3px solid var(--border-strong);
-  border-radius: var(--r-md);
-}
-.brief-finding-good { border-left-color: var(--ok); }
-.brief-finding-warn { border-left-color: var(--warn); }
-.brief-finding-critical { border-left-color: var(--bad); }
-.brief-finding-top {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s3);
-  align-items: baseline;
-}
-.brief-finding h3,
-.decision-head h3,
-.premium-panel-head h3 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 1.25;
-}
-.brief-finding-top span,
-.decision-evidence,
-.premium-panel-head span {
-  color: var(--mute);
-  font-family: var(--mono);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.brief-finding p {
-  margin: var(--s2) 0 0;
-  color: var(--ink-2);
-  font-size: 12px;
-  line-height: 1.45;
-}
-.decision-panel {
-  grid-column: 1 / -1;
-  min-width: 0;
-  padding-top: var(--s4);
-  border-top: 1px solid var(--hairline);
-}
-.premium-panel-head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s4);
-  align-items: baseline;
-  margin-bottom: var(--s3);
-}
-.decision-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--s3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.decision-item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  gap: var(--s3);
-  align-items: start;
-  min-width: 0;
-  padding: var(--s3);
-  background: var(--panel-2);
-  border: 1px solid var(--hairline);
-  border-left: 3px solid var(--border-strong);
-  border-radius: var(--r-md);
-}
-.decision-item-good { border-left-color: var(--ok); }
-.decision-item-warn { border-left-color: var(--warn); }
-.decision-item-critical { border-left-color: var(--bad); }
-.decision-rank {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: 11px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 50%;
-}
-.decision-copy {
-  min-width: 0;
-}
-.decision-head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s3);
-  align-items: baseline;
-}
-.decision-item p {
-  margin: var(--s2) 0 0;
-  color: var(--ink-2);
-  font-size: 12px;
-  line-height: 1.45;
-}
-.decision-action {
-  margin-top: var(--s2);
-  color: var(--mute);
-  font-size: 11.5px;
-  line-height: 1.4;
-}
-.comparison-grid {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--s3);
-}
-.comparison-card {
-  min-width: 0;
-  padding: var(--s3);
-  background: color-mix(in srgb, var(--panel-2) 92%, transparent);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-}
-.comparison-card-good { border-color: color-mix(in srgb, var(--ok) 35%, var(--hairline)); }
-.comparison-card-warn { border-color: color-mix(in srgb, var(--warn) 35%, var(--hairline)); }
-.comparison-card-critical { border-color: color-mix(in srgb, var(--bad) 35%, var(--hairline)); }
-.comparison-label {
-  color: var(--mute);
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.comparison-value {
-  margin-top: var(--s2);
-  color: var(--ink);
-  font-size: 22px;
-  font-weight: 760;
-  line-height: 1.05;
-}
-.comparison-detail {
-  margin-top: var(--s2);
-  color: var(--ink-2);
-  font-size: 11.5px;
-  line-height: 1.4;
-}
-.trace-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  margin-top: var(--s2);
-  padding: 0 var(--s2);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 700;
-  text-decoration: none;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-}
-.trace-link:hover {
-  color: var(--ink);
-  border-color: var(--accent);
-}
-.is-lens-dim {
-  opacity: 0.64;
-}
-.is-lens-match {
-  opacity: 1;
-}
-.is-trace-target {
-  animation: tracePulse 1.8s ease-out;
-}
-@keyframes tracePulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
-  45% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent); }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
-
-.readiness-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--s3);
-}
-.readiness-card {
-  padding: var(--s4);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-}
-.readiness-card h3 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 13px;
-}
-.readiness-card p {
-  margin: var(--s2) 0 0;
-  color: var(--ink-2);
-  font-size: 12px;
-  line-height: 1.45;
-}
-.readiness-card span {
-  display: block;
-  margin-top: var(--s3);
-  color: var(--mute);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-/* — Panel --------------------------------------------------------------- */
-
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: var(--s5);
-  /* `overflow: visible` so absolutely-positioned tooltips (data-tip) can
-     escape the panel. The rounded corners still look right because
-     internal tables clamp their first/last-row backgrounds to the radius
-     (see .data thead th:first-child / :last-child below). */
-  overflow: visible;
-  min-width: 0;
-}
-.panel.pad-0 {
-  padding: 0;
-  overflow: auto;
-}
-.panel-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: var(--s4);
-  margin-bottom: var(--s4);
-  padding-bottom: var(--s3);
-  border-bottom: 1px solid var(--hairline);
-}
-.panel-title {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
-  letter-spacing: 0.005em;
-}
-.empty-panel {
-  color: var(--mute);
-  font-size: 13px;
-  padding: var(--s5);
-}
-.empty-panel code { color: var(--accent); }
-
-/* — Summary cards ------------------------------------------------------- */
-
-.cards {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--s3);
-}
-.forecast-cards { grid-template-columns: repeat(2, 1fr); gap: var(--s3); }
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: var(--s4) var(--s5) var(--s4);
-  position: relative;
-  /* overflow: visible so hover tooltips can escape the card */
-  overflow: visible;
-  transition: border-color 120ms ease-out, transform 120ms ease-out;
-}
-.card:hover { border-color: var(--border-strong); }
-.card.stat {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-}
-.card.stat::before {
-  /* Per-card semantic hairline. Color resolves from --card-rail-* via the
-     [data-accent] attribute. */
-  content: "";
-  position: absolute;
-  left: 0; right: 0; top: 0;
-  height: 1px;
-  background: linear-gradient(
-    to right,
-    transparent,
-    var(--card-rail, var(--accent-tint-2)) 12%,
-    var(--card-rail, var(--accent-tint-2)) 88%,
-    transparent
-  );
-}
-.card.stat[data-accent="cost"]     { --card-rail: var(--card-rail-cost); }
-.card.stat[data-accent="cache"]    { --card-rail: var(--card-rail-cache); }
-.card.stat[data-accent="tokens"]   { --card-rail: var(--card-rail-tokens); }
-.card.stat[data-accent="sessions"] { --card-rail: var(--card-rail-sessions); }
-
-.stat-label {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
+  letter-spacing: .12em;
   text-transform: uppercase;
   color: var(--mute);
-}
-.stat-value {
-  font-size: var(--num-xl);
-  font-weight: 600;
-  line-height: 1.04;
-  letter-spacing: -0.025em;
-  color: var(--ink);
-  margin-top: var(--s1);
-  font-variant-numeric: tabular-nums lining-nums;
-  font-feature-settings: var(--otf-num);
-}
-.stat-empty { color: var(--ghost); font-weight: 500; letter-spacing: 0; }
-.stat-sub {
-  margin-top: var(--s1);
-  font-size: 11.5px;
-  color: var(--mute);
-  font-family: var(--mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: 0.01em;
-}
-.card.stat .metric-context {
-  margin-top: var(--s2);
-}
-.card.stat .metric-context dl > div {
-  grid-template-columns: 58px minmax(0, 1fr);
-}
-.stat-foot {
-  margin-top: auto;
-  padding-top: var(--s3);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s2);
-}
-
-/* sparkline polish */
-.spark { display: block; }
-.spark-empty { color: var(--ghost); font-size: 14px; }
-
-/* Delta — refined chip */
-.delta {
-  font-size: 10.5px;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  padding: 3px 7px;
-  border-radius: 3px;
-  white-space: nowrap;
-  letter-spacing: 0.02em;
-}
-.delta-ok  { color: var(--ok);   background: var(--ok-tint); }
-.delta-bad { color: var(--bad);  background: var(--bad-tint); }
-.delta-flat { color: var(--ghost); }
-
-/* — Rolling usage windows --------------------------------------------- */
-
-.usage-window-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--s3);
-}
-.usage-window-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: var(--s4) var(--s5);
-  min-width: 0;
-  overflow: visible;
-  position: relative;
-}
-.usage-window-card::before {
-  content: "";
-  position: absolute;
-  left: 0; right: 0; top: 0;
-  height: 1px;
-  background: linear-gradient(to right, transparent, var(--accent-tint-2), transparent);
-}
-.usage-window-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s3);
-  min-width: 0;
-}
-.usage-window-label {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent);
-  white-space: nowrap;
-}
-.usage-window-range {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--ghost);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.usage-window-value {
-  margin-top: var(--s3);
-  font-size: 28px;
-  font-weight: 650;
-  line-height: 1.05;
-  font-variant-numeric: tabular-nums lining-nums;
-  font-feature-settings: var(--otf-num);
-  color: var(--ink);
-}
-.usage-window-meta {
-  margin-top: var(--s1);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--mute);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.usage-window-stats {
-  display: flex;
-  gap: var(--s3);
-  margin-top: var(--s3);
-  color: var(--ink-2);
-  font-family: var(--mono);
-  font-size: 11px;
-  flex-wrap: wrap;
-}
-.usage-window-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s3);
-  margin-top: var(--s4);
-  padding-top: var(--s3);
-  border-top: 1px solid var(--hairline);
-}
-
-/* — Impact cards ------------------------------------------------------- */
-
-.impact-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--s3);
-}
-.impact-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--border-strong);
-  border-radius: var(--r-md);
-  padding: var(--s4);
-  min-width: 0;
-}
-.impact-card-good { border-left-color: var(--ok); }
-.impact-card-warn { border-left-color: var(--warn); }
-.impact-card-critical { border-left-color: var(--bad); }
-.impact-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--mute);
-}
-.impact-value {
-  margin-top: var(--s2);
-  color: var(--ink);
-  font-weight: 650;
-  font-size: 19px;
-  line-height: 1.15;
-  overflow-wrap: anywhere;
-}
-.impact-detail {
-  margin-top: var(--s2);
-  color: var(--mute);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-/* — Cost chart ---------------------------------------------------------- */
-
-.chart-panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  /* 24 top / 24 sides / 16 bottom — sides bumped 2px to land on the 8pt grid */
-  padding: var(--s5) var(--s5) var(--s4);
-}
-.chart {
-  width: 100%;
-  display: block;
-  height: 240px;
-  font-family: var(--mono);
-  overflow: visible;
-}
-.shape-strip {
-  margin-top: var(--s3);
-  display: flex;
-  align-items: center;
-  gap: var(--s1);
-  /* Aligned to the chart's PAD_L=60 / PAD_R=24 plus the chart-panel padding.
-     Math: panel pad 24 + chart pad 60 = 84 inside, but the chart fills the
-     panel content box, so strip alignment uses 60 / 24 to land under the bars. */
-  padding-left: 60px;
-  padding-right: 24px;
-}
-.shape-cell {
-  flex: 1;
-  height: 10px;
-  border-radius: 2px;
-  background: var(--mixed);
-  opacity: 0.85;
-}
-.shape-explore  { background: var(--explore); }
-.shape-execute  { background: var(--execute); }
-.shape-diagnose { background: var(--diagnose); }
-.shape-mixed    { background: var(--mixed); opacity: 0.5; }
-.shape-strip-row {
-  display: flex; align-items: center;
-  gap: var(--s4);
-  margin-top: var(--s2);
-  padding-left: 60px;
-  padding-right: 24px;
-}
-.shape-strip-row .label {
-  font-size: 11px;
-  color: var(--mute);
-  font-family: var(--mono);
-  letter-spacing: 0.02em;
-}
-.shape-strip-legend {
-  display: inline-flex;
-  gap: var(--s4);
-  font-size: 11px;
-  color: var(--mute);
-  font-family: var(--mono);
-  margin-left: auto;
-  letter-spacing: 0.01em;
-}
-.shape-strip-legend > span {
-  display: inline-flex; align-items: center; gap: 6px;
-}
-.shape-strip-legend .dot {
-  width: 8px; height: 8px; border-radius: 2px; display: inline-block;
-}
-.shape-strip-legend .leg-explore .dot  { background: var(--explore); }
-.shape-strip-legend .leg-execute .dot  { background: var(--execute); }
-.shape-strip-legend .leg-diagnose .dot { background: var(--diagnose); }
-.shape-strip-legend .leg-mixed .dot    { background: var(--mixed); opacity: 0.55; }
-
-/* — Two-col session shape ---------------------------------------------- */
-
-.shape-grid {
-  display: grid;
-  grid-template-columns: 1.35fr 1fr;
-  gap: var(--s3);
-}
-
-.legend {
-  display: inline-flex; gap: var(--s4); flex-wrap: wrap;
-}
-.legend-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 11px; color: var(--mute);
-  font-family: var(--mono);
-  letter-spacing: 0.01em;
-}
-.legend-chip .dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  display: inline-block;
-}
-
-/* Meter row */
-.meters { display: flex; flex-direction: column; gap: var(--s2); }
-.meter-row {
-  display: grid;
-  grid-template-columns: 100px 1fr 56px;
-  align-items: center;
-  gap: var(--s4);
-}
-.meter-name {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 13px;
-  color: var(--ink);
-  font-weight: 500;
-}
-.meter-name .dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  display: inline-block;
-}
-.meter-track {
-  background: var(--bar-ghost);
-  height: 10px;
-  border-radius: 2px;
-  overflow: hidden;
-  position: relative;
-}
-.meter-track > span {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-}
-.meter-count {
-  text-align: right;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--mute);
-  font-weight: 500;
-}
-
-/* Stacked horizontal bar */
-.stacked {
-  display: flex; height: 28px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--bar-ghost);
-  margin: var(--s2) 0 var(--s4);
-}
-.stacked-seg {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(0,0,0,0.78);
-  font-size: 11px;
-  font-weight: 600;
-  font-family: var(--mono);
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: clip;
-  /* Theme-aware divider: dark seam on coloured fills in dark mode, light
-     seam in light/print. Was `var(--bg)` which gave invisible seams on light. */
-  border-right: 1px solid var(--seg-divider);
-}
-.stacked-seg:last-child { border-right: 0; }
-[data-theme="light"] .stacked-seg, [data-theme="print"] .stacked-seg { color: #fff; }
-.seg-explore  { background: var(--explore); }
-.seg-execute  { background: var(--execute); }
-.seg-diagnose { background: var(--diagnose); }
-.seg-mixed    { background: var(--mixed); }
-
-/* Cat table */
-.tight { width: 100%; border-collapse: collapse; }
-.tight td {
-  padding: var(--s2) 0;
-  font-size: 13px;
-  border-bottom: 1px solid var(--hairline);
-}
-.tight tr:last-child td { border-bottom: 0; }
-.tight .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
-.tight .dot-inline {
-  width: 7px; height: 7px; border-radius: 50%;
-  display: inline-block;
-  margin-right: 10px;
-  vertical-align: middle;
-}
-.cat-label { color: var(--ink); }
-
-/* — Data tables --------------------------------------------------------- */
-
-.data {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.data thead th {
-  text-align: left;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--mute);
-  padding: 14px var(--row-pad-x);
-  border-bottom: 1px solid var(--border);
-  background: var(--panel-2);
-  white-space: nowrap;
-}
-.data thead th:first-child {
-  padding-left: 20px;
-  /* Round the upper-left to match the panel's border-radius so the
-     thead's --panel-2 fill doesn't square off the corner. */
-  border-top-left-radius: var(--r-md);
-}
-.data thead th:last-child {
-  padding-right: 20px;
-  border-top-right-radius: var(--r-md);
-}
-
-.data tbody td {
-  padding: var(--row-pad-y) var(--row-pad-x);
-  border-bottom: 1px solid var(--hairline);
-  vertical-align: middle;
-  color: var(--ink-2);
-}
-.data tbody td:first-child { padding-left: 20px; }
-.data tbody td:last-child { padding-right: 20px; }
-.data tbody tr:last-child td { border-bottom: 0; }
-.data tbody tr { transition: background-color 80ms ease-out; }
-.data tbody tr:hover { background: var(--panel-hover); }
-.data tbody tr.summary-row td {
-  color: var(--mute);
-  background: var(--panel-2);
-  border-top: 1px solid var(--border);
-}
-
-.data .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
-.data .strong { color: var(--ink); font-weight: 600; font-size: 13.5px; }
-
-.sort-glyph {
-  color: var(--accent);
-  display: inline-block;
-  font-size: 12px;
-  line-height: 1;
-  margin-left: 4px;
-  transform: translateY(-1px);
-}
-
-.th-cost { width: 110px; }
-.th-cache { width: 80px; }
-.th-tools { width: 280px; }
-.th-vendor { width: 96px; }
-
-.vendor-badge {
-  display: inline-block;
-  padding: 3px 8px;
-  font-size: 10.5px;
-  font-family: var(--mono);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  border: 1px solid var(--border-strong);
-  border-radius: 3px;
-  color: var(--mute);
-  background: var(--panel-2);
-}
-
-.proj-name {
-  font-weight: 600;
-  color: var(--ink);
-  font-size: 14px;
-  letter-spacing: -0.005em;
-}
-.proj-path {
-  font-size: 11.5px;
-  margin-top: 3px;
-  color: var(--mute);
-}
-
-/* Inline-bar (share column) */
-.inline-bar {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: flex-end;
-}
-.inline-bar-track {
-  width: 72px;
-  height: 6px;
-  background: var(--bar-ghost);
-  border-radius: 2px;
-  overflow: hidden;
-  display: inline-block;
-}
-.inline-bar-track > span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-}
-.inline-bar-label {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--mute);
-  min-width: 32px;
-  text-align: right;
-}
-
-/* Mini bars (Projects → top tools) */
-.col-tools {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding-top: 9px !important;
-  padding-bottom: 9px !important;
-}
-.mini-bar {
-  display: grid;
-  grid-template-columns: 64px 1fr;
-  align-items: center;
-  gap: 10px;
-  font-size: 11.5px;
-}
-.mini-bar-name {
-  font-family: var(--mono);
-  color: var(--mute);
-  font-size: 11px;
-}
-.mini-bar-track {
-  height: 5px;
-  background: var(--bar-ghost);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.mini-bar-track > span {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-}
-
-/* — Insights ----------------------------------------------------------- */
-
-.insight-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-}
-.insight {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: var(--s4) var(--s4) var(--s4) var(--s5);
-  position: relative;
-  /* overflow visible so impact-chip / severity pill tooltips can escape */
-  overflow: visible;
-  transition: background-color 100ms ease-out;
-}
-.insight:hover { background: var(--panel-hover); }
-.insight-rail {
-  /* Inset so the rail floats inside the rounded corner instead of clipping
-     it. The 8px inset matches the 5px corner radius + 3px breathing room. */
-  position: absolute;
-  left: 8px; top: 12px; bottom: 12px;
-  width: 2px;
-  border-radius: 2px;
-}
-.insight-info     .insight-rail { background: var(--accent); }
-.insight-warn     .insight-rail { background: var(--warn); }
-.insight-critical .insight-rail { background: var(--bad); }
-
-.insight-head {
-  display: flex; align-items: center; gap: 12px;
-  margin-bottom: 6px;
-}
-.insight-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-  letter-spacing: -0.005em;
-}
-.insight-detail {
-  margin: 0;
-  font-size: 13px;
-  color: var(--mute);
-  line-height: 1.55;
-  max-width: 76ch;
-  text-wrap: pretty;
-}
-
-.sev {
-  display: inline-block;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  padding: 3px 7px;
-  border-radius: 3px;
-  font-family: var(--mono);
-}
-.sev-info     { color: var(--accent); background: var(--accent-tint); }
-.sev-warn     { color: var(--warn);   background: var(--warn-tint); }
-.sev-critical { color: var(--bad);    background: var(--bad-tint); }
-
-.impact-chip {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--ink-2);
-  padding: 4px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 3px;
-  background: var(--panel-2);
-  white-space: nowrap;
-  letter-spacing: 0.01em;
-}
-.insight-critical .impact-chip {
-  border-color: rgba(240,133,133,0.35);
-  color: var(--bad);
-  background: var(--bad-tint);
-}
-.insight-warn .impact-chip {
-  border-color: rgba(245,201,113,0.32);
-  color: var(--warn);
-  background: var(--warn-tint);
-}
-.insight-info .impact-chip {
-  border-color: var(--accent-tint-2);
-  color: var(--accent);
-  background: var(--accent-tint);
-}
-
-/* — Forecast ----------------------------------------------------------- */
-
-.forecast-card {
-  padding: var(--s5) var(--s5) var(--s4);
-}
-.forecast-card-head {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: var(--s1);
-}
-.forecast-card .stat-label { margin-bottom: 0; }
-.forecast-tag {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--mute);
-  letter-spacing: 0.04em;
-}
-.forecast-card .stat-value {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  font-size: var(--num-lg);
-  margin: var(--s1) 0 var(--s3);
-}
-.forecast-band {
-  position: relative;
-  display: block;
-  margin: var(--s3) 0 var(--s2);
-  height: 38px;
-}
-.forecast-band-svg {
-  display: block;
-  width: 100%;
-  height: 22px;
-}
-.forecast-dot {
-  position: absolute;
-  top: 11px;
-  width: 9px;
-  height: 9px;
-  margin-top: -4.5px;
-  margin-left: -4.5px;
-  border-radius: 50%;
-  background: var(--accent-strong);
-  box-shadow:
-    inset 0 0 0 2px var(--accent-strong),
-    inset 0 0 0 3.5px var(--panel),
-    0 0 0 2px color-mix(in srgb, var(--panel) 65%, transparent);
-  z-index: 1;
-}
-.forecast-dot.is-warn {
-  background: var(--warn);
-  box-shadow:
-    inset 0 0 0 2px var(--warn),
-    inset 0 0 0 3.5px var(--panel),
-    0 0 0 2px color-mix(in srgb, var(--panel) 65%, transparent);
-}
-.forecast-band-labels {
-  position: absolute;
-  left: 0; right: 0;
-  top: 22px;
-  height: 14px;
-  pointer-events: none;
-}
-.forecast-band-label {
-  position: absolute;
-  transform: translateX(-50%);
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--mute);
-  white-space: nowrap;
-  /* Edge-aware clamp so labels at 0% / 100% don't get cropped. */
-  max-width: 50%;
-}
-.forecast-band-label:where([style*="left:0"]),
-.forecast-band-label:where([style*="left:0.000%"]) {
-  transform: none;
-}
-.forecast-band-label:where([style*="left:100"]) {
-  transform: translateX(-100%);
-}
-.forecast-sub {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  font-size: 12px;
-  color: var(--mute);
-  font-family: var(--mono);
-  letter-spacing: 0.01em;
-}
-.forecast-sub-key {
-  color: var(--mute);
-  opacity: 0.75;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
   margin-right: 2px;
 }
-.forecast-delta { margin-left: auto; }
-.off-band-chip {
-  align-self: center;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--warn);
-  background: var(--warn-tint);
-  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
-  padding: 2px 7px;
-  border-radius: 999px;
-  cursor: help;
-}
-
-/* — Evidence ----------------------------------------------------------- */
-
-.data.evidence tbody td {
-  font-size: 13px;
-  padding: var(--s3) var(--row-pad-x);
-}
-.evidence-dim {
-  width: 220px;
-  font-weight: 500;
-  color: var(--ink);
-}
-.evidence-note { font-style: italic; font-size: 12.5px; }
-
-.status {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  font-family: var(--mono);
-  letter-spacing: 0.04em;
-  padding: 3px 9px;
-  border-radius: 3px;
-  text-transform: lowercase;
-}
-.status-exact       { color: var(--ok);   background: var(--ok-tint); }
-.status-estimated   { color: var(--warn); background: var(--warn-tint); }
-.status-partial     { color: var(--warn); background: var(--warn-tint); }
-.status-unsupported { color: var(--bad);  background: var(--bad-tint); }
-
-/* — Footer ------------------------------------------------------------- */
-
-.page-foot {
-  margin-top: var(--s8);
-  padding-top: var(--s5);
-  border-top: 1px solid var(--border);
-  color: var(--mute);
-  font-size: 11.5px;
-  position: relative;
-}
-.page-foot::before {
-  /* receipt double-rule */
-  content: "";
-  position: absolute;
-  left: 0; right: 0; top: 4px;
-  border-top: 1px solid var(--hairline);
-}
-.page-foot-row {
-  display: flex; justify-content: space-between; gap: var(--s5);
-  flex-wrap: wrap;
-  align-items: center;
-}
-.page-foot-left {
-  display: inline-flex; align-items: center;
-  gap: var(--s2);
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--mute);
-  letter-spacing: 0.02em;
-}
-.page-foot-fact { color: var(--mute); }
-.page-foot-sep { color: var(--ghost); opacity: 0.7; }
-.page-foot-right {
-  font-family: var(--mono);
-  display: flex; flex-direction: column; gap: var(--s1);
-  align-items: flex-end;
-  flex-shrink: 0;
-  color: var(--ghost);
-  letter-spacing: 0.02em;
-}
-.page-foot-checksum {
-  font-size: 10.5px;
-  color: var(--ghost);
-  letter-spacing: 0.06em;
-}
-
-/* — Yearly activity heatmap (GitHub-style 53×7 grid) ------------------- */
-
-.heat-panel {
-  padding: var(--s5);
-  --heat-cell-size: 11px;
-  --heat-gap: 3px;
-}
-.heat-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--s4);
-  margin-bottom: var(--s4);
-}
-.heat-headline-label {
-  color: var(--mute);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  margin-bottom: var(--s1);
-}
-.heat-headline-value {
-  color: var(--ink);
-  font-size: var(--num-lg);
-  font-weight: 600;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums lining-nums;
-  letter-spacing: -0.02em;
-}
-/* HTML CSS-grid heatmap (no SVG — each cell is a div with data-tip) */
-.heat-grid-wrap {
-  display: grid;
-  grid-template-columns: 18px 1fr;
-  grid-template-rows: 18px 1fr auto;
-  column-gap: 6px;
-  row-gap: 4px;
-  margin: var(--s3) 0 var(--s4);
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--mute);
-  letter-spacing: 0.06em;
-}
-.heat-month-row {
-  grid-column: 2;
-  grid-row: 1;
-  display: grid;
-  align-items: end;
-  padding-bottom: 2px;
-}
-.heat-month {
-  font-size: 10px;
-  color: var(--mute);
-  letter-spacing: 0.04em;
-}
-.heat-dow-col {
-  grid-column: 1;
-  grid-row: 2;
-  display: grid;
-  grid-template-rows: repeat(7, 1fr);
-  row-gap: 3px;
-  font-size: 10px;
-  color: var(--mute);
-  align-items: center;
-  justify-items: end;
-  padding-right: 2px;
-}
-.heat-grid {
-  grid-column: 2;
-  grid-row: 2;
-  display: grid;
-  grid-template-rows: repeat(7, var(--heat-cell-size));
-  grid-auto-flow: column;
-  gap: var(--heat-gap);
-}
-.heat-cell {
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  border-radius: 2px;
-  background: var(--heat-0);
-  display: inline-block;
-  transition: outline-width 80ms ease-out, transform 100ms ease-out;
-  outline: 0 solid var(--accent);
-  outline-offset: 1px;
-}
-.heat-cell-blank { visibility: hidden; }
-.heat-cell:hover {
-  outline-width: 1.5px;
-  transform: scale(1.4);
-  z-index: 3;
-  position: relative;
-}
-.heat-level-0 { background: var(--heat-0); }
-.heat-level-1 { background: var(--heat-1); }
-.heat-level-2 { background: var(--heat-2); }
-.heat-level-3 { background: var(--heat-3); }
-.heat-level-4 { background: var(--heat-4); }
-.heat-legend {
-  grid-column: 2;
-  grid-row: 3;
+.cal-tweaks-panel .cal-tweaks-group {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  justify-content: flex-end;
-  padding-top: var(--s2);
-}
-.heat-legend .heat-cell {
-  width: var(--heat-cell-size);
-  height: var(--heat-cell-size);
-  min-width: var(--heat-cell-size);
-}
-.heat-legend-label {
-  font-size: 10px;
-  color: var(--mute);
-  margin: 0 4px;
-}
-.heat-stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--s3);
-  padding-top: var(--s4);
-  border-top: 1px solid var(--hairline);
-}
-.heat-stat-label {
-  color: var(--mute);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  margin-bottom: var(--s1);
-}
-.heat-stat-value {
-  color: var(--ink);
-  font-size: var(--num-sm);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums lining-nums;
-  letter-spacing: -0.005em;
-}
-
-/* Heat color scale (green; tuned for dark surface) */
-:root {
-  --heat-0: rgba(255, 255, 255, 0.035);
-  --heat-1: #103a1f;
-  --heat-2: #1e6b34;
-  --heat-3: #2ea043;
-  --heat-4: #3fd959;
-  --hour-0: rgba(255, 255, 255, 0.035);
-  --hour-1: #1e3a8a;
-  --hour-2: #2563eb;
-  --hour-3: #3b82f6;
-  --hour-4: #60a5fa;
-}
-[data-theme="light"] {
-  --heat-0: rgba(0, 0, 0, 0.045);
-  --heat-1: #c8e6cc;
-  --heat-2: #82d18a;
-  --heat-3: #2ea043;
-  --heat-4: #1b6e2e;
-  --hour-0: rgba(0, 0, 0, 0.045);
-  --hour-1: #bcd5ff;
-  --hour-2: #7aaaff;
-  --hour-3: #2563eb;
-  --hour-4: #1d4ed8;
-}
-[data-theme="print"] {
-  --heat-0: #f1f1f1;
-  --heat-1: #d6d6d6;
-  --heat-2: #999999;
-  --heat-3: #555555;
-  --heat-4: #1a1a1a;
-  --hour-0: #f1f1f1;
-  --hour-1: #d6d6d6;
-  --hour-2: #999999;
-  --hour-3: #555555;
-  --hour-4: #1a1a1a;
-}
-
-/* — Recap card (hour-of-week heatmap + 2×4 stat grid) ------------------ */
-
-.recap-panel {
-  padding: var(--s5);
-}
-.recap-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s4);
-  margin-bottom: var(--s4);
-  padding-bottom: var(--s3);
-  border-bottom: 1px solid var(--hairline);
-  flex-wrap: wrap;
-}
-.recap-headline {
-  margin: 0;
-  font-size: var(--num-md);
-  font-weight: 600;
-  color: var(--ink);
-  letter-spacing: -0.015em;
-}
-.recap-comparison-inline {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--mute);
-  letter-spacing: 0.01em;
-}
-.recap-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--s5);
-  margin-bottom: var(--s5);
-}
-.recap-stat {
-  /* Flat statlets — match heat-stat language, no boxed chrome. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-}
-.recap-stat-label {
-  color: var(--mute);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-}
-.recap-stat-value {
-  color: var(--ink);
-  font-size: var(--num-md);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums lining-nums;
-  letter-spacing: -0.01em;
-}
-/* HTML grid hour-of-week heatmap */
-.hour-grid-wrap {
-  display: grid;
-  grid-template-columns: 22px 1fr;
-  grid-template-rows: 18px 1fr;
-  column-gap: 6px;
-  row-gap: 4px;
-  font-family: var(--mono);
-}
-.hour-axis-row {
-  grid-column: 2;
-  grid-row: 1;
-  display: grid;
-  grid-template-columns: repeat(24, 1fr);
-  align-items: end;
-  padding-bottom: 2px;
-}
-.hour-axis {
-  font-size: 10px;
-  color: var(--mute);
-  letter-spacing: 0.04em;
-}
-.hour-dow-col {
-  grid-column: 1;
-  grid-row: 2;
-  display: grid;
-  grid-template-rows: repeat(7, 1fr);
-  row-gap: 4px;
-  font-size: 10px;
-  color: var(--mute);
-  align-items: center;
-  justify-items: end;
-  padding-right: 2px;
-}
-.hour-grid {
-  grid-column: 2;
-  grid-row: 2;
-  display: grid;
-  grid-template-rows: repeat(7, 14px);
-  grid-template-columns: repeat(24, 1fr);
-  gap: 4px;
-}
-.hour-cell {
-  border-radius: 3px;
-  background: var(--hour-0);
-  transition: outline-width 80ms ease-out, transform 100ms ease-out;
-  outline: 0 solid var(--accent);
-  outline-offset: 1px;
-}
-.hour-cell:hover {
-  outline-width: 1.5px;
-  transform: scale(1.25);
-  z-index: 3;
-  position: relative;
-}
-.hour-level-0 { background: var(--hour-0); }
-.hour-level-1 { background: var(--hour-1); }
-.hour-level-2 { background: var(--hour-2); }
-.hour-level-3 { background: var(--hour-3); }
-.hour-level-4 { background: var(--hour-4); }
-
-/* — Interactive hover affordances ------------------------------------- */
-
-/* CSS-only tooltip. Opt in with `data-tip="..."`. Horizontal placement
-   is set at render time via `data-tip-anchor`:
-     center (default) — tooltip centered on the trigger
-     left             — tooltip's LEFT edge at the trigger's left edge
-                        (use for triggers near the page LEFT edge)
-     right            — tooltip's RIGHT edge at the trigger's right edge
-                        (use for triggers near the page RIGHT edge)
-   The arrow always sits at the trigger's horizontal center, regardless
-   of which anchor is chosen, so it keeps pointing at the source. */
-[data-tip] { position: relative; }
-[data-tip]:hover { z-index: 5; }
-
-[data-tip]::before,
-[data-tip]::after {
-  content: none;
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, 2px);
-  transition: opacity 90ms ease-out, transform 90ms ease-out;
-  z-index: 50;
-}
-[data-tip]::after {
-  bottom: calc(100% + 8px);
-  left: 50%;
   background: var(--panel-2);
-  color: var(--ink);
-  border: 1px solid var(--border-strong);
-  border-radius: 5px;
-  padding: 6px 10px;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.4;
-  letter-spacing: 0.01em;
-  white-space: pre;
-  max-width: min(360px, 92vw);
-  box-shadow:
-    0 1px 0 rgba(0,0,0,0.04),
-    0 12px 32px rgba(0,0,0,0.45);
-}
-[data-tip]::before {
-  bottom: calc(100% + 4px);
-  left: 50%;
-  width: 0; height: 0;
-  border: 5px solid transparent;
-  border-top-color: var(--border-strong);
-  z-index: 51;
-}
-[data-tip]:hover::before,
-[data-tip]:hover::after {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-[data-tip]:hover::before { content: ""; }
-[data-tip]:hover::after { content: attr(data-tip); }
-
-/* Horizontal anchor variants — switch the tooltip body's reference point.
-   The arrow stays anchored at the trigger center. */
-[data-tip][data-tip-anchor="left"]::after {
-  left: 0;
-  transform: translate(0, 2px);
-}
-[data-tip][data-tip-anchor="left"]:hover::after {
-  transform: translate(0, 0);
-}
-[data-tip][data-tip-anchor="right"]::after {
-  left: auto;
-  right: 0;
-  transform: translate(0, 2px);
-}
-[data-tip][data-tip-anchor="right"]:hover::after {
-  transform: translate(0, 0);
-}
-
-/* Vertical: place below for elements near the page top. */
-[data-tip][data-tip-pos="bottom"]::after {
-  top: calc(100% + 8px); bottom: auto;
-}
-[data-tip][data-tip-pos="bottom"]::before {
-  top: calc(100% + 4px); bottom: auto;
-  border-top-color: transparent;
-  border-bottom-color: var(--border-strong);
-}
-
-/* Smaller emphasis variant for in-cell chips */
-[data-tip].tip-sm::after { font-size: 11px; padding: 4px 8px; }
-
-@media print {
-  [data-tip]::after, [data-tip]::before { display: none !important; }
-}
-
-/* Cost-chart HTML hit-overlay — invisible boxes positioned over each SVG
-   bar so we can carry a styled tooltip. The bars stay in SVG for the
-   gridlines / mean line / axis labels; this layer just captures hover. */
-.chart-wrap {
-  position: relative;
-}
-.chart-hit-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.chart-hit {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  pointer-events: auto;
-  cursor: default;
-  border-radius: 1px;
-  transition: background-color 100ms ease-out;
-}
-.chart-hit:hover {
-  background-color: rgba(124,196,255,0.06);
-}
-[data-theme="light"] .chart-hit:hover { background-color: rgba(37,99,235,0.06); }
-[data-theme="print"] .chart-hit:hover { background-color: rgba(0,80,179,0.06); }
-
-.shape-cell { transition: transform 80ms ease-out, filter 80ms ease-out; transform-origin: center; cursor: default; }
-.shape-cell:hover { filter: brightness(1.25); transform: scaleY(1.4); }
-
-/* Card hover — small lift + ink border to feel responsive */
-.card.stat { transition: transform 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out; }
-.card.stat:hover {
-  transform: translateY(-1px);
-  border-color: var(--border-strong);
-  box-shadow: 0 1px 0 rgba(0,0,0,0.04), 0 10px 24px rgba(0,0,0,0.18);
-}
-
-/* Insight rows — show the rail breathes on hover */
-.insight { transition: background-color 100ms ease-out, transform 120ms ease-out; }
-.insight:hover { transform: translateX(2px); }
-
-/* Meter rows / project rows highlight on hover for scanning */
-.meter-row { transition: background-color 80ms ease-out; border-radius: 3px; padding: 2px 4px; margin: -2px -4px; }
-.meter-row:hover { background: var(--panel-hover); }
-
-/* Severity / status pills — outline on hover so they read as info-on-demand */
-.sev, .status, .vendor-badge, .impact-chip, .delta {
-  cursor: help;
-}
-.sev:hover, .status:hover, .vendor-badge:hover, .impact-chip:hover {
-  filter: brightness(1.12);
-}
-
-.dash-nav {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin: calc(var(--s2) * -1) 0 var(--s5);
-  padding: var(--s2);
-  overflow-x: auto;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  backdrop-filter: blur(14px);
-}
-
-.dash-nav-group {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 0 2px 0 var(--s2);
-  color: var(--ghost);
-  font-size: 10px;
-  font-weight: 760;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-.dash-nav-group:not(:first-child) {
-  margin-left: var(--s2);
-  padding-left: var(--s3);
-  border-left: 1px solid var(--hairline);
-}
-
-.dash-nav-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 0 var(--s3);
-  color: var(--ink-2);
-  font-size: 12px;
-  font-weight: 650;
-  text-decoration: none;
-  white-space: nowrap;
-  border: 1px solid transparent;
-  border-radius: 6px;
-}
-.dash-nav-link:hover,
-.dash-nav-link.is-current {
-  color: var(--ink);
-  background: var(--panel-hover);
-  border-color: var(--border);
-}
-.dash-nav-link.is-muted { opacity: 0.55; }
-
-.command-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--s4);
-}
-.command-card {
-  position: relative;
-  min-height: 172px;
-  padding: var(--s4);
-  overflow: visible;
-  background: linear-gradient(180deg, var(--panel), var(--panel-2));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 999px;
+  padding: 2px;
+  gap: 1px;
 }
-.command-card::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--mute);
-}
-.command-card-good::before { background: var(--ok); }
-.command-card-warn::before { background: var(--warn); }
-.command-card-critical::before { background: var(--bad); }
-.command-top {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s3);
-  align-items: center;
-  min-width: 0;
-}
-.command-label {
-  color: var(--mute);
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-.command-metric {
-  max-width: 42%;
-  overflow: hidden;
-  color: var(--ghost);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.command-value {
-  margin-top: var(--s4);
-  color: var(--ink);
-  font-size: clamp(24px, 3vw, 36px);
-  font-weight: 780;
-  line-height: 0.95;
-  overflow-wrap: anywhere;
-}
-.command-detail {
-  margin-top: var(--s3);
-  color: var(--ink-2);
-  font-size: 12px;
-  line-height: 1.45;
-}
-.command-card .metric-context {
-  margin-top: var(--s3);
-}
-.command-card .metric-context dl > div {
-  grid-template-columns: 60px minmax(0, 1fr);
-}
-
-.mix-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2);
-  margin-bottom: var(--s4);
-}
-.mix-filter {
-  min-height: 30px;
-  padding: 0 var(--s3);
+.cal-tweaks-panel .cal-tweaks-btn {
+  appearance: none;
+  background: transparent;
+  border: 0;
   color: var(--ink-2);
   font: inherit;
   font-size: 12px;
-  font-weight: 650;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
   cursor: pointer;
+  transition: background 120ms ease-out, color 120ms ease-out;
 }
-.mix-filter:hover,
-.mix-filter.is-active {
+.cal-tweaks-panel .cal-tweaks-btn:hover { color: var(--ink); background: var(--panel-hover); }
+.cal-tweaks-panel .cal-tweaks-btn.is-active {
+  background: var(--accent-tint-2);
   color: var(--ink);
-  background: var(--panel-hover);
-  border-color: var(--border-strong);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--accent-tint);
 }
-.mix-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--s4);
+.cal-tweaks-panel .cal-tweaks-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 2px;
 }
-.mix-panel {
-  min-width: 0;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.mix-panel-head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s3);
-  align-items: center;
-  padding: var(--s4);
-  border-bottom: 1px solid var(--hairline);
-}
-.mix-count {
-  color: var(--ghost);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.mix-list { display: grid; }
-.mix-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 92px 92px;
-  gap: var(--s3);
-  align-items: center;
-  min-height: 64px;
-  padding: var(--s3) var(--s4);
-  border-bottom: 1px solid var(--hairline);
-}
-.mix-row:last-child { border-bottom: 0; }
-.mix-label {
+.cal-tweaks-panel .cal-tweaks-save {
+  appearance: none;
+  background: var(--accent-tint-2);
+  border: 1px solid var(--accent-tint);
   color: var(--ink);
-  font-size: 13px;
-  font-weight: 650;
-  overflow-wrap: anywhere;
-}
-.mix-meta {
-  margin-top: 3px;
-  color: var(--mute);
-  font-size: 11px;
-}
-.mix-spark {
-  justify-self: end;
-  width: 92px;
-}
-.mix-share { justify-self: end; }
-
-.advisor-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--s4);
-}
-.advisor-card {
-  position: relative;
-  min-width: 0;
-  padding: var(--s4);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.advisor-card::before {
-  content: "";
-  position: absolute;
-  inset: var(--s4) auto var(--s4) 0;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--mute);
-}
-.advisor-card-good::before { background: var(--ok); }
-.advisor-card-warn::before { background: var(--warn); }
-.advisor-card-critical::before { background: var(--bad); }
-.advisor-card-top {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s4);
-  align-items: baseline;
-}
-.advisor-title {
-  margin: 0;
-  color: var(--ink);
-  font-size: 14px;
-  line-height: 1.25;
-}
-.advisor-value {
-  color: var(--ok);
-  font-family: ui-monospace, SF Mono, Menlo, Consolas, monospace;
-  font-size: 16px;
-  font-weight: 760;
-  white-space: nowrap;
-}
-.advisor-detail {
-  margin: var(--s3) 0 0;
-  color: var(--ink-2);
+  font: inherit;
   font-size: 12px;
-  line-height: 1.45;
-}
-.advisor-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2);
-  margin-top: var(--s3);
-}
-.advisor-meta span,
-.reason-chip,
-.limit-samples {
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
-  padding: 0 var(--s2);
-  color: var(--ink-2);
-  font-size: 11px;
-  background: var(--panel-2);
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-}
-.advisor-command {
-  display: block;
-  margin-top: var(--s3);
-  padding: var(--s2) var(--s3);
-  color: var(--accent-soft);
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
-  border: 1px solid var(--hairline);
-  border-radius: 6px;
-}
-
-.table-scroll {
-  overflow-x: auto;
-}
-.data-sortable th[data-sort] {
-  cursor: pointer;
-  user-select: none;
-}
-.data-sortable th[data-sort]:hover {
-  color: var(--ink);
-  background: var(--panel-hover);
-}
-.data-sortable th[data-sort]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.session-label {
-  display: inline-block;
-  max-width: 260px;
-  color: var(--ink);
-  font-weight: 650;
-  overflow-wrap: anywhere;
-}
-.session-table td:nth-child(6) {
-  max-width: 180px;
-  overflow-wrap: anywhere;
-}
-
-.limit-panel {
-  position: relative;
-  overflow: hidden;
-}
-.limit-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--mute);
-}
-.limit-panel-good::before { background: var(--ok); }
-.limit-panel-warn::before { background: var(--warn); }
-.limit-panel-critical::before { background: var(--bad); }
-.limit-panel-head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s4);
-  align-items: flex-start;
-  padding: var(--s4);
-  border-bottom: 1px solid var(--hairline);
-}
-.limit-sub {
-  margin-top: 4px;
-  color: var(--mute);
-  font-size: 12px;
-}
-.limit-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-.limit-stat {
-  padding: var(--s4);
-  border-right: 1px solid var(--hairline);
-}
-.limit-stat:last-child { border-right: 0; }
-.limit-label {
-  color: var(--mute);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-.limit-value {
-  margin-top: var(--s2);
-  color: var(--ink);
-  font-size: 22px;
-  font-weight: 760;
-}
-
-.quality-panel {
-  display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
-  gap: var(--s5);
-  align-items: start;
-  margin-bottom: var(--s4);
-  padding: var(--s4);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.quality-score {
-  display: flex;
-  align-items: baseline;
-  color: var(--ink);
-}
-.quality-number {
-  font-size: 52px;
-  font-weight: 780;
-  line-height: 0.95;
-}
-.quality-denom {
-  color: var(--mute);
-  font-size: 15px;
-}
-.quality-list {
-  display: grid;
-  gap: var(--s2);
-  margin: var(--s3) 0 0;
-  padding: 0;
-  list-style: none;
-}
-.quality-signal {
-  display: grid;
-  grid-template-columns: 160px 88px minmax(0, 1fr);
-  gap: var(--s3);
-  align-items: center;
-  color: var(--ink-2);
-  font-size: 12px;
-}
-.quality-signal-label { color: var(--ink); font-weight: 650; }
-.quality-signal-status {
-  justify-self: start;
-  padding: 2px 7px;
-  color: var(--ink-2);
-  font-size: 10px;
-  font-weight: 750;
-  text-transform: uppercase;
-  background: var(--panel-2);
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-}
-.quality-signal-note {
-  color: var(--mute);
-  overflow-wrap: anywhere;
-}
-
-/* — Responsive --------------------------------------------------------- */
-
-@media (max-width: 920px) {
-  .cards { grid-template-columns: repeat(2, 1fr); }
-  .glossary-grid { grid-template-columns: 1fr; }
-  .premium-brief { grid-template-columns: 1fr; }
-  .decision-list,
-  .comparison-grid,
-  .readiness-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .command-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .mix-grid,
-  .advisor-grid { grid-template-columns: 1fr; }
-  .limit-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .limit-stat:nth-child(2n) { border-right: 0; }
-  .quality-panel { grid-template-columns: 1fr; gap: var(--s4); }
-  .usage-window-grid { grid-template-columns: 1fr; }
-  .impact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .shape-grid { grid-template-columns: 1fr; }
-  .th-tools, .col-tools { display: none; }
-  .page { padding: var(--s6) var(--s4) var(--s6); }
-  .recap-stat-grid { grid-template-columns: repeat(2, 1fr); gap: var(--s4); }
-  .heat-stats { grid-template-columns: repeat(2, 1fr); }
-  .heat-panel {
-    --heat-cell-size: clamp(7px, 1.15vw, 11px);
-    --heat-gap: 2px;
-  }
-  .data:not(.evidence) { min-width: 620px; }
-}
-@media (max-width: 640px) {
-  .cards { grid-template-columns: 1fr; }
-  .lens-bar {
-    align-items: stretch;
-  }
-  .lens-label {
-    width: 100%;
-    padding: 0 var(--s1);
-  }
-  .lens-button {
-    flex: 1 1 calc(50% - var(--s2));
-  }
-  .premium-brief {
-    padding: var(--s4);
-  }
-  .brief-main h2 {
-    font-size: 28px;
-  }
-  .brief-finding-top,
-  .premium-panel-head,
-  .decision-head {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--s1);
-  }
-  .brief-finding-top span,
-  .decision-evidence,
-  .premium-panel-head span {
-    white-space: normal;
-  }
-  .decision-list,
-  .comparison-grid,
-  .readiness-grid {
-    grid-template-columns: 1fr;
-  }
-  .decision-item {
-    grid-template-columns: 28px minmax(0, 1fr);
-  }
-  .decision-item .trace-link {
-    grid-column: 2;
-    justify-self: start;
-  }
-  .dash-nav {
-    position: static;
-    margin-top: 0;
-    flex-wrap: wrap;
-    overflow-x: visible;
-  }
-  .dash-nav-group {
-    width: 100%;
-    padding-left: var(--s2);
-  }
-  .dash-nav-group:not(:first-child) {
-    margin-left: 0;
-    border-left: 0;
-  }
-  .metric-glossary > summary {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--s1);
-  }
-  .metric-context dl > div {
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-  .command-grid { grid-template-columns: 1fr; }
-  .impact-grid { grid-template-columns: 1fr; }
-  .forecast-cards { grid-template-columns: 1fr; }
-  .page { padding: var(--s5) var(--s4) var(--s5); }
-  [data-theme="print"] .page-wrap {
-    padding: var(--s5) 0 var(--s6);
-  }
-  [data-theme="print"] .page {
-    max-width: none;
-    padding: var(--s5) var(--s4) var(--s5);
-  }
-  .page-head { grid-template-columns: 1fr; }
-  .page-head-right { text-align: left; align-items: flex-start; }
-  .window-badge,
-  .page-meta {
-    max-width: 100%;
-    white-space: normal;
-    flex-wrap: wrap;
-  }
-  .sec-head {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: var(--s2) var(--s3);
-  }
-  .sec-head-left {
-    flex-wrap: wrap;
-    white-space: normal;
-  }
-  .sec-hint {
-    width: 100%;
-    white-space: normal;
-  }
-  .shape-strip,
-  .shape-strip-row {
-    padding-left: 0;
-    padding-right: 0;
-  }
-  .shape-strip-row {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: var(--s2) var(--s3);
-  }
-  .shape-strip-legend {
-    margin-left: 0;
-    flex-wrap: wrap;
-    gap: var(--s2) var(--s3);
-  }
-  .heat-panel {
-    --heat-cell-size: clamp(4px, 1.35vw, 7px);
-    --heat-gap: 2px;
-  }
-  .heat-grid-wrap {
-    grid-template-columns: 16px 1fr;
-    column-gap: 4px;
-  }
-  .heat-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .mix-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .mix-spark {
-    display: none;
-  }
-  .advisor-card-top {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--s2);
-  }
-  .limit-panel-head {
-    flex-direction: column;
-    gap: var(--s3);
-  }
-  .limit-stats { grid-template-columns: 1fr; }
-  .limit-stat,
-  .limit-stat:nth-child(2n) {
-    border-right: 0;
-    border-bottom: 1px solid var(--hairline);
-  }
-  .limit-stat:last-child { border-bottom: 0; }
-  .quality-signal {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .quality-signal-note {
-    grid-column: 1 / -1;
-  }
-  .data:not(.evidence) { min-width: 0; }
-  #models .data th:nth-child(n+4),
-  #models .data td:nth-child(n+4),
-  #projects .data th:nth-child(n+3),
-  #projects .data td:nth-child(n+3) {
-    display: none;
-  }
-  #models .th-vendor { width: 72px; }
-  #models .th-cost,
-  #projects .th-cost { width: 86px; }
-  #models .data thead th,
-  #projects .data thead th,
-  #models .data tbody td,
-  #projects .data tbody td {
-    padding-left: var(--s3);
-    padding-right: var(--s3);
-  }
-  #models .data thead th:first-child,
-  #projects .data thead th:first-child,
-  #models .data tbody td:first-child,
-  #projects .data tbody td:first-child { padding-left: var(--s4); }
-  #models .data thead th:last-child,
-  #projects .data thead th:last-child,
-  #models .data tbody td:last-child,
-  #projects .data tbody td:last-child { padding-right: var(--s4); }
-  #models .vendor-badge {
-    padding: 2px 6px;
-    font-size: 9.5px;
-  }
-  #models .th-model { width: auto; }
-  #models .data td:nth-child(2) {
-    max-width: 118px;
-    overflow-wrap: anywhere;
-  }
-  #projects .proj-name {
-    display: inline-block;
-    max-width: 150px;
-    overflow-wrap: anywhere;
-  }
-  .data.evidence tbody tr {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: var(--s2) var(--s3);
-    padding: var(--s4);
-    border-bottom: 1px solid var(--hairline);
-  }
-  .data.evidence tbody tr:last-child { border-bottom: 0; }
-  .data.evidence tbody td,
-  .data.evidence tbody td:first-child,
-  .data.evidence tbody td:last-child {
-    padding: 0;
-    border-bottom: 0;
-  }
-  .data.evidence tbody td:nth-child(2) {
-    justify-self: end;
-  }
-  .data.evidence .evidence-dim {
-    width: auto;
-    min-width: 0;
-  }
-  .data.evidence .evidence-note {
-    grid-column: 1 / -1;
-    line-height: 1.5;
-    max-width: 32ch;
-  }
-  .mean-label-bg,
-  .mean-label-text {
-    display: none;
-  }
-  .recap-header { gap: var(--s2); }
-  .page-foot-left { flex-wrap: wrap; }
-  .page-foot-right { align-items: flex-start; }
-}
-
-/* — Print -------------------------------------------------------------- */
-
-@media print {
-  body { background: #fff; }
-  .page { padding: 32px; max-width: none; }
-  .lens-bar,
-  .trace-link { display: none; }
-  .premium-brief { break-inside: avoid; }
-  .decision-item,
-  .brief-finding,
-  .comparison-card,
-  .readiness-card { break-inside: avoid; }
-  .sec { break-inside: avoid; }
-  .insight { break-inside: avoid; }
-  .chart-panel { break-inside: avoid; }
-  [class*="twk-"] { display: none !important; }
-}
-
-/* === Phase 1 power-ups: seasonality, ETA bands, tier provenance ======== */
-
-/* Cost-weighted hour×dow grid (distinct from event-count Recap heatmap). */
-.seasonality-grid-wrap {
-  display: grid;
-  grid-template-columns: 36px 1fr;
-  column-gap: 8px;
-  row-gap: 4px;
-  margin-top: var(--s4);
-}
-.hod-row-labels {
-  display: grid;
-  grid-template-rows: repeat(7, 14px);
-  row-gap: 4px;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--mute);
-  align-items: center;
-  justify-items: end;
-  padding-right: 4px;
-}
-.hod-row-label { line-height: 14px; }
-.hod-grid {
-  display: grid;
-  grid-template-rows: repeat(7, 14px);
-  grid-template-columns: repeat(24, 1fr);
-  gap: 4px;
-}
-.hod-cell {
-  border-radius: 3px;
-  background: var(--hour-0);
-  outline: 0 solid var(--accent);
-  outline-offset: 1px;
-  transition: outline-width 80ms ease-out, transform 100ms ease-out;
-}
-.hod-cell:hover {
-  outline-width: 1.5px;
-  transform: scale(1.25);
-  z-index: 3;
-  position: relative;
-}
-.hod-level-0 { background: var(--hour-0); }
-.hod-level-1 { background: var(--hour-1); }
-.hod-level-2 { background: var(--hour-2); }
-.hod-level-3 { background: var(--hour-3); }
-.hod-level-4 { background: var(--hour-4); }
-.hod-col-labels {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  margin: 4px 0 var(--s4) 44px;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--mute);
-}
-.seasonality-strips {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--s5);
-  margin-top: var(--s5);
-}
-.strip-title {
-  color: var(--mute);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  margin-bottom: 6px;
-}
-.strip-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 56px;
-  border-bottom: 1px solid var(--rule);
-}
-.strip-bar {
-  flex: 1 1 0;
-  min-height: 2px;
-  background: var(--accent);
-  opacity: 0.85;
-  border-radius: 2px 2px 0 0;
-}
-.strip-bar:hover { opacity: 1; }
-.seasonality-callouts {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--s5);
-  margin-top: var(--s5);
-}
-.seasonality-callouts .callout {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.seasonality-callouts .callout-label {
-  color: var(--mute);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-}
-.seasonality-callouts .callout-value {
-  color: var(--ink);
-  font-size: var(--num-md);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums lining-nums;
-}
-
-/* Rate-limit ETA bands */
-.limit-forecasts {
-  margin-top: var(--s5);
-  border-top: 1px solid var(--rule);
-  padding-top: var(--s5);
-}
-.limit-forecasts-title {
-  margin: 0 0 var(--s3) 0;
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--mute);
-}
-.eta-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--s4);
-}
-.eta-card {
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: var(--s3);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.eta-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--s2);
-}
-.eta-window {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink);
-  text-transform: capitalize;
-}
-.eta-confidence-chip {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--surface-2);
-  color: var(--mute);
-}
-.eta-confidence-high .eta-confidence-chip {
-  background: rgba(34, 197, 94, 0.15);
-  color: rgb(34, 197, 94);
-}
-.eta-confidence-medium .eta-confidence-chip {
-  background: rgba(251, 191, 36, 0.15);
-  color: rgb(251, 191, 36);
-}
-.eta-mid {
-  display: flex;
-  align-items: baseline;
   gap: 6px;
+  transition: background 120ms ease-out, transform 80ms ease-out;
 }
-.eta-value {
-  font-size: var(--num-lg);
-  font-weight: 600;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums lining-nums;
-}
-.eta-unit { font-size: 11px; }
-.eta-range, .eta-burn, .eta-samples, .eta-empty {
-  font-size: 11px;
-  font-family: var(--mono);
-}
-
-/* Tier-source provenance stacked bar */
-.prov-bar {
-  display: flex;
-  height: 14px;
-  border-radius: 4px;
-  overflow: hidden;
-  margin-top: var(--s4);
-  background: var(--surface-2);
-}
-.prov-seg { height: 100%; min-width: 2px; }
-.prov-seg-0 { background: var(--accent); }
-.prov-seg-1 { background: #6366f1; }
-.prov-seg-2 { background: #f59e0b; }
-.prov-seg-3 { background: #ef4444; }
-.prov-seg-4 { background: var(--mute); }
-.prov-legend {
-  list-style: none;
-  padding: 0;
-  margin: var(--s3) 0 0 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--s2);
-}
-.prov-legend-item {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  font-size: 12px;
-}
-.prov-swatch {
+.cal-tweaks-panel .cal-tweaks-save:hover { background: var(--accent); color: var(--bg); }
+.cal-tweaks-panel .cal-tweaks-save:active { transform: scale(0.97); }
+.cal-tweaks-panel .cal-tweaks-arrow {
+  display: inline-block;
   width: 10px;
   height: 10px;
-  border-radius: 2px;
-  flex: 0 0 auto;
+  border: 1.5px solid currentColor;
+  border-top: 0;
+  border-right: 0;
+  transform: rotate(-45deg) translate(1px, -1px);
 }
-.prov-label { font-weight: 600; color: var(--ink); }
-.prov-count { margin-left: auto; font-family: var(--mono); }
-
-/* === Phase 2 power-ups: model forecasts, portfolio outlook, project bands === */
-
-.mf-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--s4);
-}
-.mf-card {
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  padding: var(--s4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  background: var(--surface);
-}
-.mf-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--s2);
-}
-.mf-vendor {
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--mute);
-  font-weight: 600;
-}
-.mf-model {
-  font-size: 12px;
-  color: var(--ink);
-}
-.mf-spark { display: flex; align-items: center; min-height: 22px; }
-.mf-figures {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--s2);
-}
-.mf-figures > div { display: flex; flex-direction: column; gap: 2px; }
-.mf-figures .mute {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-.mf-figure {
-  font-size: var(--num-md);
-  font-weight: 600;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums lining-nums;
-}
-.mf-band, .mf-meta { font-size: 11px; font-family: var(--mono); }
-
-.outlook-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--s5);
-}
-.outlook-card {
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  padding: var(--s5);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  background: var(--surface);
-}
-.outlook-card-warn { border-color: var(--rule); }
-.outlook-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-.outlook-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--mute);
-}
-.outlook-days { font-family: var(--mono); font-size: 11px; }
-.outlook-mid {
-  font-size: var(--num-lg);
-  font-weight: 600;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums lining-nums;
-}
-.outlook-range, .outlook-ewma { font-size: 12px; font-family: var(--mono); }
-
-.proj-est { display: inline-flex; gap: var(--s2); align-items: baseline; }
-.proj-band { font-size: 10px; }
-.forecast-chip {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--surface-2);
-  color: var(--mute);
-}
-.forecast-chip-high { background: rgba(34, 197, 94, 0.15); color: rgb(34, 197, 94); }
-.forecast-chip-medium { background: rgba(251, 191, 36, 0.15); color: rgb(251, 191, 36); }
-.forecast-chip-low { background: rgba(148, 163, 184, 0.18); color: var(--mute); }
-
-/* === Phase 3 power-ups: prompt-rot curves, cache leverage, LC histogram === */
-
-.rot-curve {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  margin: var(--s2) 0;
+/* Floating, never blocks printing or PDF export. */
+@media print { .cal-tweaks-panel { display: none !important; } }
+[data-viewport="mobile"] .cal-tweaks-panel {
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  flex-wrap: wrap;
+  border-radius: var(--r-md);
+  justify-content: center;
 }
 
-.cl-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
+/* Privacy mode — CSS-only swap between real and redacted labels.
+   The renderer wraps every sensitive value (project name, session
+   label, filesystem path) in a pair of sibling spans carrying the
+   "real" and "redacted" labels respectively. Default rule below hides
+   the redacted twin so the browser sees the real text. @media print
+   and a root-level data-privacy=always attribute both flip the swap,
+   producing redacted output without re-running the report. */
+.cal-redacted { display: none; }
+[data-privacy="always"] .cal-real { display: none !important; }
+[data-privacy="always"] .cal-redacted { display: inline !important; }
+@media print {
+  .cal-real { display: none !important; }
+  .cal-redacted { display: inline !important; }
 }
-.cl-row {
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: var(--s3);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  background: var(--surface);
-}
-.cl-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-.cl-session { font-size: 12px; color: var(--ink); }
-.cl-savings {
-  font-size: var(--num-md);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums lining-nums;
-  color: var(--ink);
-}
-.cl-bar {
-  height: 6px;
-  background: var(--surface-2);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.cl-bar-fill {
-  height: 100%;
-  background: rgb(34, 197, 94);
-  border-radius: 3px;
-}
-.cl-meta { font-size: 11px; font-family: var(--mono); }
-
-.lc-chart {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: var(--s2);
-  align-items: end;
-  height: 140px;
-  border-bottom: 1px solid var(--rule);
-}
-.lc-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  height: 100%;
-  justify-content: flex-end;
-  gap: 4px;
-}
-.lc-bar {
-  width: 100%;
-  background: var(--accent);
-  border-radius: 3px 3px 0 0;
-  min-height: 2px;
-}
-.lc-col[data-above-threshold="true"] .lc-bar { background: #ef4444; }
-.lc-label { font-size: 10px; color: var(--mute); }
-.lc-threshold-line {
-  margin-top: var(--s3);
-  font-size: 11px;
-  color: var(--mute);
-  border-top: 1px dashed var(--rule);
-  padding-top: var(--s2);
-}
-
-/* === Phase 4 power-ups: cohort delta + agent sparkline === */
-
-.cohort-label { font-weight: 600; color: var(--ink); }
-.cohort-delta {
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums lining-nums;
-}
-.cohort-delta-warn { color: rgb(239, 68, 68); }
-.cohort-delta-good { color: rgb(34, 197, 94); }
-.cohort-delta-neutral { color: var(--mute); }
-
-/* === Share-safe banner ================================================ */
-
-.share-safe-banner {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  padding: var(--s3) var(--s4);
-  margin: var(--s3) 0 var(--s4);
-  border-radius: 8px;
-  border: 1px solid rgba(99, 102, 241, 0.35);
-  background: rgba(99, 102, 241, 0.08);
-  color: var(--ink);
-  font-size: 13px;
-}
-.share-safe-banner code {
-  background: var(--surface-2);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 12px;
-  font-family: var(--mono);
-}
-.share-safe-banner strong { color: var(--ink); }
-.share-safe-icon { font-size: 16px; line-height: 1; }
-.share-safe-copy { line-height: 1.5; }
 """
 
 
-def _redact_text(value: str, replacements: dict[str, str]) -> str:
-    out = value
-    for needle, replacement in sorted(
-        replacements.items(), key=lambda item: len(item[0]), reverse=True
-    ):
-        if needle:
-            out = out.replace(needle, replacement)
-    return out
+# ============================================================================
+# Section definitions
+# ============================================================================
+
+# Numbered audit anchors. The order is the rendering order; renumbering is a
+# breaking change for any external links into a generated dashboard.
+SECTION_NUMBERS: dict[str, str] = {
+    "overview": "01",
+    "cost": "02",
+    "shape": "03",
+    "models": "04",
+    "projects": "05",
+    "insights": "06",
+    "anomalies": "07",
+    "budgets": "08",
+    "forecast": "09",
+    "advisor": "10",
+    "rate-limits": "11",
+    "heatmap": "12",
+    "sessions": "13",
+    "evidence": "14",
+}
+
+_SECTION_TITLES: dict[str, str] = {
+    "overview": "Overview",
+    "cost": "Cost over time",
+    "shape": "Session shape",
+    "models": "Models & tiers",
+    "projects": "Projects",
+    "insights": "Insights",
+    "anomalies": "Anomalies",
+    "budgets": "Budget burn",
+    "forecast": "Forecast",
+    "advisor": "Advisor",
+    "rate-limits": "Rate-limit pressure",
+    "heatmap": "Activity heatmap",
+    "sessions": "Top sessions",
+    "evidence": "Evidence",
+}
+
+# Map session-shape categories to CSS color tokens.
+_SHAPE_COLORS: dict[str, str] = {
+    "exploration": "var(--explore)",
+    "explore": "var(--explore)",
+    "execution": "var(--execute)",
+    "execute": "var(--execute)",
+    "diagnostic": "var(--diagnose)",
+    "diagnose": "var(--diagnose)",
+    "mixed": "var(--mixed)",
+    "no-tools": "var(--bar-ghost)",
+}
 
 
-def _share_safe_dashboard(d: Dashboard) -> Dashboard:
-    replacements: dict[str, str] = {}
-    safe_projects: list[ProjectRow] = []
-    for index, row in enumerate(d.by_project, start=1):
-        label = f"Project {index}"
-        replacements[row.name] = label
-        if row.path:
-            replacements[row.path] = "project path hidden"
-        safe_projects.append(dataclasses.replace(row, name=label, path=None))
+def _should_render(section_id: str, d: Dashboard) -> bool:
+    """Hide-when-empty rules. Sections not listed always render."""
+    if section_id == "cost":
+        return bool(d.daily)
+    if section_id == "models":
+        return bool(d.by_model)
+    if section_id == "projects":
+        return bool(d.by_project)
+    if section_id == "anomalies":
+        return bool(d.anomalies)
+    if section_id == "budgets":
+        return bool(d.budgets)
+    if section_id == "forecast":
+        return d.forecast is not None
+    if section_id == "advisor":
+        return bool(d.advisor_recommendations)
+    if section_id == "rate-limits":
+        return d.rate_limit_pressure is not None
+    if section_id == "heatmap":
+        return d.recap is not None and bool(d.recap.hours)
+    if section_id == "sessions":
+        return bool(d.top_sessions)
+    if section_id == "evidence":
+        return bool(d.evidence)
+    # overview / shape / insights always render (placeholder when empty)
+    return True
 
-    safe_sessions: list[SessionRow] = []
-    for index, row in enumerate(d.top_sessions, start=1):
-        session_label = f"Session {index}"
-        replacements[row.label] = session_label
-        project = replacements.get(row.project, "Project hidden")
-        safe_sessions.append(dataclasses.replace(row, label=session_label, project=project))
 
-    safe_agents: list[AgentRow] = []
-    for index, row in enumerate(d.agents, start=1):
-        agent_label = f"Agent {index}"
-        replacements[row.agent_id] = agent_label
-        safe_agents.append(dataclasses.replace(row, agent_id=agent_label))
+# ============================================================================
+# Formatting helpers (kept module-level for tests and CLI scripts)
+# ============================================================================
 
-    safe_skills: list[SkillRow] = []
-    for index, row in enumerate(d.skills, start=1):
-        skill_label = f"Workflow {index}"
-        replacements[row.name] = skill_label
-        safe_skills.append(dataclasses.replace(row, name=skill_label))
 
-    safe_anomalies: list[AnomalyRow] = []
-    for index, row in enumerate(d.anomalies, start=1):
-        label = _redact_text(row.label, replacements)
-        if label == row.label:
-            label = f"Anomaly {index}"
-        safe_anomalies.append(dataclasses.replace(row, label=label))
+def fmt_money(v: float | int | None) -> str:
+    """Render a USD amount.
 
-    def redact_dataclass(item):
-        changes = {
-            field.name: _redact_text(getattr(item, field.name), replacements)
-            for field in dataclasses.fields(item)
-            if isinstance(getattr(item, field.name), str)
-        }
-        return dataclasses.replace(item, **changes)
+    Numbers ≥ 1000 are integer-formatted with thousand separators; smaller
+    values keep two decimals. ``None`` renders as an em-dash.
+    """
+    if v is None:
+        return "—"
+    if v >= 1000:
+        return "$" + format(int(round(v)), ",")
+    return "$" + format(float(v), ".2f")
 
-    safe_advisor = [
-        dataclasses.replace(
-            redact_dataclass(row),
-            action="Hidden in share-safe mode.",
-        )
-        for row in d.advisor_recommendations
+
+def _fmt_money_axis(v: float) -> str:
+    """Compact axis label for bar-chart Y-ticks."""
+    if v >= 10000:
+        return "$" + format(int(round(v / 1000)), "d") + "K"
+    if v >= 1000:
+        return "$" + format(v / 1000, ".1f") + "K"
+    return "$" + format(int(round(v)), "d")
+
+
+def fmt_int(v: int | None) -> str:
+    if v is None:
+        return "—"
+    return format(int(v), ",")
+
+
+def fmt_tokens(v: int | None) -> str:
+    """Compact token count: B / M / K / raw."""
+    if v is None:
+        return "—"
+    av = int(v)
+    if av >= 1_000_000_000:
+        return format(av / 1_000_000_000, ".1f") + "B"
+    if av >= 1_000_000:
+        return format(av / 1_000_000, ".1f") + "M"
+    if av >= 10_000:
+        return format(av / 1000, ".1f") + "K"
+    return format(av, ",")
+
+
+def fmt_pct(v: float | None, digits: int = 1) -> str:
+    if v is None:
+        return "—"
+    return format(float(v) * 100, f".{digits}f") + "%"
+
+
+def _fmt_delta(v: float | None) -> str | None:
+    """Signed percent delta, or ``None`` to mean "don't render the chip"."""
+    if v is None:
+        return None
+    pct = abs(v) * 100
+    if v > 0:
+        sign = "+"
+    elif v < 0:
+        sign = "−"
+    else:
+        sign = ""
+    return f"{sign}{pct:.1f}%"
+
+
+def _nice_ceil(v: float) -> float:
+    """Round up to a "nice" axis maximum (1, 2, 5, or 10 × 10ⁿ)."""
+    if v <= 0:
+        return 1.0
+    exp = 10 ** math.floor(math.log10(v))
+    norm = v / exp
+    if norm <= 1:
+        nice = 1
+    elif norm <= 2:
+        nice = 2
+    elif norm <= 5:
+        nice = 5
+    else:
+        nice = 10
+    return float(nice * exp)
+
+
+def _esc(s: Any) -> str:
+    """``html.escape`` with ``None``-tolerance and string coercion."""
+    if s is None:
+        return ""
+    return html.escape(str(s), quote=True)
+
+
+# ============================================================================
+# Privacy mode — CSS-only swap between real and redacted labels
+# ============================================================================
+
+PRIVACY_MODES = ("off", "print-only", "always")
+
+
+class _PrivacyMap:
+    """Pre-computed mapping from real → redacted labels.
+
+    Walks the :class:`Dashboard` once at render time and assigns stable,
+    indexed placeholders so a reader can still cross-reference between
+    sections ("Project 3" in the projects table is the same project as
+    "Project 3" referenced by a top session). Paths are uniformly
+    redacted to ``[path]`` because they leak filesystem layout.
+
+    Lookups for unknown values fall back to ``Project ?`` / ``Session ?``
+    rather than raising — the renderer is defensive about partial data.
+    """
+
+    __slots__ = ("mode", "projects", "sessions", "path_label")
+
+    def __init__(self, mode: str, projects: dict[str, str], sessions: dict[str, str]):
+        self.mode = mode
+        self.projects = projects
+        self.sessions = sessions
+        self.path_label = "[path]"
+
+
+def _build_privacy_map(d: Dashboard, mode: str) -> _PrivacyMap:
+    project_names = sorted({p.name for p in d.by_project if p.name})
+    session_labels = sorted({s.label for s in d.top_sessions if s.label})
+    return _PrivacyMap(
+        mode=mode,
+        projects={name: f"Project {i}" for i, name in enumerate(project_names, start=1)},
+        sessions={label: f"Session {i}" for i, label in enumerate(session_labels, start=1)},
+    )
+
+
+def _private(real: str, redacted: str, pm: _PrivacyMap) -> str:
+    """Emit a real-or-redacted span based on privacy mode.
+
+    * ``off``: just the escaped real value (no wrapper, no class).
+    * ``always``: just the escaped redacted value (no wrapper either —
+      cheaper output when the user has committed to redaction).
+    * ``print-only``: both spans, controlled by CSS. ``cal-real`` is the
+      browser view; ``cal-redacted`` shows in print and when the root
+      carries ``data-privacy="always"``.
+    """
+    if pm.mode == "off":
+        return _esc(real)
+    if pm.mode == "always":
+        return _esc(redacted)
+    return (
+        f'<span class="cal-real">{_esc(real)}</span>'
+        f'<span class="cal-redacted">{_esc(redacted)}</span>'
+    )
+
+
+def _private_project(name: str, pm: _PrivacyMap) -> str:
+    if pm.mode == "off":
+        return _esc(name)
+    redacted = pm.projects.get(name, "Project ?")
+    return _private(name, redacted, pm)
+
+
+def _private_session(label: str, pm: _PrivacyMap) -> str:
+    if pm.mode == "off":
+        return _esc(label)
+    redacted = pm.sessions.get(label, "Session ?")
+    return _private(label, redacted, pm)
+
+
+def _private_path(path: str | None, pm: _PrivacyMap) -> str:
+    if not path:
+        return ""
+    if pm.mode == "off":
+        return _esc(path)
+    return _private(path, pm.path_label, pm)
+
+
+# ============================================================================
+# SVG chart primitives — pure functions returning HTML/SVG strings
+# ============================================================================
+
+
+def _sparkline(
+    values: Sequence[float],
+    *,
+    width: int = 84,
+    height: int = 22,
+    stroke: str = "var(--accent)",
+    stroke_width: float = 1,
+    fill: str = "none",
+    show_zero_line: bool = False,
+) -> str:
+    """Hairline SVG sparkline. Returns an empty (decorative) svg if no values."""
+    if not values:
+        return f'<svg width="{width}" height="{height}" aria-hidden="true"></svg>'
+    nums = [float(v) for v in values]
+    mx = max(*nums, 1.0)
+    mn = min(*nums, 0.0)
+    rng = (mx - mn) or 1.0
+    pad = 2
+    w = width - pad * 2
+    h = height - pad * 2
+    step = w / max(1, len(nums) - 1)
+    pts: list[tuple[float, float]] = [
+        (pad + i * step, pad + h - ((v - mn) / rng) * h) for i, v in enumerate(nums)
     ]
-    return dataclasses.replace(
-        d,
-        by_project=safe_projects,
-        anomalies=safe_anomalies,
-        top_sessions=safe_sessions,
-        agents=safe_agents,
-        skills=safe_skills,
-        impact_cards=[redact_dataclass(row) for row in d.impact_cards],
-        command_center=[redact_dataclass(row) for row in d.command_center],
-        advisor_recommendations=safe_advisor,
-        inefficiencies=[redact_dataclass(row) for row in d.inefficiencies],
-        forecast_drivers=[redact_dataclass(row) for row in d.forecast_drivers],
-        insights=[redact_dataclass(row) for row in d.insights],
-        evidence=[redact_dataclass(row) for row in d.evidence],
-        executive_brief=(
-            dataclasses.replace(
-                d.executive_brief,
-                title=_redact_text(d.executive_brief.title, replacements),
-                verdict=_redact_text(d.executive_brief.verdict, replacements),
-                subtitle=_redact_text(d.executive_brief.subtitle, replacements),
-                findings=[redact_dataclass(row) for row in d.executive_brief.findings],
+    d_parts = [f"{'L' if i else 'M'}{x:.1f} {y:.1f}" for i, (x, y) in enumerate(pts)]
+    d = " ".join(d_parts)
+    area_d = f"{d} L{pts[-1][0]:.1f} {(pad + h):.1f} L{pts[0][0]:.1f} {(pad + h):.1f} Z"
+    parts = [
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" aria-hidden="true">',
+    ]
+    if show_zero_line:
+        parts.append(
+            f'<line x1="{pad}" y1="{pad + h}" x2="{pad + w}" y2="{pad + h}" '
+            f'stroke="var(--hairline)" stroke-width="1" />'
+        )
+    if fill != "none":
+        parts.append(f'<path d="{area_d}" fill="{fill}" />')
+    parts.append(
+        f'<path d="{d}" fill="none" stroke="{stroke}" stroke-width="{stroke_width}" '
+        f'stroke-linecap="round" stroke-linejoin="round" />'
+    )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _meter(
+    value: float,
+    maximum: float,
+    *,
+    color: str = "var(--accent)",
+    height: int = 6,
+    radius: int = 2,
+    track: str = "var(--bar-ghost)",
+) -> str:
+    pct = min(100.0, (float(value) / float(maximum)) * 100) if maximum > 0 else 0.0
+    return (
+        f'<span style="display:block;width:100%;height:{height}px;background:{track};'
+        f'border-radius:{radius}px;overflow:hidden">'
+        f'<span style="display:block;width:{pct:.1f}%;height:100%;background:{color};'
+        f'border-radius:{radius}px;transition:width 200ms ease-out"></span>'
+        f"</span>"
+    )
+
+
+def _budget_bar(spent: float, cap: float, warn: float) -> str:
+    pct = min(100.0, (spent / cap) * 100) if cap > 0 else 0.0
+    warn_pct = (warn / cap) * 100 if cap > 0 else 0.0
+    if spent >= cap:
+        tone = "var(--bad)"
+    elif spent >= warn:
+        tone = "var(--warn)"
+    else:
+        tone = "var(--ok)"
+    return (
+        '<div style="position:relative;height:8px;background:var(--bar-ghost);'
+        'border-radius:2px;overflow:visible">'
+        f'<span style="position:absolute;left:0;top:0;bottom:0;width:{pct:.1f}%;'
+        f'background:{tone};border-radius:2px"></span>'
+        f'<span title="warn at {fmt_money(warn)}" style="position:absolute;top:-2px;'
+        f'bottom:-2px;left:{warn_pct:.1f}%;width:1px;background:var(--warn)"></span>'
+        "</div>"
+    )
+
+
+def _stacked_bar(
+    segments: Sequence[tuple[str, float, str]],
+    *,
+    height: int = 14,
+    gap: int = 2,
+    radius: int = 3,
+) -> str:
+    """Horizontal stacked bar; segments are (label, value, color)."""
+    total = sum(v for _, v, _ in segments) or 1.0
+    parts = [
+        f'<div style="display:flex;gap:{gap}px;width:100%;height:{height}px;'
+        f'border-radius:{radius}px;overflow:hidden;background:var(--bar-ghost)">'
+    ]
+    for label, value, color in segments:
+        share = (value / total) * 100
+        parts.append(
+            f'<span title="{_esc(label)} · {round((value / total) * 100)}%" '
+            f'style="flex-basis:{share:.2f}%;background:{color};height:100%"></span>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _shape_strip(daily: Sequence[Any], *, height: int = 10) -> str:
+    """One block per day, colored by dominant session shape."""
+    if not daily:
+        return ""
+    parts = [
+        f'<div style="display:grid;grid-template-columns:repeat({len(daily)},1fr);'
+        f'gap:2px;margin-top:8px">'
+    ]
+    for d in daily:
+        shape = (getattr(d, "shape", None) or "no-tools").lower()
+        color = _SHAPE_COLORS.get(shape, "var(--mixed)")
+        opacity = "0.4" if shape == "no-tools" else "1"
+        parts.append(
+            f'<span title="{_esc(d.day)} · {_esc(shape)}" '
+            f'style="height:{height}px;background:{color};border-radius:1px;opacity:{opacity}"></span>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _bar_chart(
+    daily: Sequence[Any],
+    *,
+    width: int = 1000,
+    height: int = 220,
+    accent: str = "var(--accent)",
+) -> str:
+    """Bar chart in real pixel coords. Uses ``xMinYMin meet`` so axis text never
+    distorts. (Earlier dashboards used ``preserveAspectRatio="none"`` which
+    stretched text — that mistake must not return.)
+
+    Y-axis: 4 ticks + baseline, ``$0`` at the floor, nice-ceiled max at the top.
+    X-axis labels: first, mid, last day (truncated to ``MM-DD``).
+    """
+    if not daily:
+        return ""
+    data: list[tuple[str, float, str]] = []
+    for d in daily:
+        day = getattr(d, "day", "")
+        label = day[5:] if len(day) > 5 else day
+        data.append((label, float(d.cost_usd), (getattr(d, "shape", None) or "mixed")))
+    mx = max((v for _, v, _ in data), default=1.0) or 1.0
+    nice_max = _nice_ceil(mx)
+    pad_l, pad_r, pad_t, pad_b = 44, 16, 18, 28
+    inner_w = max(50, width - pad_l - pad_r)
+    inner_h = height - pad_t - pad_b
+    bar_w = inner_w / len(data)
+    gap = max(2.0, min(8.0, bar_w * 0.18))
+    y_ticks = 4
+    parts = [
+        f'<svg width="100%" viewBox="0 0 {width} {height}" preserveAspectRatio="xMinYMin meet" '
+        f'role="img" aria-label="Daily cost bar chart" style="display:block;height:{height}px">',
+    ]
+    for i in range(y_ticks + 1):
+        t = (nice_max / y_ticks) * i
+        y = pad_t + inner_h - (t / nice_max) * inner_h
+        dash = "" if i == 0 else 'stroke-dasharray="2 4"'
+        parts.append(
+            f'<line x1="{pad_l}" y1="{y:.1f}" x2="{width - pad_r}" y2="{y:.1f}" '
+            f'stroke="var(--grid)" stroke-width="1" {dash} />'
+        )
+        label = "$0" if i == 0 else _fmt_money_axis(t)
+        parts.append(
+            f'<text x="{pad_l - 10}" y="{y + 4:.1f}" font-size="11" text-anchor="end" '
+            f'fill="var(--mute)">{label}</text>'
+        )
+    peak_value = -1.0
+    peak_idx = -1
+    for i, (label, value, shape) in enumerate(data):
+        x = pad_l + i * bar_w + gap / 2
+        bw = bar_w - gap
+        bar_h = (value / nice_max) * inner_h
+        y = pad_t + inner_h - bar_h
+        if value > peak_value:
+            peak_value = value
+            peak_idx = i
+        parts.append(
+            f'<rect x="{x:.1f}" y="{pad_t}" width="{bw:.1f}" height="{inner_h:.1f}" '
+            f'fill="var(--bar-ghost)" />'
+        )
+        if bar_h > 0.5:
+            parts.append(
+                f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" '
+                f'fill="{accent}" rx="1"><title>{_esc(label)}: '
+                f"{_esc(fmt_money(value))} · {_esc(shape)}</title></rect>"
             )
-            if d.executive_brief
-            else None
+    for idx in {0, len(data) // 2, len(data) - 1}:
+        if idx < 0 or idx >= len(data):
+            continue
+        label = data[idx][0]
+        x = pad_l + idx * bar_w + bar_w / 2
+        parts.append(
+            f'<text x="{x:.1f}" y="{height - 10}" font-size="11" text-anchor="middle" '
+            f'fill="var(--mute)">{_esc(label)}</text>'
+        )
+    if peak_idx >= 0:
+        parts.append(
+            f'<text x="{width - pad_r}" y="{pad_t - 4}" font-size="11" text-anchor="end" '
+            f'fill="var(--accent)" font-weight="600">peak {_esc(fmt_money(peak_value))}</text>'
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _heatmap_7x24(recap: Recap) -> str:
+    """7×24 (day-of-week × hour) heatmap. Day 0 = Monday."""
+    if not recap.hours:
+        return ""
+    day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    grid: list[list[int]] = [[0] * 24 for _ in range(7)]
+    for c in recap.hours:
+        d = max(0, min(6, c.day_of_week))
+        h = max(0, min(23, c.hour))
+        grid[d][h] = c.value
+    flat = [v for row in grid for v in row]
+    mx = max(flat, default=0) or 1
+    cell_size = 14
+    gap = 2
+    parts = [
+        '<div style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start">',
+        f'<div style="display:grid;grid-template-rows:repeat(7,{cell_size}px);'
+        f'gap:{gap}px;font-size:10px;color:var(--mute);padding-top:14px">',
+    ]
+    for label in day_labels:
+        parts.append(
+            f'<span style="line-height:{cell_size}px;text-align:right;padding-right:4px">{label}</span>'
+        )
+    parts.append("</div>")
+    parts.append("<div>")
+    parts.append(
+        f'<div style="display:grid;grid-template-columns:repeat(24,1fr);column-gap:{gap}px;'
+        f'margin-bottom:4px;font-size:10px;color:var(--mute)">'
+    )
+    for h in range(24):
+        vis = "visible" if h % 3 == 0 else "hidden"
+        parts.append(f'<span style="text-align:center;visibility:{vis}">{h:02d}</span>')
+    parts.append("</div>")
+    parts.append(
+        f'<div style="display:grid;grid-template-rows:repeat(7,{cell_size}px);gap:{gap}px">'
+    )
+    for d in range(7):
+        parts.append(f'<div style="display:grid;grid-template-columns:repeat(24,1fr);gap:{gap}px">')
+        for h in range(24):
+            v = grid[d][h]
+            if v == 0:
+                bg = "var(--bar-ghost)"
+                op = 1.0
+            else:
+                bg = "var(--accent)"
+                op = 0.18 + (v / mx) * 0.82
+            parts.append(
+                f'<span title="{day_labels[d]} {h:02d}:00 · {v} calls" '
+                f'style="background:{bg};opacity:{op:.2f};border-radius:2px;'
+                f'border:1px solid var(--hairline)"></span>'
+            )
+        parts.append("</div>")
+    parts.append("</div>")
+    parts.append(
+        '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;'
+        'margin-top:8px;font-size:11px;color:var(--mute)"><span>less</span>'
+    )
+    for op in (0, 0.3, 0.55, 0.8, 1.0):
+        bg = "var(--bar-ghost)" if op == 0 else "var(--accent)"
+        op_str = "1" if op == 0 else f"{op:.2f}"
+        parts.append(
+            f'<span style="width:12px;height:12px;background:{bg};opacity:{op_str};'
+            f'border-radius:2px;border:1px solid var(--hairline)"></span>'
+        )
+    parts.append("<span>more</span></div>")
+    parts.append("</div></div>")
+    return "".join(parts)
+
+
+def _ranked_bars(items: Sequence[Any]) -> str:
+    """Ranked horizontal bars; items expose ``name``, ``count``, ``category``."""
+    if not items:
+        return ""
+    counts = [int(it.count) for it in items]
+    mx = max(counts) if counts else 1
+    parts = ['<ul style="display:grid;gap:8px;list-style:none;padding:0;margin:0">']
+    for it in items:
+        cat = getattr(it, "category", None) or "accent"
+        color = f"var(--{cat})"
+        dot = (
+            f'<span style="width:8px;height:8px;border-radius:2px;background:{color};'
+            f'display:inline-block"></span>'
+        )
+        parts.append(
+            '<li style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;'
+            'gap:12px;font-size:13px">'
+            f'<span style="display:inline-flex;align-items:center;gap:8px;min-width:96px">'
+            f"{dot}"
+            f'<span style="color:var(--ink);font-weight:500">{_esc(it.name)}</span>'
+            "</span>"
+            f"{_meter(it.count, mx, color=color)}"
+            '<span style="color:var(--ink-2);min-width:32px;text-align:right;font-size:12px">'
+            f"{_esc(fmt_int(it.count))}</span></li>"
+        )
+    parts.append("</ul>")
+    return "".join(parts)
+
+
+# ============================================================================
+# Small component primitives
+# ============================================================================
+
+_TONE_COLOR = {
+    "good": "var(--ok)",
+    "warn": "var(--warn)",
+    "bad": "var(--bad)",
+    "critical": "var(--bad)",
+    "accent": "var(--accent)",
+    "default": "var(--mute)",
+    "neutral": "var(--mute)",
+}
+
+
+def _tone_color(tone: str | None, default: str = "var(--mute)") -> str:
+    if tone is None:
+        return default
+    return _TONE_COLOR.get(tone, default)
+
+
+def _stat_card(
+    *,
+    label: str,
+    value: str,
+    sub: str | None = None,
+    delta: str | None = None,
+    delta_tone: str | None = None,
+    sparkline: Sequence[float] | None = None,
+    spark_color: str = "var(--accent)",
+    rail: str | None = None,
+    dense: bool = False,
+) -> str:
+    pad = 12 if dense else 16
+    delta_color = _tone_color(delta_tone)
+    value_color = "var(--ghost)" if value == "—" else "var(--ink)"
+    parts = [
+        f'<div class="cal-stat-card" style="position:relative;background:var(--panel);'
+        f'border:1px solid var(--border);border-radius:var(--r-md);padding:{pad}px;overflow:hidden">'
+    ]
+    if rail:
+        parts.append(
+            f'<span style="position:absolute;left:0;top:0;bottom:0;width:2px;background:{rail}"></span>'
+        )
+    parts.append(
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">'
+        f'<span style="font-size:11px;letter-spacing:.10em;color:var(--mute);'
+        f'text-transform:uppercase;font-weight:500">{_esc(label)}</span>'
+    )
+    if delta:
+        parts.append(
+            f'<span style="font-size:11px;color:{delta_color};font-weight:500">{_esc(delta)}</span>'
+        )
+    parts.append("</div>")
+    parts.append(
+        f'<div style="font-size:var(--num-xl);line-height:1.05;font-weight:600;color:{value_color};'
+        f'margin-bottom:4px;letter-spacing:-0.01em">{_esc(value)}</div>'
+    )
+    if sub:
+        margin = "10px" if sparkline else "0"
+        parts.append(
+            f'<div style="font-size:12px;color:var(--mute);margin-bottom:{margin}">{_esc(sub)}</div>'
+        )
+    if sparkline:
+        spark_w = 100 if dense else 140
+        spark_h = 22 if dense else 26
+        parts.append(
+            f'<div style="margin-top:8px">'
+            f"{_sparkline(sparkline, width=spark_w, height=spark_h, stroke=spark_color)}"
+            f"</div>"
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _banner_html(b: Banner) -> str:
+    """Map the Caliper :class:`Banner` (kind/label/text) to the design banner."""
+    tone = "bad" if b.kind == "crit" else "warn"
+    accent = "var(--bad)" if tone == "bad" else "var(--warn)"
+    bg = "var(--bad-tint)" if tone == "bad" else "var(--warn-tint)"
+    label_text = "ALERT" if tone == "bad" else "NOTE"
+    return (
+        '<div class="cal-banner" style="display:flex;align-items:flex-start;gap:14px;'
+        f"padding:12px 16px;border:1px solid var(--border);border-left:3px solid {accent};"
+        f'background:{bg};border-radius:0 var(--r-sm) var(--r-sm) 0;font-size:13px">'
+        f'<span aria-hidden="true" style="font-family:var(--mono);color:{accent};font-size:11px;'
+        f'padding-top:1px;letter-spacing:.10em">{label_text}</span>'
+        '<div style="flex:1;min-width:0">'
+        f'<div style="color:var(--ink);font-weight:500">{_esc(b.label)}</div>'
+        f'<div style="color:var(--mute);margin-top:2px">{b.text}</div>'
+        "</div></div>"
+    )
+
+
+def _pill(content: str, *, tone: str = "default", mono: bool = False) -> str:
+    color = _tone_color(tone)
+    font = "var(--mono)" if mono else "inherit"
+    return (
+        f'<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;'
+        f"border-radius:3px;font-size:11px;font-weight:500;color:{color};"
+        f"background:var(--panel-2);border:1px solid var(--border);font-family:{font};"
+        f'white-space:nowrap">{content}</span>'
+    )
+
+
+def _evidence_badge(qs: QualityScore) -> str:
+    score = qs.score
+    grade = qs.grade
+    if score >= 80:
+        color = "var(--ok)"
+    elif score >= 65:
+        color = "var(--warn)"
+    else:
+        color = "var(--bad)"
+    return (
+        '<a href="#evidence" style="text-decoration:none">'
+        '<span title="Evidence quality — click to jump to §14" '
+        'style="display:inline-flex;align-items:baseline;gap:6px;padding:5px 10px;'
+        "border-radius:3px;background:var(--panel-2);border:1px solid var(--border);"
+        'font-family:var(--mono);font-size:12px;white-space:nowrap">'
+        f'<span style="width:6px;height:6px;border-radius:50%;background:{color};align-self:center"></span>'
+        '<span style="color:var(--mute);text-transform:uppercase;letter-spacing:.10em;font-size:10px">Evidence</span>'
+        f'<span style="color:var(--ink);font-weight:600">{score}'
+        '<span style="color:var(--mute);font-weight:400">/100</span></span>'
+        f'<span style="color:{color};font-size:11px">{_esc(grade)}</span>'
+        "</span></a>"
+    )
+
+
+def _window_badge(w: WindowMeta) -> str:
+    return (
+        '<span style="display:inline-flex;align-items:center;gap:10px;padding:5px 10px;'
+        "border-radius:3px;background:var(--panel-2);border:1px solid var(--border);"
+        'font-family:var(--mono);font-size:12px;white-space:nowrap">'
+        f'<span style="color:var(--ink)">{_esc(w.label)}</span>'
+        '<span style="color:var(--mute)">·</span>'
+        f'<span style="color:var(--ink-2)">{_esc(w.range)}</span>'
+        "</span>"
+    )
+
+
+def _status_dot(tone: str, label: str) -> str:
+    color = _tone_color(tone, "var(--ok)")
+    halo = "rgba(123,224,146,0.15)" if tone == "good" else "transparent"
+    return (
+        '<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)">'
+        f'<span style="width:6px;height:6px;border-radius:50%;background:{color};'
+        f'box-shadow:0 0 0 2px {halo}"></span>{_esc(label)}</span>'
+    )
+
+
+def _caliper_mark(size: int = 22) -> str:
+    return (
+        f'<span style="display:inline-flex;align-items:center;gap:10px">'
+        f'<svg width="{size}" height="{size}" viewBox="0 0 24 24" aria-hidden="true">'
+        '<path d="M3 7v10M21 7v10M3 7l4 -3M21 7l-4 -3M3 17l4 3M21 17l-4 3M7 12h10" '
+        'fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />'
+        '<circle cx="12" cy="12" r="1.5" fill="var(--accent)" />'
+        "</svg></span>"
+    )
+
+
+def _section_head(section_id: str, *, rhythm: str, meta: str | None = None) -> str:
+    num = SECTION_NUMBERS[section_id]
+    title = _SECTION_TITLES[section_id]
+    if rhythm == "terminal":
+        meta_html = (
+            f'<span style="font-family:var(--mono);font-size:11px;color:var(--mute);'
+            f'white-space:nowrap;text-overflow:ellipsis;overflow:hidden">{_esc(meta)}</span>'
+            if meta
+            else ""
+        )
+        return (
+            '<div class="cal-section-head term" '
+            'style="display:flex;align-items:baseline;justify-content:space-between;'
+            "padding:10px 16px;border-top:1px solid var(--border-strong);"
+            "border-bottom:1px solid var(--border);background:var(--panel-2);"
+            'margin-bottom:16px;gap:16px">'
+            '<div style="display:flex;align-items:baseline;gap:12px;min-width:0">'
+            f'<span style="font-family:var(--mono);font-size:11px;color:var(--mute);'
+            f'letter-spacing:.04em">§{num}</span>'
+            f'<span style="font-family:var(--mono);font-size:12px;letter-spacing:.18em;'
+            f"color:var(--accent);text-transform:uppercase;font-weight:600;"
+            f'white-space:nowrap">{_esc(title)}</span>'
+            "</div>"
+            f"{meta_html}</div>"
+        )
+    meta_html = (
+        f'<span style="font-size:12px;color:var(--mute);text-align:right;'
+        f'white-space:nowrap;text-overflow:ellipsis;overflow:hidden">{_esc(meta)}</span>'
+        if meta
+        else ""
+    )
+    # Receipt header — §NN (no space) matches the design prototype.
+    return (
+        '<div class="cal-section-head receipt" '
+        'style="display:flex;align-items:baseline;justify-content:space-between;'
+        'margin-bottom:12px;gap:16px">'
+        '<div style="display:flex;align-items:baseline;gap:12px;min-width:0">'
+        f'<span style="font-family:var(--mono);font-size:11px;color:var(--ghost)">'
+        f"§{num}</span>"
+        f'<h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.14em;'
+        f"color:var(--accent);text-transform:uppercase;"
+        f'white-space:nowrap">{_esc(title)}</h2>'
+        "</div>"
+        f"{meta_html}</div>"
+    )
+
+
+def _empty_placeholder(text: str) -> str:
+    return (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        "border-radius:var(--r-md);padding:20px 18px;display:flex;"
+        'justify-content:space-between;align-items:center;gap:16px">'
+        f'<span style="color:var(--mute);font-size:13px">{_esc(text)}</span></div>'
+    )
+
+
+def _category_legend(items: Iterable[tuple[str, str]]) -> str:
+    parts = ['<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--mute)">']
+    for color, label in items:
+        parts.append(
+            '<span style="display:inline-flex;align-items:center;gap:6px">'
+            f'<span style="width:8px;height:8px;border-radius:2px;background:{color};display:inline-block"></span>'
+            f'<span style="color:var(--ink-2)">{_esc(label)}</span></span>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _verdict_strip(d: Dashboard, rhythm: str) -> str:
+    eb = d.executive_brief
+    if eb is None or not eb.findings:
+        return ""
+    if eb.tone == "critical":
+        tone_accent = "var(--bad)"
+    elif eb.tone == "warn":
+        tone_accent = "var(--warn)"
+    elif eb.tone == "good":
+        tone_accent = "var(--ok)"
+    else:
+        tone_accent = "var(--accent)"
+    findings = list(eb.findings)[:4]
+
+    def _pill_tone(f: BriefFinding) -> str:
+        return {
+            "critical": "bad",
+            "warn": "warn",
+            "good": "good",
+            "neutral": "default",
+        }.get(f.tone, "default")
+
+    if rhythm == "terminal":
+        chips = "".join(
+            f'<a href="#{_esc(f.anchor)}" style="text-decoration:none">'
+            f"{_pill(_esc(f.title) + ' · ' + _esc(f.impact), tone=_pill_tone(f))}</a>"
+            for f in findings
+        )
+        return (
+            '<div class="cal-verdict-strip" style="display:grid;'
+            "grid-template-columns:auto 1fr auto;gap:18px;align-items:center;"
+            "padding:10px 16px;background:var(--panel);border:1px solid var(--border);"
+            f'border-left:3px solid {tone_accent};border-radius:0 var(--r-md) var(--r-md) 0">'
+            f'<div style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
+            f'color:{tone_accent};text-transform:uppercase;font-weight:600">Verdict</div>'
+            '<div style="display:flex;align-items:baseline;gap:12px;min-width:0">'
+            f'<span style="font-size:14px;color:var(--ink);font-weight:600">{_esc(eb.verdict)}</span>'
+            f'<span style="font-size:12px;color:var(--mute)">· {_esc(eb.subtitle)}</span>'
+            "</div>"
+            f'<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">{chips}</div>'
+            "</div>"
+        )
+    chips_html = []
+    for f in findings:
+        inner = (
+            '<span style="color:var(--mute);margin-right:6px">↳</span>'
+            + _esc(f.title)
+            + '<span style="color:var(--ink-2);margin-left:8px">'
+            + _esc(f.impact)
+            + "</span>"
+        )
+        chips_html.append(
+            f'<a href="#{_esc(f.anchor)}" style="text-decoration:none">'
+            f"{_pill(inner, tone=_pill_tone(f))}</a>"
+        )
+    return (
+        '<div class="cal-verdict-strip" style="background:var(--panel);border:1px solid var(--border);'
+        "border-radius:var(--r-md);"
+        f'border-left:3px solid {tone_accent};padding:14px 18px">'
+        '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap">'
+        f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
+        f'color:{tone_accent};text-transform:uppercase;font-weight:600;white-space:nowrap">Verdict</span>'
+        f'<span style="font-size:17px;color:var(--ink);font-weight:600;letter-spacing:-0.005em">{_esc(eb.verdict)}</span>'
+        f'<span style="font-size:12px;color:var(--mute)">· {_esc(eb.subtitle)}</span>'
+        "</div>"
+        f'<div style="display:flex;gap:8px;flex-wrap:wrap">{"".join(chips_html)}</div>'
+        "</div>"
+    )
+
+
+def _caliper_footer(d: Dashboard) -> str:
+    sha = getattr(d.caliper, "build_sha", "") or ""
+    sha_line = f"<div>sha {_esc(sha)}</div>" if sha else ""
+    return (
+        '<footer style="border-top:1px solid var(--border);padding-top:16px;margin-top:32px;'
+        'display:grid;grid-template-columns:1fr auto;gap:16px;color:var(--mute);font-size:11px;line-height:1.6">'
+        '<div style="max-width:640px">Caliper is '
+        '<span style="color:var(--ok)">offline-first</span>. '
+        "This dashboard contains no external resources, scripts, or fetch calls. "
+        "All data was parsed from local AI coding logs.</div>"
+        '<div style="text-align:right;font-family:var(--mono)">'
+        f"<div>caliper v{_esc(d.caliper.version)} · schema {_esc(d.caliper.schema_version)}</div>"
+        f"<div>{_esc(d.generated_at)}</div>"
+        f"{sha_line}"
+        "</div></footer>"
+    )
+
+
+def _section_wrap(section_id: str, *, rhythm: str, body: str, meta: str | None = None) -> str:
+    num = SECTION_NUMBERS[section_id]
+    title = _SECTION_TITLES[section_id]
+    return (
+        f'<section id="{section_id}" data-screen-label="{num} {_esc(title)}">'
+        f"{_section_head(section_id, rhythm=rhythm, meta=meta)}"
+        f"{body}"
+        "</section>"
+    )
+
+
+# ============================================================================
+# Table helpers (used by render_models / render_projects / _section_sessions)
+# ============================================================================
+
+
+def _th(content: str, *, align: str = "left", aria_sort: str | None = None) -> str:
+    sort_attr = f' aria-sort="{aria_sort}"' if aria_sort else ""
+    return (
+        f"<th{sort_attr} "
+        f'style="text-align:{align};padding:10px 14px;font-size:11px;'
+        f"font-weight:500;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;"
+        f'border-bottom:1px solid var(--border)">{content}</th>'
+    )
+
+
+def _td(
+    content: str,
+    *,
+    align: str = "left",
+    mono: bool = False,
+    muted: bool = False,
+) -> str:
+    font = "var(--mono)" if mono else "inherit"
+    color = "var(--mute)" if muted else "var(--ink-2)"
+    return (
+        f'<td style="text-align:{align};padding:10px 14px;vertical-align:middle;'
+        f'font-family:{font};color:{color}">{content}</td>'
+    )
+
+
+# ============================================================================
+# Section renderers
+# ============================================================================
+
+
+def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
+    t: Totals = d.totals
+    is_empty = (t.cost_usd is None) or (t.events == 0)
+
+    def _card(
+        *,
+        label: str,
+        value: str,
+        sub: str,
+        delta: float | None,
+        delta_tone: str,
+        spark: Sequence[float],
+        spark_color: str,
+        rail: str,
+    ) -> str:
+        return _stat_card(
+            label=label,
+            value=value,
+            sub=sub,
+            delta=None if is_empty else _fmt_delta(delta),
+            delta_tone=delta_tone,
+            sparkline=spark if not is_empty else None,
+            spark_color=spark_color,
+            rail=rail,
+            dense=dense,
+        )
+
+    empty_sub = "No events for this window" if is_empty else ""
+    cards = "".join(
+        [
+            _card(
+                label="Cost",
+                value="—" if is_empty else fmt_money(t.cost_usd),
+                sub=empty_sub or f"{fmt_int(t.events)} events · {fmt_int(t.turns)} turns",
+                delta=t.delta_cost_pct,
+                delta_tone="bad" if (t.delta_cost_pct or 0) > 0 else "good",
+                spark=t.daily_cost_sparkline,
+                spark_color="var(--accent)",
+                rail="var(--card-rail-cost)",
+            ),
+            _card(
+                label="Cache savings",
+                value="—" if is_empty else fmt_money(t.cache_savings_usd),
+                sub=empty_sub or f"{fmt_pct(t.cache_hit_rate)} hit rate",
+                delta=t.delta_cache_pct,
+                delta_tone="good" if (t.delta_cache_pct or 0) >= 0 else "warn",
+                spark=t.daily_cache_sparkline,
+                spark_color="var(--ok)",
+                rail="var(--card-rail-cache)",
+            ),
+            _card(
+                label="Tokens",
+                value="—" if is_empty else fmt_tokens(t.total_tokens),
+                sub=empty_sub
+                or f"{fmt_tokens(t.cached_input_tokens)} cached · {fmt_tokens(t.output_tokens)} output",
+                delta=t.delta_tokens_pct,
+                delta_tone="default",
+                spark=t.daily_token_sparkline,
+                spark_color="var(--accent)",
+                rail="var(--card-rail-tokens)",
+            ),
+            _card(
+                label="Sessions",
+                value="—" if is_empty else fmt_int(t.sessions),
+                sub=empty_sub or f"{t.tools_per_turn:.2f} tools/turn",
+                delta=t.delta_sessions_pct,
+                delta_tone="default",
+                spark=t.daily_session_sparkline,
+                spark_color="var(--accent-strong)",
+                rail="var(--card-rail-sessions)",
+            ),
+        ]
+    )
+    body = (
+        '<div class="cal-summary-row" '
+        'style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">' + cards + "</div>"
+    )
+    return _section_wrap("overview", rhythm=rhythm, body=body)
+
+
+def _section_cost(d: Dashboard, *, rhythm: str) -> str:
+    daily = d.daily
+    if not daily:
+        return ""
+    total = sum(float(p.cost_usd) for p in daily)
+    avg = total / len(daily) if daily else 0.0
+    legend = _category_legend(
+        [
+            ("var(--explore)", "exploration"),
+            ("var(--execute)", "execution"),
+            ("var(--diagnose)", "diagnostic"),
+            ("var(--mixed)", "mixed"),
+        ]
+    )
+    summary = f"{len(daily)} active days · {fmt_money(total)} total · avg {fmt_money(avg)}/day"
+    body = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);padding:16px">'
+        '<div style="display:flex;justify-content:space-between;align-items:center;'
+        'flex-wrap:wrap;gap:12px;margin-bottom:6px;font-size:12px;color:var(--mute)">'
+        f"<span>{_esc(summary)}</span>{legend}</div>"
+        f"{_bar_chart(daily)}"
+        f"{_shape_strip(daily)}"
+        "</div>"
+    )
+    return _section_wrap("cost", rhythm=rhythm, body=body)
+
+
+def _section_shape(d: Dashboard, *, rhythm: str) -> str:
+    s: SessionShape = d.shape
+    meta = (
+        f"{s.total_sessions} sessions · {s.total_turns} turns" if s and s.total_sessions else None
+    )
+    if not s or not s.top_tools:
+        body = _empty_placeholder(
+            "No tool-use signal yet in this window. Session shape is currently extracted from Claude Code only."
+        )
+        return _section_wrap("shape", rhythm=rhythm, body=body, meta=meta)
+    segments: list[tuple[str, float, str]] = []
+    for c in s.categories:
+        color = _SHAPE_COLORS.get(c.category, "var(--mixed)")
+        segments.append((c.label or c.category, float(c.sessions), color))
+    category_rows: list[str] = []
+    for c in s.categories:
+        color = _SHAPE_COLORS.get(c.category, "var(--mixed)")
+        category_rows.append(
+            '<li style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;'
+            'align-items:baseline;font-size:13px">'
+            f'<span style="width:8px;height:8px;border-radius:2px;background:{color};display:inline-block"></span>'
+            f'<span style="color:var(--ink)">{_esc(c.category)}</span>'
+            f'<span style="color:var(--mute);font-size:11px">{int(round((c.share or 0) * 100))}%</span>'
+            f'<span style="color:var(--ink-2)">{fmt_int(c.sessions)}</span></li>'
+        )
+    coverage_block = ""
+    if s.coverage_events < s.coverage_total_events:
+        coverage_block = (
+            f'<div style="margin-top:4px">Coverage: {fmt_int(s.coverage_events)} of '
+            f"{fmt_int(s.coverage_total_events)} events.</div>"
+        )
+    body = (
+        '<div class="cal-shape-grid" '
+        'style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px">'
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);padding:16px">'
+        '<div style="font-size:12px;color:var(--ink-2);margin-bottom:12px;font-weight:500">Top tools</div>'
+        f"{_ranked_bars(s.top_tools)}"
+        "</div>"
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);padding:16px">'
+        '<div style="font-size:12px;color:var(--ink-2);margin-bottom:12px;font-weight:500">Shape distribution</div>'
+        f"{_stacked_bar(segments, height=16)}"
+        '<ul style="list-style:none;padding:0;margin:14px 0 0;display:grid;gap:8px">'
+        + "".join(category_rows)
+        + "</ul>"
+        '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);'
+        'font-size:11px;color:var(--mute)">'
+        f"{s.tool_use_total} tool calls · {s.tools_per_turn:.2f} tools/turn"
+        f"{coverage_block}"
+        "</div></div></div>"
+    )
+    return _section_wrap("shape", rhythm=rhythm, body=body, meta=meta)
+
+
+def render_models(rows: Sequence[ModelRow], *, total_cost: float | None = None) -> str:
+    """Render the §04 models table. Exposed for unit tests."""
+    if not rows:
+        return ""
+    sorted_rows = sorted(rows, key=lambda r: (-r.cost_usd, -r.tokens))
+    mx = max((r.cost_usd for r in sorted_rows), default=1.0) or 1.0
+    total = float(total_cost) if total_cost else sum(r.cost_usd for r in sorted_rows) or 1.0
+    head = (
+        '<thead><tr style="background:var(--panel-2)">'
+        f"{_th('Vendor')}{_th('Model · tier')}"
+        f"{_th('Cost ↓', align='right', aria_sort='descending')}"
+        f"{_th('Share', align='right')}{_th('Events', align='right')}"
+        f"{_th('Tokens', align='right')}{_th('Cache', align='right')}"
+        f"{_th('14d', align='right')}"
+        "</tr></thead>"
+    )
+    body_rows: list[str] = []
+    for r in sorted_rows:
+        share = (r.cost_usd / total) if total else 0.0
+        share_pct = int(round(share * 100))
+        share_cell = (
+            '<div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">'
+            f'<span style="color:var(--mute);font-size:12px">{share_pct}%</span>'
+            f'<span style="width:64px;display:inline-block">{_meter(r.cost_usd, mx)}</span></div>'
+        )
+        model_cell = (
+            f'<span style="font-family:var(--mono);color:var(--ink)">{_esc(r.model)}</span>'
+            f'<span style="color:var(--mute);margin-left:8px">· {_esc(r.tier)}</span>'
+        )
+        body_rows.append(
+            '<tr style="border-top:1px solid var(--border)">'
+            + _td(_pill(_esc(r.vendor), mono=True))
+            + _td(model_cell)
+            + _td(fmt_money(r.cost_usd), align="right", mono=True)
+            + _td(share_cell, align="right")
+            + _td(fmt_int(r.events), align="right", mono=True)
+            + _td(fmt_tokens(r.tokens), align="right", mono=True)
+            + _td(fmt_pct(r.cache_hit_rate, 0), align="right", mono=True)
+            + _td(_sparkline(r.daily_cost_sparkline, width=80, height=18), align="right")
+            + "</tr>"
+        )
+    return (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">'
+        '<table class="cal-table data data-sortable" '
+        'style="width:100%;border-collapse:collapse;font-size:13px">'
+        + head
+        + "<tbody>"
+        + "".join(body_rows)
+        + "</tbody></table></div>"
+    )
+
+
+def _section_models(d: Dashboard, *, rhythm: str) -> str:
+    if not d.by_model:
+        return ""
+    body = render_models(d.by_model, total_cost=d.totals.cost_usd)
+    meta = f"{len(d.by_model)} models"
+    return _section_wrap("models", rhythm=rhythm, body=body, meta=meta)
+
+
+def render_projects(
+    rows: Sequence[ProjectRow],
+    *,
+    show_paths: bool = False,
+    total_cost: float | None = None,
+    pm: _PrivacyMap | None = None,
+) -> str:
+    """Render the §05 projects table. Exposed for unit tests.
+
+    The ``pm`` parameter applies the privacy map (project names + paths).
+    When omitted, defaults to an off-mode map so legacy callers (tests,
+    external scripts) keep the unredacted behaviour they had before.
+    """
+    if pm is None:
+        # Build an empty map in "off" mode — every value passes through unchanged.
+        pm = _PrivacyMap(mode="off", projects={}, sessions={})
+    if not rows:
+        return ""
+    sorted_rows = sorted(rows, key=lambda r: (-r.cost_usd, -r.events))
+    mx = max((r.cost_usd for r in sorted_rows), default=1.0) or 1.0
+    total = float(total_cost) if total_cost else sum(r.cost_usd for r in sorted_rows) or 1.0
+    head = (
+        '<thead><tr style="background:var(--panel-2)">'
+        f"{_th('Project')}"
+        f"{_th('selected-window cost ↓', align='right', aria_sort='descending')}"
+        f"{_th('Share of window', align='right')}"
+        f"{_th('Events', align='right')}{_th('Sessions', align='right')}"
+        f"{_th('Days', align='right')}{_th('Trend')}{_th('Top tools')}"
+        "</tr></thead>"
+    )
+    body_rows: list[str] = []
+    for r in sorted_rows:
+        share = (r.cost_usd / total) if total else 0.0
+        share_pct = int(round(share * 100))
+        path_block = (
+            '<span style="color:var(--mute);font-family:var(--mono);font-size:11px">'
+            f"{_private_path(r.path, pm)}</span>"
+            if show_paths and r.path
+            else ""
+        )
+        if r.trend_tone == "warn":
+            tone_color = "var(--warn)"
+        elif r.trend_tone == "good":
+            tone_color = "var(--ok)"
+        else:
+            tone_color = "var(--mute)"
+        top_tool_pills = "".join(
+            f'<span title="{_esc(t.name)} · {fmt_int(t.count)}" '
+            'style="display:inline-flex;align-items:center;gap:4px;padding:1px 6px;'
+            f"border-radius:2px;font-size:11px;color:{_SHAPE_COLORS.get(t.category, 'var(--mixed)')};"
+            'background:var(--panel-2);border:1px solid var(--border)">'
+            f'{_esc(t.name)}<span style="color:var(--mute)">{fmt_int(t.count)}</span></span>'
+            for t in (r.top_tools or [])
+        )
+        body_rows.append(
+            '<tr style="border-top:1px solid var(--border)">'
+            + _td(
+                '<div style="display:flex;flex-direction:column;gap:2px">'
+                f'<span style="color:var(--ink);font-weight:500">{_private_project(r.name, pm)}</span>'
+                f"{path_block}</div>"
+            )
+            + _td(fmt_money(r.cost_usd), align="right", mono=True)
+            + _td(
+                '<div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">'
+                f'<span style="color:var(--mute);font-size:12px">{share_pct}%</span>'
+                f'<span style="width:56px;display:inline-block">{_meter(r.cost_usd, mx)}</span></div>',
+                align="right",
+            )
+            + _td(fmt_int(r.events), align="right", mono=True)
+            + _td(fmt_int(r.sessions), align="right", mono=True)
+            + _td(fmt_int(r.active_days), align="right", mono=True)
+            + _td(f'<span style="color:{tone_color};font-size:12px">{_esc(r.trend_label)}</span>')
+            + _td(
+                f'<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">{top_tool_pills}</div>'
+            )
+            + "</tr>"
+        )
+    other_share = max(0.0, 1.0 - sum(r.cost_usd for r in sorted_rows) / total) if total else 0.0
+    other_row = ""
+    if other_share > 0.01:
+        other_row = (
+            '<tr style="border-top:1px solid var(--border);color:var(--mute);font-style:italic">'
+            + _td("Other selected-window usage")
+            + _td(fmt_money(other_share * total), align="right", mono=True)
+            + _td(f"{int(round(other_share * 100))}%", align="right")
+            + _td("—", align="right")
+            + _td("—", align="right")
+            + _td("—", align="right")
+            + _td("")
+            + _td("")
+            + "</tr>"
+        )
+    return (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">'
+        '<table class="cal-table data data-sortable" '
+        'style="width:100%;border-collapse:collapse;font-size:13px">'
+        + head
+        + "<tbody>"
+        + "".join(body_rows)
+        + other_row
+        + "</tbody></table></div>"
+    )
+
+
+def _section_projects(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    if not d.by_project:
+        return ""
+    body = render_projects(
+        d.by_project, show_paths=d.show_paths, total_cost=d.totals.cost_usd, pm=pm
+    )
+    meta = f"{len(d.by_project)} projects · sorted by cost"
+    return _section_wrap("projects", rhythm=rhythm, body=body, meta=meta)
+
+
+def _insight_row(it: Insight, *, dense: bool) -> str:
+    sev = it.severity
+    if sev == "critical":
+        accent = "var(--bad)"
+        tone = "var(--bad)"
+    elif sev == "warn":
+        accent = "var(--warn)"
+        tone = "var(--warn)"
+    else:
+        accent = "var(--accent)"
+        tone = "var(--mute)"
+    pad = "10px 14px" if dense else "12px 16px"
+    impact_html = (
+        f'<span style="font-size:11px;color:var(--ink-2);background:var(--panel-2);'
+        f"border:1px solid var(--border);border-radius:3px;padding:3px 8px;"
+        f'white-space:nowrap">{_esc(it.impact)}</span>'
+        if it.impact
+        else ""
+    )
+    return (
+        f'<div class="cal-insight-row" style="display:grid;grid-template-columns:auto 1fr auto;'
+        f"gap:14px;align-items:baseline;padding:{pad};border-left:3px solid {accent};"
+        f'background:var(--panel);border-top:1px solid var(--border)">'
+        f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:{tone};'
+        f'text-transform:uppercase;font-weight:600;min-width:56px">{_esc(sev)}</span>'
+        '<div style="min-width:0">'
+        f'<div style="color:var(--ink);font-size:13px;font-weight:500">{_esc(it.title)}</div>'
+        f'<div style="color:var(--mute);font-size:12px;margin-top:3px;line-height:1.5">{_esc(it.detail)}</div>'
+        "</div>"
+        f"{impact_html}</div>"
+    )
+
+
+def _section_insights(d: Dashboard, *, dense: bool, rhythm: str) -> str:
+    insights = list(d.insights)
+    if not insights:
+        body = _empty_placeholder("No insights for this window.")
+        return _section_wrap("insights", rhythm=rhythm, body=body)
+    order = {"critical": 0, "warn": 1, "info": 2}
+    insights.sort(key=lambda it: order.get(it.severity, 9))
+    body = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">'
+        + "".join(_insight_row(it, dense=dense) for it in insights)
+        + "</div>"
+    )
+    return _section_wrap("insights", rhythm=rhythm, body=body)
+
+
+def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str) -> str:
+    if not d.anomalies:
+        return ""
+    pad = "10px 14px" if dense else "12px 16px"
+    rows_html: list[str] = []
+    for i, a in enumerate(d.anomalies):
+        tone_color = "var(--bad)" if a.tone == "critical" else "var(--warn)"
+        evidence_tone = "good" if a.evidence_status == "exact" else "warn"
+        top = "none" if i == 0 else "1px solid var(--border)"
+        rows_html.append(
+            f'<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;'
+            f"align-items:baseline;padding:{pad};border-left:3px solid {tone_color};"
+            f'border-top:{top}">'
+            f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;'
+            f'color:{tone_color};text-transform:uppercase;font-weight:600;min-width:56px">'
+            f"{a.z_score:.1f}σ</span>"
+            '<div style="min-width:0">'
+            f'<div style="color:var(--ink);font-size:13px;font-weight:500">'
+            f'{_esc(a.kind)} · <span style="font-family:var(--mono);color:var(--ink-2)">{_esc(a.label)}</span></div>'
+            f'<div style="color:var(--mute);font-size:12px;margin-top:3px">'
+            f"observed {fmt_money(a.observed_usd)} vs baseline {fmt_money(a.baseline_usd)} · "
+            f"scale ${a.baseline_scale_usd:.1f} · {_esc(a.timestamp)}</div>"
+            "</div>"
+            f"{_pill(_esc(a.evidence_status), tone=evidence_tone)}"
+            f'<span style="font-size:12px;color:{tone_color};font-family:var(--mono);'
+            f'font-weight:500;white-space:nowrap">+{_esc(fmt_money(a.impact_usd))}</span>'
+            "</div>"
+        )
+    body = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">' + "".join(rows_html) + "</div>"
+    )
+    meta = f"{len(d.anomalies)} outliers · z ≥ 4σ"
+    return _section_wrap("anomalies", rhythm=rhythm, body=body, meta=meta)
+
+
+def _fmt_money_locale(v: float) -> str:
+    """Match the JSX prototype's ``$<n>.toLocaleString()`` shape.
+
+    JavaScript's ``toLocaleString()`` drops trailing decimals on whole numbers
+    (``37`` → ``"37"``, ``1640`` → ``"1,640"``) and only keeps decimals when
+    the value carries them. The shared :func:`fmt_money` always emits two
+    decimals below 1000 — that's right for chart axes but wrong in places
+    that copy this convention (currently the budgets row trailing label).
+    """
+    av = float(v)
+    if av == int(av):
+        return "$" + format(int(av), ",")
+    if av >= 1000:
+        return "$" + format(int(round(av)), ",")
+    return "$" + format(av, ".2f")
+
+
+def _section_budgets(d: Dashboard, *, rhythm: str) -> str:
+    if not d.budgets:
+        return ""
+    rows_html: list[str] = []
+    for b in d.budgets:
+        pct = (b.spent / b.cap) * 100 if b.cap else 0.0
+        if b.spent >= b.cap:
+            tone_color = "var(--bad)"
+        elif b.spent >= b.warn:
+            tone_color = "var(--warn)"
+        else:
+            tone_color = "var(--ok)"
+        rows_html.append(
+            '<li style="display:grid;grid-template-columns:100px 1fr auto auto;gap:14px;'
+            'align-items:center;font-size:13px">'
+            f'<span style="color:var(--ink);font-weight:500">{_esc(b.period)}</span>'
+            f"{_budget_bar(b.spent, b.cap, b.warn)}"
+            f'<span style="font-family:var(--mono);color:{tone_color};font-size:12px">{pct:.0f}%</span>'
+            f'<span style="font-family:var(--mono);color:var(--ink-2);font-size:12px;'
+            f'min-width:140px;text-align:right">'
+            f"{_fmt_money_locale(b.spent)} / {_fmt_money_locale(b.cap)}</span>"
+            "</li>"
+        )
+    body = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);padding:16px">'
+        '<ul style="list-style:none;padding:0;margin:0;display:grid;gap:14px">'
+        + "".join(rows_html)
+        + "</ul></div>"
+    )
+    return _section_wrap("budgets", rhythm=rhythm, body=body)
+
+
+def _forecast_card(label: str, value: str, sub: str, band: str | None) -> str:
+    band_html = (
+        f'<div style="font-size:12px;color:var(--ink-2);margin-top:6px">{_esc(band)}</div>'
+        if band
+        else ""
+    )
+    return (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);padding:16px">'
+        f'<div style="font-size:11px;letter-spacing:.10em;color:var(--mute);'
+        f'text-transform:uppercase;margin-bottom:6px">{_esc(label)}</div>'
+        f'<div style="font-size:var(--num-lg);font-weight:600;color:var(--ink);margin-bottom:4px">{_esc(value)}</div>'
+        f'<div style="font-size:12px;color:var(--mute)">{_esc(sub)}</div>'
+        f"{band_html}</div>"
+    )
+
+
+def _section_forecast(d: Dashboard, *, rhythm: str) -> str:
+    f: Forecast | None = d.forecast
+    if f is None:
+        return ""
+    intro = (
+        f'<div style="font-size:12px;color:var(--mute);margin-bottom:10px">'
+        f"Based on {f.days_analyzed} days · projected through next {f.days_remaining} days.</div>"
+    )
+    band1 = f"1σ band: {fmt_money(f.linear_low)} – {fmt_money(f.linear_high)}"
+    band2 = f"Δ vs linear: {fmt_money(f.ewma_total - f.linear_total)}"
+    cards = _forecast_card(
+        "Linear projection",
+        fmt_money(f.linear_total),
+        f"daily mean ${f.daily_mean:.0f} ± ${f.daily_stdev:.0f}",
+        band1,
+    ) + _forecast_card(
+        "EWMA (recency-weighted)",
+        fmt_money(f.ewma_total),
+        "Weights recent days higher",
+        band2,
+    )
+    body = (
+        intro
+        + '<div class="cal-forecast-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+        + cards
+        + "</div>"
+    )
+    return _section_wrap("forecast", rhythm=rhythm, body=body)
+
+
+def _section_advisor(d: Dashboard, *, rhythm: str) -> str:
+    rows: list[AdvisorRecommendation] = list(d.advisor_recommendations)
+    if not rows:
+        return ""
+    total = sum(r.savings_usd for r in rows)
+    header = (
+        '<div style="padding:10px 16px;background:var(--panel-2);'
+        "border-bottom:1px solid var(--border);display:flex;"
+        'justify-content:space-between;font-size:12px;color:var(--mute)">'
+        f"<span>{len(rows)} recommendations · estimated total savings</span>"
+        f'<span style="color:var(--ok);font-family:var(--mono);font-weight:600">{fmt_money(total)}</span>'
+        "</div>"
+    )
+    body_rows: list[str] = []
+    for i, r in enumerate(rows):
+        top = "none" if i == 0 else "1px solid var(--border)"
+        conf_tone = "var(--ok)" if r.confidence >= 0.75 else "var(--warn)"
+        body_rows.append(
+            '<div style="display:grid;grid-template-columns:1fr auto auto;gap:14px;'
+            f'padding:12px 16px;border-top:{top};align-items:center">'
+            '<div style="min-width:0">'
+            f'<div style="font-size:13px;color:var(--ink);font-weight:500">{_esc(r.title)}</div>'
+            f'<div style="font-size:12px;color:var(--mute);margin-top:3px">{_esc(r.detail)}</div>'
+            f'<code style="display:inline-block;margin-top:6px;font-family:var(--mono);'
+            f'font-size:11px;color:var(--accent);background:transparent;padding:0">$ {_esc(r.action)}</code>'
+            "</div>"
+            '<div style="text-align:right">'
+            '<div style="font-size:11px;color:var(--mute);margin-bottom:2px">confidence</div>'
+            f'<div style="font-family:var(--mono);color:{conf_tone};font-size:12px">{int(round(r.confidence * 100))}%</div>'
+            "</div>"
+            '<div style="text-align:right">'
+            '<div style="font-size:11px;color:var(--mute);margin-bottom:2px">est. savings</div>'
+            f'<div style="font-family:var(--mono);font-size:15px;color:var(--ok);font-weight:600">{fmt_money(r.savings_usd)}</div>'
+            "</div></div>"
+        )
+    body = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">' + header + "".join(body_rows) + "</div>"
+    )
+    return _section_wrap("advisor", rhythm=rhythm, body=body)
+
+
+def _section_rate_limits(d: Dashboard, *, rhythm: str) -> str:
+    r: RateLimitPressure | None = d.rate_limit_pressure
+    if r is None:
+        return ""
+
+    def _meter_block(label: str, pct: float | None, note: str) -> str:
+        if pct is None:
+            return (
+                "<div>"
+                '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">'
+                f'<span style="color:var(--ink-2)">{_esc(label)}</span>'
+                '<span style="color:var(--mute)">—</span></div>'
+                f"{_meter(0, 1)}"
+                f'<div style="font-size:11px;color:var(--mute);margin-top:6px">{_esc(note)}</div></div>'
+            )
+        if pct > 0.8:
+            color = "var(--bad)"
+        elif pct > 0.6:
+            color = "var(--warn)"
+        else:
+            color = "var(--ok)"
+        return (
+            "<div>"
+            '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">'
+            f'<span style="color:var(--ink-2)">{_esc(label)}</span>'
+            f'<span style="font-family:var(--mono);color:{color}">{pct * 100:.0f}%</span></div>'
+            f"{_meter(pct, 1, color=color, height=8)}"
+            f'<div style="font-size:11px;color:var(--mute);margin-top:6px">{_esc(note)}</div>'
+            "</div>"
+        )
+
+    peak_note = f"{r.sample_count} samples"
+    latest_note = f"{r.latest_limit_name} · {r.latest_plan_type}"
+    secondary_pct = (r.peak_secondary_pct or 0) * 100
+    body = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);padding:16px">'
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'
+        + _meter_block("Peak primary", r.peak_primary_pct, peak_note)
+        + _meter_block("Latest primary", r.latest_primary_pct, latest_note)
+        + "</div>"
+        '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);'
+        'font-size:11px;color:var(--mute);font-family:var(--mono)">'
+        f"Resets at {_esc(r.latest_resets_at)} · peak secondary {secondary_pct:.0f}%"
+        "</div></div>"
+    )
+    return _section_wrap("rate-limits", rhythm=rhythm, body=body)
+
+
+def _section_heatmap(d: Dashboard, *, rhythm: str) -> str:
+    if d.recap is None or not d.recap.hours:
+        return ""
+    total_calls = sum(c.value for c in d.recap.hours)
+    # Peak-hour caption: surface the busiest hour-of-day across all weekdays.
+    # The prototype hard-coded "peak hour: 15:00 · 16:00"; we derive the same
+    # shape from data so the caption is accurate for real payloads too.
+    by_hour: dict[int, int] = {}
+    for c in d.recap.hours:
+        by_hour[c.hour] = by_hour.get(c.hour, 0) + c.value
+    if by_hour:
+        peak1, peak2 = sorted(by_hour, key=lambda h: -by_hour[h])[:2]
+        if peak2 is None:
+            peak_caption = f"peak hour: {peak1:02d}:00"
+        else:
+            lo, hi = sorted((peak1, peak2))
+            peak_caption = f"peak hour: {lo:02d}:00 · {hi:02d}:00"
+    else:
+        peak_caption = ""
+    body = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);padding:16px">'
+        '<div style="display:flex;justify-content:space-between;margin-bottom:12px;'
+        'font-size:12px;color:var(--mute)">'
+        f"<span>AI tool calls by hour of day · {fmt_int(total_calls)} total</span>"
+        f'<span style="font-family:var(--mono)">{peak_caption}</span></div>'
+        f"{_heatmap_7x24(d.recap)}"
+        "</div>"
+    )
+    return _section_wrap("heatmap", rhythm=rhythm, body=body)
+
+
+def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    rows: list[SessionRow] = sorted(d.top_sessions, key=lambda r: -r.cost_usd)
+    if not rows:
+        return ""
+    mx = max((r.cost_usd for r in rows), default=1.0) or 1.0
+    head = (
+        '<thead><tr style="background:var(--panel-2)">'
+        f"{_th('Session')}{_th('Started')}{_th('Project')}"
+        f"{_th('Cost ↓', align='right', aria_sort='descending')}"
+        f"{_th('Tokens', align='right')}{_th('Events', align='right')}"
+        f"{_th('Tools', align='right')}{_th('Models')}{_th('Reason')}"
+        "</tr></thead>"
+    )
+    body_rows: list[str] = []
+    for s in rows:
+        models_html = "".join(_pill(_esc(m), mono=True) for m in (s.models or []))
+        cost_cell = (
+            '<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">'
+            f'<span style="width:44px">{_meter(s.cost_usd, mx)}</span>'
+            f"<span>{fmt_money(s.cost_usd)}</span></div>"
+        )
+        body_rows.append(
+            '<tr style="border-top:1px solid var(--border)">'
+            + _td(
+                f'<span style="font-family:var(--mono);color:var(--ink)">{_private_session(s.label, pm)}</span>'
+            )
+            + _td(_esc(s.started_at), mono=True, muted=True)
+            + _td(f'<span style="color:var(--ink-2)">{_private_project(s.project, pm)}</span>')
+            + _td(cost_cell, align="right", mono=True)
+            + _td(fmt_tokens(s.total_tokens), align="right", mono=True)
+            + _td(fmt_int(s.events), align="right", mono=True)
+            + _td(fmt_int(s.tool_calls), align="right", mono=True)
+            + _td(f'<div style="display:flex;gap:4px;flex-wrap:wrap">{models_html}</div>')
+            + _td(_esc(s.reason), muted=True)
+            + "</tr>"
+        )
+    body = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">'
+        '<table class="cal-table" style="width:100%;border-collapse:collapse;font-size:13px">'
+        + head
+        + "<tbody>"
+        + "".join(body_rows)
+        + "</tbody></table></div>"
+    )
+    return _section_wrap("sessions", rhythm=rhythm, body=body)
+
+
+def _section_evidence(d: Dashboard, *, dense: bool, rhythm: str) -> str:
+    if not d.evidence:
+        return ""
+    pad = "8px 0" if dense else "10px 0"
+    dots = {"exact": "●", "estimated": "◐", "partial": "◐", "unsupported": "○"}
+    colors = {
+        "exact": "var(--ok)",
+        "estimated": "var(--warn)",
+        "partial": "var(--warn)",
+        "unsupported": "var(--bad)",
+    }
+    rows: list[str] = []
+    for e in d.evidence:
+        color = colors.get(e.status, "var(--mute)")
+        dot = dots.get(e.status, "·")
+        rows.append(
+            f'<div style="display:grid;grid-template-columns:180px auto 1fr;gap:16px;'
+            f'align-items:baseline;padding:{pad};border-bottom:1px solid var(--border)">'
+            f'<span style="color:var(--ink);font-size:13px">{_esc(e.label)}</span>'
+            f'<span style="display:inline-flex;gap:6px;align-items:baseline;color:{color};'
+            f'font-size:12px;font-weight:500;font-family:var(--mono)">'
+            f'<span aria-hidden="true">{dot}</span><span>{_esc(e.status)}</span></span>'
+            f'<span style="color:var(--mute);font-size:12px;font-style:italic">{_esc(e.note)}</span>'
+            "</div>"
+        )
+    body = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);padding:8px 16px">' + "".join(rows) + "</div>"
+    )
+    return _section_wrap("evidence", rhythm=rhythm, body=body)
+
+
+# ============================================================================
+# Variant shells
+# ============================================================================
+
+_SECTION_ORDER: list[str] = [
+    "overview",
+    "cost",
+    "shape",
+    "models",
+    "projects",
+    "insights",
+    "anomalies",
+    "budgets",
+    "forecast",
+    "advisor",
+    "rate-limits",
+    "heatmap",
+    "sessions",
+    "evidence",
+]
+
+
+def _render_section(
+    section_id: str, d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap
+) -> str:
+    if section_id == "overview":
+        return _section_overview(d, dense=dense, rhythm=rhythm)
+    if section_id == "cost":
+        return _section_cost(d, rhythm=rhythm)
+    if section_id == "shape":
+        return _section_shape(d, rhythm=rhythm)
+    if section_id == "models":
+        return _section_models(d, rhythm=rhythm)
+    if section_id == "projects":
+        return _section_projects(d, rhythm=rhythm, pm=pm)
+    if section_id == "insights":
+        return _section_insights(d, dense=dense, rhythm=rhythm)
+    if section_id == "anomalies":
+        return _section_anomalies(d, dense=dense, rhythm=rhythm)
+    if section_id == "budgets":
+        return _section_budgets(d, rhythm=rhythm)
+    if section_id == "forecast":
+        return _section_forecast(d, rhythm=rhythm)
+    if section_id == "advisor":
+        return _section_advisor(d, rhythm=rhythm)
+    if section_id == "rate-limits":
+        return _section_rate_limits(d, rhythm=rhythm)
+    if section_id == "heatmap":
+        return _section_heatmap(d, rhythm=rhythm)
+    if section_id == "sessions":
+        return _section_sessions(d, rhythm=rhythm, pm=pm)
+    if section_id == "evidence":
+        return _section_evidence(d, dense=dense, rhythm=rhythm)
+    return ""
+
+
+def _build_id(d: Dashboard) -> str:
+    sha = getattr(d.caliper, "build_sha", "") or "00000000"
+    sha4 = (sha or "0000")[:4]
+    date_compact = (d.generated_at or "")[:10].replace("-", "") or "00000000"
+    return f"CALIPER-{date_compact}-{sha4}"
+
+
+def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
+    rhythm = "receipt"
+    ev = d.quality_score
+    evidence_badge = _evidence_badge(ev) if ev and ev.score > 0 else ""
+    gen_line = (d.generated_at or "").replace("T", " ")[:16]
+    vendor_line = f"{len(d.window.vendors_active)} of {d.window.vendor_count_total} vendors"
+    masthead = (
+        '<header style="display:grid;grid-template-columns:1fr auto;gap:16px;'
+        'align-items:start;padding-bottom:18px;border-bottom:1px solid var(--border)">'
+        "<div>"
+        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">'
+        f"{_caliper_mark(26)}"
+        '<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.015em;color:var(--ink)">'
+        f'Caliper <span style="color:var(--mute);font-size:12px;font-family:var(--mono);font-weight:400;margin-left:6px">v{_esc(d.caliper.version)}</span>'
+        "</h1></div>"
+        '<div style="color:var(--mute);font-size:12px">'
+        "Cost layer for AI-assisted development · offline, auditable, no login</div></div>"
+        '<div style="text-align:right;display:flex;flex-direction:column;gap:6px;align-items:flex-end">'
+        f'<div style="display:flex;gap:8px;align-items:center">{evidence_badge}{_window_badge(d.window)}</div>'
+        '<div style="font-size:11px;color:var(--mute);font-family:var(--mono);display:flex;gap:14px;align-items:center">'
+        f"{_status_dot('good', 'offline')}<span>Generated {_esc(gen_line)}</span><span>{_esc(vendor_line)}</span></div>"
+        f'<div style="font-size:11px;color:var(--ghost);font-family:var(--mono)">{_build_id(d)}</div>'
+        "</div></header>"
+    )
+    banner_html = (
+        f'<div style="margin-top:18px">{_banner_html(d.banner)}</div>'
+        if d.banner is not None
+        else ""
+    )
+    verdict_html = (
+        f'<div style="margin-top:18px">{_verdict_strip(d, rhythm)}</div>'
+        if d.executive_brief and d.executive_brief.findings
+        else ""
+    )
+    sections = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm)
+        for sid in _SECTION_ORDER
+        if _should_render(sid, d)
+    )
+    return (
+        '<div style="max-width:1180px;margin:0 auto;padding:32px 28px 64px;'
+        'font-family:var(--font);color:var(--ink)">'
+        f"{masthead}"
+        f"{banner_html}"
+        f"{verdict_html}"
+        f'<div style="margin-top:24px;display:grid;gap:28px">{sections}</div>'
+        f"{_caliper_footer(d)}"
+        "</div>"
+    )
+
+
+def _terminal_masthead(d: Dashboard) -> str:
+    ev = d.quality_score
+    badge = _evidence_badge(ev) if ev and ev.score > 0 else ""
+    gen_short = (d.generated_at or "").replace("T", " ")[:16]
+    return (
+        '<div style="border-bottom:1px solid var(--border-strong);background:var(--panel);'
+        "padding:12px 28px;display:grid;grid-template-columns:auto 1fr auto;gap:24px;"
+        'align-items:center;font-family:var(--mono)">'
+        '<div style="display:flex;align-items:center;gap:12px">'
+        f"{_caliper_mark(20)}"
+        '<span style="font-size:16px;font-weight:700;letter-spacing:.05em;color:var(--ink)">CALIPER</span>'
+        f'<span style="font-size:11px;color:var(--ghost);letter-spacing:.10em">v{_esc(d.caliper.version)} · schema {_esc(d.caliper.schema_version)}</span>'
+        "</div>"
+        '<div style="display:flex;align-items:center;gap:18px;font-size:11px;'
+        'color:var(--mute);justify-content:center">'
+        '<span style="display:flex;align-items:center;gap:6px">'
+        '<span style="width:6px;height:6px;border-radius:50%;background:var(--ok)"></span>'
+        '<span style="color:var(--ok)">OFFLINE</span></span>'
+        '<span style="color:var(--ghost)">·</span>'
+        f"<span>{len(d.window.vendors_active)} of {d.window.vendor_count_total} VENDORS</span>"
+        '<span style="color:var(--ghost)">·</span>'
+        f"<span>GENERATED {_esc(gen_short)}</span>"
+        '<span style="color:var(--ghost)">·</span>'
+        f"<span>{_esc(d.window.timezone)}</span></div>"
+        f'<div style="text-align:right;display:flex;gap:8px;align-items:center">{badge}{_window_badge(d.window)}</div>'
+        "</div>"
+    )
+
+
+def _terminal_ticker(d: Dashboard) -> str:
+    t = d.totals
+    score = d.quality_score.score if d.quality_score else 0
+    items: list[tuple[str, str, str, str | None, str | None]] = [
+        (
+            "COST",
+            fmt_money(t.cost_usd),
+            "default",
+            _fmt_delta(t.delta_cost_pct),
+            "bad" if (t.delta_cost_pct or 0) > 0 else "good",
         ),
-        decision_queue=[redact_dataclass(row) for row in d.decision_queue],
-        comparisons=[redact_dataclass(row) for row in d.comparisons],
-        show_paths=False,
+        ("CACHE HIT", fmt_pct(t.cache_hit_rate, 1), "good", None, None),
+        ("TOKENS", fmt_tokens(t.total_tokens), "default", None, None),
+        ("SESSIONS", fmt_int(t.sessions), "default", None, None),
+        ("EVENTS", fmt_int(t.events), "default", None, None),
+        (
+            "ANOMALIES",
+            fmt_int(len(d.anomalies)),
+            "warn" if d.anomalies else "good",
+            None,
+            None,
+        ),
+        (
+            "EVIDENCE",
+            f"{score}/100",
+            "good" if score >= 80 else "warn",
+            None,
+            None,
+        ),
+    ]
+    chips: list[str] = []
+    for label, value, tone, delta, dtone in items:
+        c = _tone_color(tone, "var(--ink)")
+        dc = _tone_color(dtone)
+        delta_html = (
+            f'<span style="color:{dc};font-size:11px">{_esc(delta)}</span>' if delta else ""
+        )
+        chips.append(
+            '<span style="display:inline-flex;align-items:baseline;gap:8px;font-size:12px">'
+            f'<span style="color:var(--mute);letter-spacing:.10em">{label}</span>'
+            f'<span style="color:{c};font-weight:600">{_esc(value)}</span>'
+            f"{delta_html}</span>"
+        )
+    return (
+        '<div style="border-bottom:1px solid var(--border);background:var(--bg-2);'
+        "padding:10px 28px;display:flex;gap:28px;font-family:var(--mono);"
+        'overflow-x:auto;white-space:nowrap">' + "".join(chips) + "</div>"
+    )
+
+
+def _terminal_index(d: Dashboard) -> str:
+    items: list[str] = []
+    for sid in _SECTION_ORDER:
+        if not _should_render(sid, d):
+            continue
+        num = SECTION_NUMBERS[sid]
+        title = _SECTION_TITLES[sid]
+        items.append(
+            "<li>"
+            f'<a href="#{sid}" class="cal-rail-link" style="display:grid;'
+            "grid-template-columns:26px 1fr;gap:6px;align-items:baseline;"
+            "color:var(--ink-2);text-decoration:none;padding:5px 8px;"
+            "border-radius:3px;font-size:12px;font-family:var(--mono);"
+            "border-left:2px solid transparent;padding-left:8px;margin-left:-2px;"
+            'transition:color 80ms, background-color 80ms">'
+            f'<span style="color:var(--ghost);font-size:10px">§{num}</span>'
+            f"<span>{_esc(title)}</span></a></li>"
+        )
+    sha = getattr(d.caliper, "build_sha", "") or ""
+    sha_line = f"<div>sha {_esc(sha)}</div>" if sha else ""
+    return (
+        '<aside style="border-right:1px solid var(--border);'
+        "padding:24px 8px 24px 20px;position:sticky;top:0;align-self:start;"
+        'max-height:100vh;overflow-y:auto">'
+        '<div style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
+        'color:var(--mute);text-transform:uppercase;margin-bottom:14px">Index</div>'
+        '<ul style="list-style:none;padding:0;margin:0;display:grid;gap:2px">'
+        + "".join(items)
+        + "</ul>"
+        '<div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);'
+        'font-family:var(--mono);font-size:10px;color:var(--ghost);line-height:1.7">'
+        f"<div>v{_esc(d.caliper.version)}</div>"
+        f"<div>schema {_esc(d.caliper.schema_version)}</div>"
+        f"{sha_line}"
+        "</div></aside>"
+    )
+
+
+def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
+    rhythm = "terminal"
+    is_empty = d.totals.events == 0
+    ticker = "" if is_empty else _terminal_ticker(d)
+    banner_html = (
+        f'<div style="margin-bottom:18px">{_banner_html(d.banner)}</div>'
+        if d.banner is not None
+        else ""
+    )
+    verdict_html = (
+        f'<div style="margin-bottom:22px">{_verdict_strip(d, rhythm)}</div>'
+        if d.executive_brief and d.executive_brief.findings
+        else ""
+    )
+    sections = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm)
+        for sid in _SECTION_ORDER
+        if _should_render(sid, d)
+    )
+    return (
+        '<div style="background:var(--bg);color:var(--ink);font-family:var(--font)">'
+        f"{_terminal_masthead(d)}"
+        f"{ticker}"
+        '<div style="display:grid;grid-template-columns:190px 1fr;gap:0;max-width:1320px;margin:0 auto">'
+        f"{_terminal_index(d)}"
+        '<main style="padding:24px 28px 64px;min-width:0">'
+        f"{banner_html}"
+        f"{verdict_html}"
+        f'<div style="display:grid;gap:28px">{sections}</div>'
+        f"{_caliper_footer(d)}"
+        "</main></div></div>"
+    )
+
+
+# ============================================================================
+# Interactive playground — toggle panel + inline controller
+# ============================================================================
+
+# The script is purposely tiny: it only reads/writes body data-attrs and
+# triggers a Blob download. No fetch, no XHR, no dynamic imports — the CI
+# privacy gate (see ``tests/test_dashboard_html.py``) enforces this.
+_INTERACTIVE_SCRIPT = """
+(function () {
+  var body = document.body;
+  var LS_KEY = 'caliper-dashboard:v2';
+  function load() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); }
+    catch (e) { return {}; }
+  }
+  function persist(state) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+    catch (e) { /* private mode / disabled storage — ignore */ }
+  }
+  function syncGroup(name, value) {
+    var group = document.querySelector('[data-toggle="' + name + '"]');
+    if (!group) return;
+    var btns = group.querySelectorAll('.cal-tweaks-btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle('is-active', btns[i].dataset.value === value);
+      btns[i].setAttribute('aria-checked', btns[i].dataset.value === value ? 'true' : 'false');
+    }
+  }
+  function setRhythm(r) {
+    if (r !== 'receipt' && r !== 'terminal') return;
+    body.dataset.rhythm = r;
+    syncGroup('rhythm', r);
+  }
+  var MODE_TABLE = {
+    'dark':       { theme: 'dark',  privacy: 'off',    label: 'Dark' },
+    'light':      { theme: 'light', privacy: 'off',    label: 'Light' },
+    'safe-share': { theme: 'print', privacy: 'always', label: 'Safe Share' }
+  };
+  function setMode(mode) {
+    var entry = MODE_TABLE[mode];
+    if (!entry) return;
+    body.classList.remove('theme-dark', 'theme-light', 'theme-print');
+    body.classList.add('theme-' + entry.theme);
+    body.dataset.theme = entry.theme;
+    body.dataset.mode = mode;
+    body.dataset.privacy = entry.privacy;
+    body.dataset.shareSafe = entry.privacy === 'always' ? 'true' : 'false';
+    syncGroup('mode', mode);
+  }
+  function currentState() {
+    return { rhythm: body.dataset.rhythm, mode: body.dataset.mode };
+  }
+  // Restore preferences from localStorage (if any) — falls back to the
+  // server-rendered state. This lets a single generated file remember the
+  // user's last view across reloads.
+  var saved = load();
+  setRhythm(saved.rhythm || body.dataset.rhythm || 'receipt');
+  setMode(saved.mode || body.dataset.mode || 'dark');
+  // Wire up clicks.
+  document.addEventListener('click', function (event) {
+    var btn = event.target.closest('.cal-tweaks-btn');
+    if (!btn) return;
+    var group = btn.closest('[data-toggle]');
+    if (!group) return;
+    var name = group.dataset.toggle;
+    var value = btn.dataset.value;
+    if (name === 'rhythm') setRhythm(value);
+    else if (name === 'mode') setMode(value);
+    persist(currentState());
+  });
+  // Snapshot download — serialises the current DOM and offers it as a file
+  // so the user can keep this exact playground state. Filename embeds the
+  // active rhythm + mode for human-readable history.
+  var saveBtn = document.getElementById('cal-save-snapshot');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', function () {
+      var html = '<!doctype html>' + document.documentElement.outerHTML;
+      var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      var now = new Date();
+      var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+      var ts = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) +
+               '-' + pad(now.getHours()) + '-' + pad(now.getMinutes());
+      var state = currentState();
+      a.href = url;
+      a.download = 'caliper-dashboard-' + ts + '-' + state.rhythm + '-' + state.mode + '.html';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        a.remove();
+        URL.revokeObjectURL(url);
+      }, 0);
+    });
+  }
+})();
+""".strip()
+
+
+def _render_tweaks_panel(*, initial_rhythm: str, initial_mode: str) -> str:
+    """Render the interactive toggle panel.
+
+    Initial-active classes mirror the server-rendered state so the panel
+    renders without a flash. The inline script then takes over and applies
+    any per-user override from ``localStorage``.
+    """
+
+    def _btn(value: str, label: str, active: bool) -> str:
+        cls = "cal-tweaks-btn is-active" if active else "cal-tweaks-btn"
+        aria = "true" if active else "false"
+        return (
+            f'<button type="button" class="{cls}" data-value="{value}" '
+            f'role="radio" aria-checked="{aria}">{label}</button>'
+        )
+
+    rhythm_btns = _btn("receipt", "Receipt", initial_rhythm == "receipt") + _btn(
+        "terminal", "Terminal", initial_rhythm == "terminal"
+    )
+    mode_btns = (
+        _btn("dark", "Dark", initial_mode == "dark")
+        + _btn("light", "Light", initial_mode == "light")
+        + _btn("safe-share", "Safe Share", initial_mode == "safe-share")
+    )
+    return (
+        '<aside class="cal-tweaks-panel" role="toolbar" '
+        'aria-label="Dashboard view controls">'
+        '<div class="cal-tweaks-section">'
+        '<span class="cal-tweaks-label">View</span>'
+        '<div class="cal-tweaks-group" data-toggle="rhythm" role="radiogroup" '
+        'aria-label="Layout rhythm">'
+        f"{rhythm_btns}"
+        "</div></div>"
+        '<div class="cal-tweaks-divider" aria-hidden="true"></div>'
+        '<div class="cal-tweaks-section">'
+        '<span class="cal-tweaks-label">Mode</span>'
+        '<div class="cal-tweaks-group" data-toggle="mode" role="radiogroup" '
+        'aria-label="Color and privacy mode">'
+        f"{mode_btns}"
+        "</div></div>"
+        '<div class="cal-tweaks-divider" aria-hidden="true"></div>'
+        '<button id="cal-save-snapshot" class="cal-tweaks-save" type="button" '
+        'aria-label="Save snapshot of the current view as a new HTML file">'
+        '<span class="cal-tweaks-arrow" aria-hidden="true"></span>'
+        "Save snapshot</button></aside>"
+    )
+
+
+def _mode_from_state(theme: str, privacy: str) -> str:
+    """Pick the toggle mode that matches the initial theme+privacy combo.
+
+    Falls back to ``"dark"`` so the panel always has an active button —
+    even when the CLI was invoked with an unusual combination the renderer
+    accepts (e.g. ``--theme light --privacy always``), the panel reflects
+    the closest match without confusing the user.
+    """
+    if theme == "print" or privacy == "always":
+        return "safe-share"
+    if theme == "light":
+        return "light"
+    return "dark"
+
+
+# ============================================================================
+# Document wrapper + public entrypoint
+# ============================================================================
+
+
+def _wrap_document(
+    body: str,
+    *,
+    theme: str,
+    density: str,
+    share_safe: bool,
+    privacy: str,
+    rhythm: str,
+    mode: str,
+    interactive: bool,
+    title: str = "Caliper Dashboard",
+) -> str:
+    classes = [f"theme-{theme}"]
+    if density == "compact":
+        classes.append("density-compact")
+    class_attr = " ".join(classes)
+    share = "true" if share_safe else "false"
+    script = f"<script>{_INTERACTIVE_SCRIPT}</script>" if interactive else ""
+    return (
+        "<!doctype html>"
+        '<html lang="en">'
+        "<head>"
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{_esc(title)}</title>"
+        f"<style>{INLINE_STYLES}</style>"
+        "</head>"
+        f'<body class="{class_attr}" data-theme="{theme}" data-density="{density}" '
+        f'data-share-safe="{share}" data-privacy="{privacy}" data-rhythm="{rhythm}" '
+        f'data-mode="{mode}" data-interactive="{"true" if interactive else "false"}">'
+        f"{body}"
+        f"{script}"
+        "</body></html>"
     )
 
 
@@ -6505,85 +2613,88 @@ def render_dashboard(
     *,
     theme: str = "dark",
     density: str = "comfortable",
-    default_lens: str | None = None,
+    rhythm: str = "receipt",
+    privacy: str = "off",
     share_safe: bool = False,
+    interactive: bool = False,
 ) -> str:
-    """
-    Produce the entire dashboard as one self-contained HTML string.
+    """Render the dashboard as a single offline HTML string.
 
-    theme:    "dark" | "light" | "print"
-    density:  "comfortable" | "compact"
+    Parameters
+    ----------
+    d:
+        The populated :class:`Dashboard` payload from the adapter.
+    theme:
+        ``"dark"`` (default), ``"light"``, or ``"print"``. Selects the
+        token palette.
+    density:
+        ``"comfortable"`` (default) or ``"compact"`` — tightens padding and
+        shrinks numeric type.
+    rhythm:
+        ``"receipt"`` (default) or ``"terminal"`` — picks the layout shell.
+    privacy:
+        ``"off"`` (default): show real project / session / path values.
+        ``"print-only"``: show real values in the browser, swap to indexed
+        redactions (``Project 1``, ``Session 2``, ``[path]``) on print.
+        ``"always"``: indexed redactions everywhere.
+    share_safe:
+        Legacy alias for ``privacy="always"``. If passed truthy, takes
+        precedence over the ``privacy`` argument so existing callers keep
+        working.
+    interactive:
+        When ``True``, embed *both* layout rhythms and a floating tweaks
+        panel so the recipient can flip between Receipt / Terminal and
+        Dark / Light / Safe Share without re-running the CLI. The Safe
+        Share toggle forces ``data-privacy="always"`` on the body, so the
+        renderer always emits the redacted span twin too (otherwise the
+        toggle would have nothing to swap to). A small inline script
+        powers the toggles and the snapshot-download button — it uses no
+        network APIs (the privacy gate enforces this).
     """
+    if theme not in ("dark", "light", "print"):
+        raise ValueError(f"theme must be one of 'dark', 'light', 'print' — got {theme!r}")
+    if density not in ("comfortable", "compact"):
+        raise ValueError(f"density must be one of 'comfortable', 'compact' — got {density!r}")
+    if rhythm not in ("receipt", "terminal"):
+        raise ValueError(f"rhythm must be one of 'receipt', 'terminal' — got {rhythm!r}")
     if share_safe:
-        d = _share_safe_dashboard(d)
-    css = INLINE_STYLES
-    is_empty = d.totals.events == 0
-    title = f"Caliper Dashboard — {d.window.start} → {d.window.end}"
-    lens = default_lens or d.default_lens
-    if lens not in {key for key, _label in LENSES}:
-        lens = "executive"
-
-    body = "".join(
-        [
-            render_header(d),
-            render_share_safe_banner(share_safe),
-            render_banner(d.banner) if not is_empty else "",
-            render_dashboard_nav(d),
-            render_lens_controls(lens),
-            render_executive_brief(
-                d.executive_brief, d.decision_queue, d.comparisons, empty=is_empty
-            ),
-            render_cards(d.totals, is_empty, d.window),
-            render_metric_glossary(),
-            render_empty_report_guide() if is_empty else "",
-            render_command_center(d.command_center),
-            render_usage_windows(d.usage_windows),
-            render_impact_cards(d.impact_cards),
-            render_cost_over_time(d.daily, is_empty),
-            render_yearly_heatmap(d.heatmap) if not is_empty else "",
-            render_recap(d.recap) if not is_empty else "",
-            render_seasonality(d.seasonality) if not is_empty else "",
-            render_session_shape(d.shape, is_empty),
-            render_usage_mix(d.usage_mix) if not is_empty else "",
-            render_agents(d.agents) if not is_empty else "",
-            render_skills(d.skills) if not is_empty else "",
-            render_inefficiencies(d.inefficiencies) if not is_empty else "",
-            render_cache_leverage(d.cache_leverage) if not is_empty else "",
-            render_long_context_histogram(d.long_context_histogram) if not is_empty else "",
-            render_forecast_drivers(d.forecast_drivers) if not is_empty else "",
-            render_advisor(d.advisor_recommendations) if not is_empty else "",
-            render_top_sessions(d.top_sessions) if not is_empty else "",
-            render_models(d.by_model, d.totals.cost_usd) if not is_empty else "",
-            render_model_forecasts(d.model_forecasts) if not is_empty else "",
-            render_projects(d.by_project, d.show_paths, d.totals.cost_usd) if not is_empty else "",
-            render_anomalies(d.anomalies) if not is_empty else "",
-            render_rate_limits(d.rate_limit_pressure) if not is_empty else "",
-            render_insights(d.insights),
-            render_forecast(d.forecast) if not is_empty else "",
-            render_outlook(d.outlook) if not is_empty else "",
-            render_cohort_deltas(d.cohort_deltas) if not is_empty else "",
-            render_tier_provenance(d.tier_provenance) if not is_empty else "",
-            render_evidence(d.evidence, d.quality_score) if not is_empty else "",
-            render_footer(d),
-        ]
-    )
-
-    return (
-        f"<!doctype html>\n"
-        f'<html lang="en" data-theme="{esc(theme)}" '
-        f'data-density="{esc(density)}" data-lens="{esc(lens)}" '
-        f'data-share-safe="{str(share_safe).lower()}">\n'
-        f"<head>\n"
-        f'<meta charset="utf-8">\n'
-        f'<meta name="viewport" content="width=device-width,initial-scale=1">\n'
-        f"<title>{esc(title)}</title>\n"
-        f"<style>\n{css}\n</style>\n"
-        f"</head>\n"
-        f"<body>\n"
-        f'<div class="page-wrap">'
-        f'<main class="page">{body}</main>'
-        f"</div>\n"
-        f"<script>\n{INLINE_SCRIPT}\n</script>\n"
-        f"</body>\n"
-        f"</html>\n"
+        privacy = "always"
+    if privacy not in PRIVACY_MODES:
+        raise ValueError(f"privacy must be one of {PRIVACY_MODES!r} — got {privacy!r}")
+    dense = density == "compact"
+    # Interactive mode needs BOTH spans in every sensitive cell so the
+    # Safe Share toggle can swap visibility in-browser. We hand the renderer
+    # a print-only privacy map regardless of the user's initial choice; the
+    # actual visible mode is driven by the body's data-privacy attribute and
+    # the CSS rules in INLINE_STYLES.
+    render_privacy = "print-only" if interactive else privacy
+    pm = _build_privacy_map(d, render_privacy)
+    if interactive:
+        # Embed both rhythms; CSS hides the inactive one. The wrapper class
+        # is what the rhythm-swap rules ([data-rhythm="X"] .cal-rhythm-Y)
+        # key off of.
+        receipt_body = _render_receipt(d, dense=dense, pm=pm)
+        terminal_body = _render_terminal(d, dense=dense, pm=pm)
+        mode = _mode_from_state(theme, privacy)
+        body = (
+            f'<div class="cal-rhythm-receipt">{receipt_body}</div>'
+            f'<div class="cal-rhythm-terminal">{terminal_body}</div>'
+            + _render_tweaks_panel(initial_rhythm=rhythm, initial_mode=mode)
+        )
+    else:
+        mode = _mode_from_state(theme, privacy)
+        body = (
+            _render_terminal(d, dense=dense, pm=pm)
+            if rhythm == "terminal"
+            else _render_receipt(d, dense=dense, pm=pm)
+        )
+    return _wrap_document(
+        body,
+        theme=theme,
+        density=density,
+        share_safe=(privacy == "always"),
+        privacy=privacy,
+        rhythm=rhythm,
+        mode=mode,
+        interactive=interactive,
     )

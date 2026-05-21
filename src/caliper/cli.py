@@ -2018,26 +2018,78 @@ def dashboard(
         typer.Option("--stdout", help="Print the dashboard HTML instead of opening a browser."),
     ] = False,
     theme: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--theme",
-            help="Visual theme: dark, light, or print.",
+            help=(
+                "Visual theme: dark, light, or print. "
+                "Falls back to [dashboard].theme (default: dark)."
+            ),
         ),
-    ] = "dark",
+    ] = None,
     density: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--density",
-            help="Row density: comfortable or compact.",
+            help=(
+                "Row density: comfortable or compact. "
+                "Falls back to [dashboard].density (default: comfortable)."
+            ),
         ),
-    ] = "comfortable",
-    lens: Annotated[
-        str,
+    ] = None,
+    rhythm: Annotated[
+        str | None,
         typer.Option(
-            "--lens",
-            help="Dashboard audience lens: executive, engineer, finance, or audit.",
+            "--rhythm",
+            help=(
+                "Layout rhythm: receipt (engineer-grade) or terminal "
+                "(audit-terminal). Falls back to [dashboard].rhythm (default: receipt)."
+            ),
         ),
-    ] = "executive",
+    ] = None,
+    privacy: Annotated[
+        str | None,
+        typer.Option(
+            "--privacy",
+            help=(
+                "Privacy mode: off (always show real names), print-only "
+                "(real on screen, redacted on print), or always (redacted everywhere). "
+                "Falls back to [dashboard].privacy (default: off)."
+            ),
+        ),
+    ] = None,
+    init_defaults: Annotated[
+        bool,
+        typer.Option(
+            "--init-defaults",
+            help="Write a starter [dashboard] section to ~/.config/caliper/config.toml and exit.",
+        ),
+    ] = False,
+    force_init: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="With --init-defaults, overwrite an existing [dashboard] section.",
+        ),
+    ] = False,
+    no_open: Annotated[
+        bool,
+        typer.Option(
+            "--no-open",
+            help="Suppress the auto-open behaviour even when --open is the configured default.",
+        ),
+    ] = False,
+    interactive: Annotated[
+        bool | None,
+        typer.Option(
+            "--interactive/--no-interactive",
+            help=(
+                "Embed both rhythms + a floating toggle panel + a Save Snapshot button "
+                "so the recipient can flip between Receipt/Terminal and Dark/Light/Safe Share "
+                "without re-running the CLI. Defaults to [dashboard].interactive (default: on)."
+            ),
+        ),
+    ] = None,
     no_deltas: Annotated[
         bool,
         typer.Option(
@@ -2081,28 +2133,96 @@ def dashboard(
 ) -> None:
     """Open a self-contained static HTML dashboard. Offline. No external resources."""
     from caliper.cli_progress import cli_report_progress
+    from caliper.config import (
+        derive_dashboard_output_path,
+        load_dashboard_config,
+        write_dashboard_defaults,
+    )
+
+    if init_defaults:
+        try:
+            written = write_dashboard_defaults(force=force_init)
+        except FileExistsError as exc:
+            raise _exit_error(str(exc)) from exc
+        typer.echo(f"Wrote dashboard defaults to {written}")
+        return
+
+    # First-run friendliness: if the user has neither a ``--config`` file
+    # nor the standard ``~/.config/caliper/config.toml``, write the
+    # defaults silently so subsequent runs pick them up. We surface a
+    # one-line note to stderr so the user knows where the file lives and
+    # can edit it later. No question prompts — the user shouldn't have
+    # to think about config on day 1.
+    #
+    # Guard: only auto-init in real interactive sessions (TTY stderr).
+    # CI/tests/piped invocations skip this so the user's real config
+    # directory isn't touched during automated runs.
+    import sys as _sys2
+
+    from caliper.config import USER_CONFIG  # local import keeps the CLI's top-level light
+
+    first_run_written: Path | None = None
+    if not config and not USER_CONFIG.expanduser().exists() and _sys2.stderr.isatty() and not quiet:
+        try:
+            first_run_written = write_dashboard_defaults()
+        except OSError:
+            # Read-only home, permission denied, etc. — fall back silently
+            # to the built-in DashboardConfig defaults.
+            first_run_written = None
+    # Load config so the user's [dashboard] section can supply defaults
+    # for any flag the caller didn't explicitly pass on the command line.
+    loaded_config = load_config(config) if config else load_config()
+    dash_cfg = load_dashboard_config(loaded_config)
+    if first_run_written is not None and not quiet:
+        typer.echo(
+            f"ℹ Initialised Caliper dashboard defaults at {first_run_written}",
+            err=True,
+        )
+
+    # CLI > config > hard-coded fallback. ``None`` from typer means "user
+    # didn't pass this flag" — we then take the config value.
+    theme = theme if theme is not None else dash_cfg.theme
+    density = density if density is not None else dash_cfg.density
+    rhythm = rhythm if rhythm is not None else dash_cfg.rhythm
+    privacy = privacy if privacy is not None else dash_cfg.privacy
+    interactive_effective = interactive if interactive is not None else dash_cfg.interactive
 
     if theme not in {"dark", "light", "print"}:
         raise _exit_error("--theme must be one of: dark, light, print")
     if density not in {"comfortable", "compact"}:
         raise _exit_error("--density must be one of: comfortable, compact")
-    if lens not in {"executive", "engineer", "finance", "audit"}:
-        raise _exit_error("--lens must be one of: executive, engineer, finance, audit")
+    if rhythm not in {"receipt", "terminal"}:
+        raise _exit_error("--rhythm must be one of: receipt, terminal")
+    if privacy not in {"off", "print-only", "always"}:
+        raise _exit_error("--privacy must be one of: off, print-only, always")
     if stdout_html and (output is not None or open_in_browser):
         raise _exit_error("--stdout cannot be combined with --output or --open")
-    # The dashboard always emits HTML on stdout when --stdout, so the
-    # progress check is "treat HTML output as non-table".
-    dashboard_output_format = "html"
+    # Progress widget activation for the dashboard:
+    # the generic ``cli_report_progress`` helper bails out when
+    # ``output_format != "table"`` (it was designed to keep JSON/CSV stdout
+    # byte-clean). We unconditionally write progress to stderr — HTML goes
+    # to disk or to stdout-with-``--stdout`` — so the original guard never
+    # applied here. Force it on whenever stderr is interactive and the
+    # user didn't ask for ``--quiet`` / ``--stdout``.
+    import sys as _sys
+
+    auto_progress = not quiet and not stdout_html and _sys.stderr.isatty()
     with cli_report_progress(
-        output_format=dashboard_output_format,
-        output=output,
-        progress=progress,
+        output_format="table",  # neutral: progress=True below makes the call.
+        output=None,
+        progress=progress or auto_progress,
         quiet=quiet,
     ) as prog:
         if demo:
             prog.stage_start("build")
             payload = sample_dashboard(show_paths=show_paths)
-            prog.stage_done("build", summary="demo data")
+            prog.stage_done(
+                "build",
+                summary=(
+                    f"demo data · {len(payload.by_project)} projects · "
+                    f"{len(payload.top_sessions)} top sessions"
+                ),
+            )
         else:
             values = dict(locals())
             # The dashboard command does not take an output_format; carve out before _options.
@@ -2112,7 +2232,7 @@ def dashboard(
                 "stdout_html",
                 "theme",
                 "density",
-                "lens",
+                "rhythm",
                 "share_safe",
                 "no_deltas",
                 "demo",
@@ -2128,9 +2248,13 @@ def dashboard(
             options = _options(values)
             prog.stage_start("parse")
             result = _safe_load_usage(options, progress=prog)
+            vendors_count = len({event.vendor for event in result.events if event.vendor})
             prog.stage_done(
                 "parse",
-                summary=f"{len(result.events):,} events (selected)",
+                summary=(
+                    f"{len(result.events):,} events · {vendors_count} "
+                    f"vendor{'s' if vendors_count != 1 else ''}"
+                ),
             )
             rolling_start = options.end - dt.timedelta(days=90)
             if options.start == rolling_start:
@@ -2142,7 +2266,7 @@ def dashboard(
                 rolling_result = _safe_load_usage(rolling_options, progress=prog)
                 prog.stage_done(
                     "parse",
-                    summary=f"{len(rolling_result.events):,} events (90-day rolling)",
+                    summary=f"{len(rolling_result.events):,} events · 90-day rolling baseline",
                 )
             prog.stage_start("build")
             budget_config = load_config(config) if config else load_config()
@@ -2154,32 +2278,79 @@ def dashboard(
                 rolling_options=rolling_options,
                 budget_config=budget_config,
             )
-            prog.stage_done("build", summary="dashboard payload")
+            t = payload.totals
+            prog.stage_done(
+                "build",
+                summary=(
+                    f"{t.sessions:,} sessions · {t.events:,} events · "
+                    f"{len(payload.by_project)} projects"
+                ),
+            )
         prog.stage_start("render")
+        # The dashboard CLI uses ``--privacy`` (off / print-only / always) as
+        # the canonical control. The legacy ``--share-safe`` boolean is still
+        # accepted for backwards compatibility but is no longer the dominant
+        # factor: only explicit ``--no-share-safe`` flips the privacy back to
+        # ``off`` (since users who passed it presumably want unredacted data).
+        effective_share_safe = False
+        if not share_safe and privacy == "off":
+            effective_share_safe = False
         text = render_dashboard(
-            payload, theme=theme, density=density, default_lens=lens, share_safe=share_safe
+            payload,
+            theme=theme,
+            density=density,
+            rhythm=rhythm,
+            privacy=privacy,
+            share_safe=effective_share_safe,
+            interactive=interactive_effective,
         )
-        prog.stage_done("render", summary=f"{len(text):,} bytes")
-    should_open = open_in_browser or (
-        output is None and not stdout_html and _dashboard_stdout_is_interactive()
-    )
-    if stdout_html or (output is None and not should_open):
+        # Compact "265 KB" style for the spinner summary.
+        size_kb = max(1, len(text.encode("utf-8")) // 1024)
+        layout = "Receipt + Terminal" if interactive_effective else rhythm.capitalize()
+        prog.stage_done(
+            "render",
+            summary=(
+                f"{size_kb} KB · {layout} · privacy={privacy}"
+                + (" · interactive" if interactive_effective else "")
+            ),
+        )
+
+    # Spinner has rendered parse → build → render. Now resolve the
+    # destination and do the actual file write outside the widget so the
+    # ``Wrote {path}`` line lands on stdout (visible to non-TTY callers
+    # and the existing test suite).
+    interactive_stdout = _dashboard_stdout_is_interactive()
+    pipe_to_stdout = stdout_html or (output is None and not interactive_stdout)
+    if pipe_to_stdout:
         typer.echo(text, nl=False)
         return
     if output is None:
-        # Browser preview without --out: write to a stable tempfile so the
-        # browser has a real file to open and refresh.
-        import tempfile
-
-        tmpdir = Path(tempfile.gettempdir())
-        target = tmpdir / "caliper-dashboard.html"
+        target = derive_dashboard_output_path(
+            dash_cfg,
+            theme=theme,
+            rhythm=rhythm,
+            density=density,
+            privacy=privacy,
+        )
     else:
         target = output.expanduser()
     target.parent.mkdir(parents=True, exist_ok=True)
     already_existed = target.exists()
     target.write_text(text, encoding="utf-8")
-    suffix = " (overwritten)" if already_existed else ""
-    typer.echo(f"Wrote {target}{suffix}")
+    typer.echo(f"Wrote {target}" + (" (overwritten)" if already_existed else ""))
+    # Decide whether to auto-open the file. Explicit flags win; otherwise
+    # the user's [dashboard].open_after preference applies only when we're
+    # writing to the *derived* path (because they didn't pick their own).
+    if no_open:
+        should_open = False
+    elif open_in_browser:
+        should_open = True
+    elif output is not None:
+        # The user picked their own destination — don't open unless they
+        # also passed --open. Preserves the long-standing CLI contract.
+        should_open = False
+    else:
+        should_open = dash_cfg.open_after
     if should_open:
         opened = _open_dashboard_in_browser(target)
         if not opened:
@@ -2188,7 +2359,13 @@ def dashboard(
                 f"The file is at {target} — open it manually."
             )
         else:
-            typer.echo(f"Opened {target}")
+            typer.echo("✓ Opened in browser")
+    if interactive_effective and not quiet:
+        # Tail message: tell the user about the playground. One short line.
+        typer.echo(
+            "  Toggle Receipt/Terminal · Dark/Light/Safe Share in the floating panel.",
+            err=True,
+        )
 
 
 @app.command()

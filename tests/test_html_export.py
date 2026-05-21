@@ -98,11 +98,18 @@ def test_render_command_html_outputs_self_contained_html(small_load_result) -> N
 
 
 def test_render_command_html_default_lens_is_command_specific(small_load_result) -> None:
+    # v2 removed the audience-lens system. `lens_for_command` is preserved as
+    # a label hint for callers, but the renderer no longer stamps a
+    # ``data-lens`` attribute. The HTML output is identical regardless of
+    # which command label is passed.
     result, options = small_load_result
     finance_html = render_command_html(result, options, command="models")
-    assert 'data-lens="finance"' in finance_html
     engineer_html = render_command_html(result, options, command="daily")
-    assert 'data-lens="engineer"' in engineer_html
+    assert "data-lens=" not in finance_html
+    assert "data-lens=" not in engineer_html
+    # Both still render the same chrome scaffolding (header / sections / footer).
+    assert "CALIPER-" in finance_html
+    assert "CALIPER-" in engineer_html
 
 
 def test_render_command_html_share_safe_is_default(small_load_result) -> None:

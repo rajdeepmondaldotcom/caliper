@@ -103,7 +103,6 @@ def render_command_html(
         payload,
         theme=theme,
         density=density,
-        default_lens=lens_for_command(command),
         share_safe=share_safe,
     )
 

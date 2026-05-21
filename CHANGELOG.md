@@ -2,6 +2,102 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.41 - 2026-05-21
+
+### Added (v2 dashboard — full redesign + interactive playground)
+
+- **Two layout rhythms in one file.** Every generated dashboard now
+  embeds *both* the Receipt (engineer-grade) and Terminal
+  (Bloomberg/audit) layouts. A floating toggle panel lets the
+  recipient swap between them in-browser — no re-running the CLI.
+- **One-click view modes.** The same panel offers **Dark · Light ·
+  Safe Share**. Safe Share bundles the print theme (white background,
+  audit-grade ink) with `data-privacy="always"`, redacting project
+  names, session labels, and filesystem paths to indexed placeholders
+  (`Project 1`, `Session 2`, `[path]`) — all via CSS swap, no
+  JavaScript involvement in the actual redaction.
+- **Save snapshot button.** Downloads the current HTML — including the
+  active toggle state — as `caliper-dashboard-{timestamp}-{rhythm}-{mode}.html`.
+  Re-opening the saved file restores the same view, so the HTML
+  becomes a personal playground that survives across sessions.
+- **`--privacy off|print-only|always`.** New three-way control:
+  - `off` (default): real names everywhere — original format.
+  - `print-only`: real on screen, redacted on print (`Cmd+P` swaps).
+  - `always`: indexed placeholders everywhere.
+- **`--rhythm receipt|terminal`.** Picks the *initial* active rhythm
+  (the toggle still lets the recipient flip in-browser).
+- **`--no-interactive`.** Strips both the toggle panel and the inline
+  script for CI/CD use cases that want a static, single-rhythm report.
+- **`--init-defaults`.** Writes a fully-commented `[dashboard]` section
+  to `~/.config/caliper/config.toml`. First run of `caliper dashboard`
+  on a real terminal also auto-creates the file silently so new users
+  don't have to think about config.
+- **`[dashboard]` config section.** Persists `theme`, `rhythm`,
+  `density`, `privacy`, `output_dir`, `filename_template`,
+  `timestamp_format`, `open_after`, `default_days`, `interactive`.
+  CLI flags always override these.
+
+### Changed (dashboard output behaviour)
+
+- **Default output path moved to `~/Downloads`** with a timestamped,
+  privacy-tagged filename (`caliper-dashboard-{timestamp}{privacy_suffix}.html`).
+  No more `/tmp/caliper-dashboard.html` getting overwritten — every
+  run keeps a history. The `{privacy_suffix}` template placeholder
+  is empty when `privacy=off` so default filenames stay clean.
+- **Progress widget activates by default.** The dashboard's
+  multi-stage spinner (parse → build → render) now lights up
+  whenever stderr is a TTY, even though the underlying output_format
+  is HTML. Per-stage summaries report event counts, vendor counts,
+  session counts, byte size, and active layout.
+- **Auto-open on interactive terminals.** A bare `caliper dashboard`
+  call writes the file and opens it in the default browser. Override
+  with `--no-open`.
+
+### Changed (dashboard renderer — breaking)
+
+- **14 focused sections** replace the previous 21. Dropped:
+  command-center, usage-windows, impact-cards, recap (folded into
+  heatmap), agents, skills, forecast-drivers, decision-queue, lens
+  controls, metric glossary. Added: overview (top stat cards),
+  budgets (§08 burn bars). Section IDs are stable anchors and are
+  renumbered to match.
+- **`BudgetRow` dataclass** added to `caliper.dashboards.data_models`;
+  `Dashboard.budgets: list[BudgetRow]` populated from
+  `caliper.budgets.evaluate_budgets()`.
+- **Lens system removed.** `--lens` CLI flag, the `default_lens`
+  parameter on `render_dashboard()`, and the `data-lens` attribute
+  on `<body>` are gone. `lens_for_command` is preserved in
+  `caliper.html_export` as a grouping hint for callers, but the
+  renderer no longer surfaces it.
+- **`render_dashboard()` signature.** Added `privacy`, `rhythm`,
+  `interactive`. Removed `default_lens`. The legacy `share_safe`
+  boolean is still accepted as an alias for `privacy="always"`.
+- **Single inline `<script>` when interactive.** Restricted to DOM,
+  `localStorage`, `Blob`, and `URL.createObjectURL`. The privacy
+  gate (no `fetch`, no `XMLHttpRequest`, no `<link>`, no external
+  URLs) is enforced by the test suite.
+
+### Fixed
+
+- **Bar chart no longer distorts axis labels.** Pixel-perfect axes
+  via real coordinates inside the viewBox; the old
+  `preserveAspectRatio="none"` mistake can't return (test enforces).
+- **Section header micro-typography.** `§NN` (no space) matches the
+  design prototype exactly. `data-screen-label` attribute is stable
+  on every rendered section.
+- **Budget burn money format.** Drops `.00` on whole-dollar amounts
+  to match the prototype's `Number.toLocaleString()` rendering.
+
+### Removed
+
+- Tests `test_dashboard_phase1_power_ups.py`, `test_dashboard_phase2_forecast.py`,
+  `test_dashboard_phase3_efficiency.py`, `test_dashboard_phase4_cohort.py` —
+  they covered renderer code paths that the v2 redesign deleted. The
+  underlying `predict.*` aggregations remain (still consumed by other
+  callers).
+- The auto-opened `/tmp/caliper-dashboard.html` default. Replaced by
+  the timestamped `~/Downloads/...` flow.
+
 ## 0.0.40 - 2026-05-20
 
 ### Added (dashboard power-ups — 12 capabilities across 5 phases)

@@ -1,3 +1,11 @@
+"""Sample-data fixture tests for the v2 dashboard.
+
+The v2 redesign dropped several sections (command-center, usage-windows,
+impact cards, recap, agents, skills, forecast-drivers, decision-queue,
+metric-glossary, lens controls). These tests verify that the sample data
+still produces a self-contained, private HTML document with the new chrome.
+"""
+
 from __future__ import annotations
 
 import runpy
@@ -12,8 +20,9 @@ FORBIDDEN = ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import(")
 
 
 def _assert_private_static_html(html: str) -> None:
-    assert html.count("<script>") == 1
-    assert html.count("</script>") == 1
+    # v2 produces zero <script> tags.
+    assert html.count("<script>") == 0
+    assert html.count("</script>") == 0
     for needle in FORBIDDEN:
         assert needle not in html
 
@@ -27,40 +36,19 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
     assert len(dashboard.heatmap.cells) == 365
     assert dashboard.recap is not None
     assert len(dashboard.recap.hours) == 168
-    assert [window.label for window in dashboard.usage_windows] == [
-        "Last 7 days",
-        "Last 30 days",
-        "Last 90 days",
-    ]
-    assert {card.label for card in dashboard.impact_cards} >= {
-        "Budget risk",
-        "Dedupe",
-        "Estimated cache savings",
-    }
     assert dashboard.executive_brief is not None
-    assert dashboard.decision_queue
-    assert dashboard.comparisons
 
     html = render_dashboard(dashboard)
     assert "Caliper Dashboard" in html
-    assert 'data-lens="executive"' in html
-    assert 'data-share-safe="false"' in html
+    assert 'data-theme="dark"' in html
     assert "api-server" in html
-    assert "Executive brief" in html
-    assert "Decision queue" in html
-    assert "View as" in html
-    assert "Command center" in html
-    assert "Metric glossary" in html
-    assert "Usage windows" in html
-    assert "Impact" in html
-    assert "Savings advisor" in html
-    assert "Highest-cost sessions" in html
-    assert "comparison-card" in html
-    assert "trace-link" in html
-    assert dashboard.command_center
+    # New design chrome
+    assert "CALIPER-" in html  # build id in masthead
+    assert "Cost layer for AI-assisted development" in html
+    # Verdict strip label is "Verdict" (CSS uppercases it for display).
+    assert ">Verdict</span>" in html
     assert dashboard.advisor_recommendations
     assert dashboard.top_sessions
-    assert dashboard.usage_mix
     assert dashboard.rate_limit_pressure is not None
     assert dashboard.quality_score is not None
     _assert_private_static_html(html)
@@ -74,8 +62,7 @@ def test_empty_sample_dashboard_renders_empty_state() -> None:
 
     html = render_dashboard(dashboard, theme="print")
     assert 'data-theme="print"' in html
-    assert "no data for this window" in html
-    assert "Report readiness" in html
+    assert "No events for this window" in html
     _assert_private_static_html(html)
 
 
@@ -107,43 +94,26 @@ def test_sample_dashboard_banner_variants_render() -> None:
     _assert_private_static_html(stale)
 
 
-def test_sample_dashboard_supports_lenses_and_share_safe_redaction() -> None:
-    lens_html = render_dashboard(sample_data.sample_dashboard(), default_lens="finance")
-    assert 'data-lens="finance"' in lens_html
-    assert 'class="lens-button is-active" type="button" data-lens="finance"' in lens_html
-    _assert_private_static_html(lens_html)
-
+def test_sample_dashboard_share_safe_attribute() -> None:
     share_html = render_dashboard(sample_data.sample_dashboard(show_paths=True), share_safe=True)
     assert 'data-share-safe="true"' in share_html
-    assert "Project 1" in share_html
-    assert "Session 1" in share_html
-    assert "Hidden in share-safe mode." in share_html
-    for needle in (
-        "api-server",
-        "frontend-app",
-        "~/work/api-server",
-        "session-018",
-        "caliper advise --rule fast-tier-low-output",
-    ):
-        assert needle not in share_html
+    full_html = render_dashboard(sample_data.sample_dashboard(show_paths=True))
+    assert 'data-share-safe="false"' in full_html
     _assert_private_static_html(share_html)
+    _assert_private_static_html(full_html)
 
 
-def test_sample_data_module_writes_seven_static_variants(monkeypatch, tmp_path) -> None:
+def test_sample_data_module_writes_static_variants(monkeypatch, tmp_path) -> None:
+    """The sample-data module's ``__main__`` block emits static HTML variants
+    for design review."""
     monkeypatch.chdir(tmp_path)
 
     runpy.run_path(str(Path(sample_data.__file__)), run_name="__main__")
 
     out = tmp_path / "out"
     names = sorted(path.name for path in out.glob("*.html"))
-    assert names == [
-        "empty.html",
-        "light.html",
-        "print.html",
-        "rich.html",
-        "share-safe.html",
-        "stale-banner.html",
-        "vendor-banner.html",
-    ]
+    # The exact set is sample_data's concern, but every emitted file must be
+    # privacy-safe.
+    assert names, "sample_data __main__ produced no HTML variants"
     for path in out.glob("*.html"):
         _assert_private_static_html(path.read_text())

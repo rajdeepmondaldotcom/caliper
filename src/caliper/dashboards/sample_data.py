@@ -20,6 +20,7 @@ from caliper.dashboards.data_models import (
     AnomalyRow,
     Banner,
     BriefFinding,
+    BudgetRow,
     CaliperMeta,
     CategoryCount,
     CommandCenterCard,
@@ -168,7 +169,7 @@ def _sample_recap() -> Recap:
 
 def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> Dashboard:
     return Dashboard(
-        caliper=CaliperMeta(version=__version__, schema_version=2),
+        caliper=CaliperMeta(version=__version__, schema_version=2, build_sha="330c1ab"),
         window=WindowMeta(
             start="2026-05-03",
             end="2026-05-17",
@@ -892,13 +893,18 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
         recap=_sample_recap(),
         banner=banner,
         show_paths=show_paths,
+        budgets=[
+            BudgetRow(period="daily", spent=37.0, cap=100.0, warn=80.0, tone="good"),
+            BudgetRow(period="weekly", spent=412.0, cap=500.0, warn=400.0, tone="warn"),
+            BudgetRow(period="monthly", spent=1640.0, cap=2000.0, warn=1600.0, tone="warn"),
+        ],
     )
 
 
 def empty_dashboard() -> Dashboard:
     """The all-zero dashboard. Renderer falls back to empty placeholders."""
     return Dashboard(
-        caliper=CaliperMeta(version=__version__, schema_version=2),
+        caliper=CaliperMeta(version=__version__, schema_version=2, build_sha="330c1ab"),
         window=WindowMeta(
             start="2026-05-10",
             end="2026-05-17",

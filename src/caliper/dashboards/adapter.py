@@ -67,6 +67,7 @@ from caliper.dashboards.data_models import (
     AnomalyRow,
     Banner,
     BriefFinding,
+    BudgetRow,
     CacheLeverageRow,
     CaliperMeta,
     CategoryCount,
@@ -333,6 +334,13 @@ def build_handoff_dashboard(
     cache_leverage = _build_cache_leverage(result, options, rate_card)
     long_context_histogram = _build_long_context_histogram(result, rate_card)
     cohort_deltas = _build_cohort_deltas(result, options, rate_card, total) if with_deltas else []
+    budgets = _build_budget_rows(result, options, rate_card, budget_config)
+
+    # v2 design: the verdict strip shows up to 4 findings sorted by tone, so
+    # cap here. The renderer also slices defensively, but enforcing it in the
+    # adapter keeps the data payload aligned with what ships.
+    if executive_brief is not None and executive_brief.findings:
+        executive_brief = _cap_brief_findings(executive_brief, limit=4)
 
     return Dashboard(
         caliper=CaliperMeta(version=__version__, schema_version=3),
@@ -373,7 +381,80 @@ def build_handoff_dashboard(
         cache_leverage=cache_leverage,
         long_context_histogram=long_context_histogram,
         cohort_deltas=cohort_deltas,
+        budgets=budgets,
     )
+
+
+# ---------------------------------------------------------------------------
+# v2 dashboard: budget burn rows + executive-brief finding cap
+# ---------------------------------------------------------------------------
+
+
+_BRIEF_TONE_RANK = {"critical": 0, "warn": 1, "good": 2, "neutral": 3}
+
+
+def _cap_brief_findings(brief: ExecutiveBrief, *, limit: int) -> ExecutiveBrief:
+    """Sort findings by tone severity, then keep the top ``limit``."""
+    findings = sorted(brief.findings, key=lambda f: _BRIEF_TONE_RANK.get(f.tone, 9))
+    capped = findings if len(findings) <= limit else findings[:limit]
+    return ExecutiveBrief(
+        title=brief.title,
+        verdict=brief.verdict,
+        subtitle=brief.subtitle,
+        tone=brief.tone,
+        findings=capped,
+    )
+
+
+def _build_budget_rows(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard,
+    budget_config: dict[str, Any] | None,
+) -> list[BudgetRow]:
+    """Translate ``evaluate_budgets`` output into renderer-ready burn rows.
+
+    Filters to cost-denominated budgets (the §08 section is a dollar burn
+    view). Returns an empty list when no budgets are configured — the renderer
+    then hides the section entirely.
+    """
+    raw = (budget_config or {}).get("budgets") or {}
+    try:
+        budgets = parse_budgets_table(raw if isinstance(raw, dict) else {})
+    except ValueError:
+        return []
+    if not budgets:
+        return []
+
+    from caliper.timeutil import load_timezone
+
+    now = options.end.astimezone(load_timezone(options.timezone))
+    windows = current_period_intervals(now)
+    usage = usage_for_periods(result.events, options, rate_card, now, windows=windows)
+    alerts = evaluate_budgets(budgets, usage)
+    rows: list[BudgetRow] = []
+    # Deterministic display order regardless of config order.
+    period_order = {"daily": 0, "weekly": 1, "monthly": 2}
+    for alert in sorted(alerts, key=lambda a: period_order.get(a.budget.period, 9)):
+        if alert.budget.metric != "cost_usd":
+            continue  # the §08 burn bar is dollars; token budgets stay in impact_cards
+        if alert.severity == SEVERITY_BREACH:
+            tone = "critical"
+        elif alert.severity == SEVERITY_WARN:
+            tone = "warn"
+        else:
+            tone = "good"
+        warn_dollars = alert.budget.limit * float(alert.budget.warn_at)
+        rows.append(
+            BudgetRow(
+                period=alert.budget.period,
+                spent=float(alert.used),
+                cap=float(alert.budget.limit),
+                warn=warn_dollars,
+                tone=tone,
+            )
+        )
+    return rows
 
 
 # ---------------------------------------------------------------------------

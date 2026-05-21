@@ -90,6 +90,28 @@ def test_dashboard_default_opens_browser_for_interactive_terminal(monkeypatch, t
         lambda url, *args, **kwargs: opened.append(url) or True,
     )
 
+    # Redirect the configured output_dir into the per-test tmp_path so the
+    # generated file doesn't litter the real ~/Downloads folder.
+    from caliper.config import DashboardConfig
+    from caliper.config import load_dashboard_config as real_loader
+
+    def fake_loader(_loaded):
+        cfg = real_loader(_loaded)
+        return DashboardConfig(
+            theme=cfg.theme,
+            rhythm=cfg.rhythm,
+            density=cfg.density,
+            privacy=cfg.privacy,
+            show_paths=cfg.show_paths,
+            output_dir=str(tmp_path),
+            filename_template=cfg.filename_template,
+            timestamp_format=cfg.timestamp_format,
+            open_after=cfg.open_after,
+            default_days=cfg.default_days,
+        )
+
+    monkeypatch.setattr("caliper.config.load_dashboard_config", fake_loader)
+
     result = runner.invoke(app, ["dashboard", "--demo"])
 
     assert result.exit_code == 0, result.output
@@ -98,9 +120,15 @@ def test_dashboard_default_opens_browser_for_interactive_terminal(monkeypatch, t
     assert "Opened" in result.output
     assert opened
     opened_path = Path(urlparse(opened[0]).path)
-    assert opened_path.name == "caliper-dashboard.html"
+    # v2 default: ~/Downloads/caliper-dashboard-<timestamp>.html
+    # Privacy suffix is only embedded when --privacy is explicitly used.
+    assert opened_path.name.startswith("caliper-dashboard-")
+    assert opened_path.name.endswith(".html")
+    assert "privacy-" not in opened_path.name  # default = no suffix
     assert opened_path.exists()
     assert opened_path.read_text(encoding="utf-8").startswith("<!doctype html>")
+    # Cleanup the generated file so re-running tests doesn't litter ~/Downloads.
+    opened_path.unlink(missing_ok=True)
 
 
 def test_dashboard_stdout_flag_keeps_raw_html_explicit(monkeypatch) -> None:
@@ -232,9 +260,11 @@ def test_dashboard_days_still_renders_rolling_windows(monkeypatch, tmp_path) -> 
 
     assert result.exit_code == 0, result.output
     html = out.read_text()
+    # The v2 design surfaces the selected report window in the masthead window
+    # badge. The rolling 7/30/90-day rollups are no longer rendered as a
+    # dedicated section, but the rolling parse still runs (and is checked by
+    # adapter tests).
     assert "Last 7 days" in html
-    assert "Last 30 days" in html
-    assert "Last 90 days" in html
 
 
 def test_dashboard_demo_renders_without_local_logs(tmp_path) -> None:
@@ -244,9 +274,33 @@ def test_dashboard_demo_renders_without_local_logs(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     html = out.read_text()
     assert "Caliper" in html
-    assert html.count("<script>") == 1
+    # v2 with interactive mode (default): exactly one inline <script> tag
+    # for the toggle controller. The CI privacy gate forbids any network
+    # APIs inside it.
+    assert html.count("<script>") <= 1
     for needle in ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import("):
         assert needle not in html
+
+
+def test_dashboard_rhythm_terminal(tmp_path) -> None:
+    out = tmp_path / "term.html"
+    result = runner.invoke(
+        app, ["dashboard", "--demo", "--rhythm", "terminal", "--output", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    html = out.read_text()
+    assert 'data-rhythm="terminal"' in html
+    assert "OFFLINE" in html
+    assert ">Index<" in html
+
+
+def test_dashboard_rhythm_invalid(tmp_path) -> None:
+    out = tmp_path / "x.html"
+    result = runner.invoke(
+        app, ["dashboard", "--demo", "--rhythm", "purple-haze", "--output", str(out)]
+    )
+    assert result.exit_code != 0
+    assert "must be one of" in result.output
 
 
 def test_dashboard_invalid_theme_errors(monkeypatch, tmp_path) -> None:

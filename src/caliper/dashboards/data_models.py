@@ -35,6 +35,9 @@ DashboardLens = Literal["executive", "engineer", "finance", "audit"]
 class CaliperMeta:
     version: str  # e.g. "0.0.30"
     schema_version: int  # 3 (added seasonality/tier-provenance/rate-limit ETA bands)
+    # Optional build SHA (short hex) — surfaced in the masthead build id
+    # ``CALIPER-YYYYMMDD-XXXX``. Empty string is fine (shows ``0000``).
+    build_sha: str = ""
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,23 @@ class ImpactCard:
     label: str
     value: str
     detail: str
+    tone: ImpactTone = "neutral"
+
+
+@dataclass(frozen=True)
+class BudgetRow:
+    """Single budget burn row for the budgets section.
+
+    Surfaces an `evaluate_budgets()` result in the shape the renderer expects:
+    a period label, the dollar amount spent so far, the budget cap, and the
+    warning threshold (in dollars, not a fraction) — plus an explicit tone so
+    the renderer doesn't have to re-derive it.
+    """
+
+    period: str  # "daily" | "weekly" | "monthly" (display-formatted)
+    spent: float
+    cap: float
+    warn: float  # warning threshold in dollars (e.g. 80% of cap)
     tone: ImpactTone = "neutral"
 
 
@@ -714,3 +734,7 @@ class Dashboard:
 
     # Phase 4 power-ups: cohort delta table (compare lens) + agent sparklines.
     cohort_deltas: list[CohortDeltaRow] = field(default_factory=list)
+
+    # v2 redesign: dedicated budget burn rows (daily / weekly / monthly).
+    # Optional so older fixtures that omit this field still build.
+    budgets: list[BudgetRow] = field(default_factory=list)

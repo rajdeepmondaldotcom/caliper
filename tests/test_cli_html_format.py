@@ -1,14 +1,17 @@
 """Smoke matrix: `--format html` works for every grouped command.
 
-Phase C of the HTML + progress overhaul. Each command's HTML output
-must:
+Each command's HTML output must:
 
 * exit 0 against an empty session root,
 * start with ``<!doctype html>``,
-* carry the per-command ``data-lens`` audience hint,
 * be safe-by-default (``data-share-safe="true"``),
 * be self-contained (no external CSS/JS/font references),
 * write to ``--out file`` without echoing to stdout when ``--out`` is set.
+
+The v2 dashboard redesign removed the audience-lens system; the
+per-command ``lens_for_command`` label is kept for grouping logic but is
+no longer surfaced as a ``data-lens`` attribute. Tests that previously
+asserted on that attribute now just verify the chrome scaffolding.
 """
 
 from __future__ import annotations
@@ -90,7 +93,9 @@ def test_html_format_grouped_command_emits_dashboard_chrome(
     assert result.exit_code == 0, result.output
     assert result.stdout.startswith("<!doctype html>"), result.stdout[:200]
     assert "</html>" in result.stdout
-    assert f'data-lens="{lens_for_command(command)}"' in result.stdout
+    # lens_for_command is still importable but no longer surfaced as an
+    # attribute — keep the import live so refactors don't silently break it.
+    assert lens_for_command(command) in {"executive", "engineer", "finance", "audit"}
     assert 'data-share-safe="true"' in result.stdout
 
 
@@ -170,13 +175,16 @@ def test_html_format_self_contained_no_external_resources(setup_environment, tmp
         assert pattern not in html, f"Found remote reference: {pattern}"
 
 
-def test_html_format_dashboard_command_default_share_safe_now_true(
+def test_html_format_dashboard_command_default_privacy(
     setup_environment,
 ) -> None:
-    """Phase D unification: ``caliper dashboard`` defaults to share-safe.
+    """v2 redesign: ``caliper dashboard`` defaults to privacy="off".
 
-    Test placed here next to the other HTML expectations so the matrix
-    stays cohesive.
+    The legacy ``--share-safe`` boolean has been superseded by the
+    three-way ``--privacy`` flag (off / print-only / always). Setting
+    ``privacy = "print-only"`` in ``~/.config/caliper/config.toml`` is
+    the recommended way to get always-redacted print output while
+    keeping the browser view unredacted.
     """
     runner = CliRunner()
     result = runner.invoke(
@@ -188,6 +196,28 @@ def test_html_format_dashboard_command_default_share_safe_now_true(
         ],
     )
     assert result.exit_code == 0, result.output
+    # Default privacy is "off" — original format, real names everywhere.
+    # The user opts into redaction by passing --privacy print-only or
+    # --privacy always. ``data-share-safe`` mirrors ``privacy == "always"``.
+    assert 'data-privacy="off"' in result.stdout
+    assert 'data-share-safe="false"' in result.stdout
+
+
+def test_html_format_dashboard_command_privacy_always(setup_environment) -> None:
+    """``--privacy always`` reproduces the legacy redact-everywhere behaviour."""
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "dashboard",
+            "--stdout",
+            "--privacy",
+            "always",
+            *_common_args(setup_environment),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert 'data-privacy="always"' in result.stdout
     assert 'data-share-safe="true"' in result.stdout
 
 
@@ -229,4 +259,4 @@ def test_extra_commands_support_html_format(command: str, setup_environment) -> 
     )
     assert result.exit_code == 0, result.output
     assert result.stdout.startswith("<!doctype html>"), result.stdout[:200]
-    assert f'data-lens="{lens_for_command(command)}"' in result.stdout
+    assert lens_for_command(command) in {"executive", "engineer", "finance", "audit"}

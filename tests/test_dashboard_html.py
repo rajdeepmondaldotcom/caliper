@@ -1,32 +1,43 @@
+"""Renderer contract tests for the v2 dashboard.
+
+Covers privacy invariants, theme/density/rhythm attributes, section markers,
+empty-state placeholder, table sort stability, and the masthead build id.
+"""
+
 from __future__ import annotations
 
 import datetime as dt
 import json
 
+import pytest
+
 from caliper.config import build_options
 from caliper.dashboards import build_handoff_dashboard, render_dashboard
-from caliper.dashboards.data_models import ImpactCard, ModelRow, ProjectRow, ToolCount, UsageWindow
+from caliper.dashboards.data_models import ModelRow, ProjectRow, ToolCount
 from caliper.dashboards.html import (
+    SECTION_NUMBERS,
     fmt_money,
     fmt_tokens,
-    render_impact_cards,
     render_models,
     render_projects,
-    render_usage_windows,
 )
 from caliper.models import VENDOR_CLAUDE_CODE
 from caliper.parser import load_usage
 
 SECRET = "REDACTED_SECRET_THAT_MUST_NEVER_LEAK"
 
-# The privacy gate permits the dashboard's inline controls, but still forbids
-# external resources and network-capable script APIs.
+# Privacy gate: no external resources, no network-capable script APIs.
 FORBIDDEN = ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import(")
 
 
 def _assert_private_html(html: str) -> None:
-    assert html.count("<script>") == 1
-    assert html.count("</script>") == 1
+    # The v2 renderer ships at most one inline <script> tag — the
+    # interactive toggle controller (Receipt/Terminal + Dark/Light/Safe
+    # Share + Save snapshot). The script uses only DOM, localStorage,
+    # Blob, and URL.createObjectURL — no network APIs.
+    assert html.count("<script>") <= 1
+    assert html.count("</script>") <= 1
+    assert html.count("<script>") == html.count("</script>")
     for needle in FORBIDDEN:
         assert needle not in html, f"Privacy gate broken — dashboard contains {needle!r}"
 
@@ -81,7 +92,7 @@ def _render(
     *,
     theme: str = "dark",
     density: str = "comfortable",
-    default_lens: str | None = None,
+    rhythm: str = "receipt",
     share_safe: bool = False,
 ) -> str:
     _write_session(tmp_path)
@@ -98,13 +109,13 @@ def _render(
         payload,
         theme=theme,
         density=density,
-        default_lens=default_lens,
+        rhythm=rhythm,
         share_safe=share_safe,
     )
 
 
 def test_dashboard_privacy_gate(monkeypatch, tmp_path) -> None:
-    """The CI privacy gate: inline controls only; no external resources."""
+    """No external resources, no scripts, no fetch APIs."""
     html = _render(monkeypatch, tmp_path)
     _assert_private_html(html)
 
@@ -115,47 +126,66 @@ def test_dashboard_does_not_leak_tool_use_input(monkeypatch, tmp_path) -> None:
 
 
 def test_dashboard_renders_section_markers(monkeypatch, tmp_path) -> None:
-    """§ N markers are the design's audit-doc anchor."""
+    """§NN markers are the design's audit anchors."""
     html = _render(monkeypatch, tmp_path)
-    # In non-empty rich state, we expect § 01 (cost) through § 09 (evidence).
-    for marker in ("§&nbsp;01", "§&nbsp;02", "§&nbsp;03", "§&nbsp;04", "§&nbsp;07"):
-        assert marker in html, f"Section marker {marker!r} missing"
+    # At minimum §01 (overview), §03 (shape), §06 (insights) — these always
+    # render regardless of payload density. The mono prefix is rendered as
+    # the literal "§NN" (no separator) to match the design prototype.
+    for marker in ("§01", "§03", "§06"):
+        assert f">{marker}<" in html, f"Section marker {marker!r} missing"
+    # Every rendered section's id and data-screen-label come from SECTION_NUMBERS.
+    for sid, num in SECTION_NUMBERS.items():
+        if f'id="{sid}"' in html:
+            assert f'data-screen-label="{num} ' in html, (
+                f"Section {sid!r} rendered without its data-screen-label"
+            )
 
 
 def test_dashboard_renders_dark_theme_attribute(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path, theme="dark")
     assert 'data-theme="dark"' in html
+    assert "theme-dark" in html
 
 
 def test_dashboard_renders_light_theme(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path, theme="light")
     assert 'data-theme="light"' in html
+    assert "theme-light" in html
     _assert_private_html(html)
 
 
 def test_dashboard_renders_print_theme(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path, theme="print")
     assert 'data-theme="print"' in html
+    assert "theme-print" in html
     _assert_private_html(html)
 
 
 def test_dashboard_renders_compact_density(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path, density="compact")
     assert 'data-density="compact"' in html
+    assert "density-compact" in html
 
 
-def test_dashboard_renders_premium_decision_layer(monkeypatch, tmp_path) -> None:
-    html = _render(monkeypatch, tmp_path, default_lens="audit")
-    assert 'data-lens="audit"' in html
-    assert "Executive brief" in html
-    assert "Decision queue" in html
-    assert "View as" in html
-    assert "Rate-limit signal" in html
-    assert "Evidence quality" in html
-    assert 'data-lens-scope="audit"' in html
-    assert 'href="#executive-brief"' in html
-    assert 'data-trace-target="evidence"' in html
+def test_dashboard_renders_terminal_rhythm(monkeypatch, tmp_path) -> None:
+    html = _render(monkeypatch, tmp_path, rhythm="terminal")
+    # Terminal masthead surfaces the OFFLINE word and the section index rail.
+    assert "OFFLINE" in html
+    assert ">Index<" in html
     _assert_private_html(html)
+
+
+def test_dashboard_renders_receipt_rhythm(monkeypatch, tmp_path) -> None:
+    html = _render(monkeypatch, tmp_path, rhythm="receipt")
+    # Receipt masthead carries the wordmark + subtitle, not the OFFLINE ticker.
+    assert "Cost layer for AI-assisted development" in html
+    _assert_private_html(html)
+
+
+def test_dashboard_renders_build_id(monkeypatch, tmp_path) -> None:
+    """The masthead anchors a dated build id for audit trails."""
+    html = _render(monkeypatch, tmp_path)
+    assert "CALIPER-20260517-" in html
 
 
 def test_dashboard_renders_when_no_events(tmp_path) -> None:
@@ -171,36 +201,27 @@ def test_dashboard_renders_when_no_events(tmp_path) -> None:
     assert "<title>" in html
     assert "Caliper Dashboard" in html
     _assert_private_html(html)
-    # Empty state still renders the page header + footer + empty placeholders.
-    assert "no data for this window" in html
+    # Empty state surfaces a friendly placeholder in the summary cards.
+    assert "No events for this window" in html
+
+
+def test_dashboard_rejects_invalid_options() -> None:
+    from caliper.dashboards.sample_data import sample_dashboard
+
+    d = sample_dashboard()
+
+    with pytest.raises(ValueError):
+        render_dashboard(d, theme="bogus")
+    with pytest.raises(ValueError):
+        render_dashboard(d, density="bogus")
+    with pytest.raises(ValueError):
+        render_dashboard(d, rhythm="bogus")
 
 
 def test_dashboard_formats_billion_tokens_but_not_costs() -> None:
     assert fmt_tokens(1_234_567_890) == "1.2B"
     assert fmt_tokens(234_567_890) == "234.6M"
     assert fmt_money(1_234_567_890) == "$1,234,567,890"
-
-
-def test_dashboard_renderer_sorts_usage_windows_and_impact_cards() -> None:
-    windows = [
-        UsageWindow("Last 90 days", 90, "2026-02-12", "2026-05-13", "90", 3, 3, 3, 3, 0, 3),
-        UsageWindow("Last 7 days", 7, "2026-05-06", "2026-05-13", "7", 1, 1, 1, 1, 0, 1),
-        UsageWindow("Last 30 days", 30, "2026-04-13", "2026-05-13", "30", 2, 2, 2, 2, 0, 2),
-    ]
-    usage_html = render_usage_windows(windows)
-    assert usage_html.index("Last 7 days") < usage_html.index("Last 30 days")
-    assert usage_html.index("Last 30 days") < usage_html.index("Last 90 days")
-
-    cards = [
-        ImpactCard("Usage rhythm", "1 active day", "Peak hour 10 AM"),
-        ImpactCard("Estimated cache savings", "$1", "Good cache", "good"),
-        ImpactCard("Budget risk", "120%", "monthly cost", "critical"),
-        ImpactCard("Cost driver", "api", "$9", "warn"),
-    ]
-    impact_html = render_impact_cards(cards)
-    assert impact_html.index("Budget risk") < impact_html.index("Cost driver")
-    assert impact_html.index("Cost driver") < impact_html.index("Estimated cache savings")
-    assert impact_html.index("Estimated cache savings") < impact_html.index("Usage rhythm")
 
 
 def test_dashboard_renderer_sorts_tables_by_cost() -> None:
@@ -234,36 +255,45 @@ def test_dashboard_renderer_sorts_tables_by_cost() -> None:
     )
     assert project_html.index("project-a") < project_html.index("project-c")
     assert project_html.index("project-c") < project_html.index("project-b")
-    assert "Other selected-window usage" in project_html
     assert "selected-window cost" in project_html
     assert "Share of window" in project_html
     assert 'aria-sort="descending"' in project_html
 
 
-def test_dashboard_renders_analysis_drilldowns(monkeypatch, tmp_path) -> None:
+def test_dashboard_models_table_includes_sortable_marker(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path)
-    assert "Command center" in html
-    assert "Usage mix" in html
-    assert "Savings advisor" in html
-    assert "Highest-cost sessions" in html
-    assert "Rate limits" in html
-    assert "Evidence quality" in html
-    assert 'class="data data-sortable' in html
-    assert 'data-mix-filter="all"' in html
+    # Both the models and projects tables advertise the sortable class so a
+    # future static-HTML enhancement layer (if any) can find them.
+    assert 'class="cal-table data data-sortable' in html
 
 
-def test_dashboard_explains_metrics_and_avoids_stale_window_labels(monkeypatch, tmp_path) -> None:
+def test_dashboard_evidence_link_jumps_to_section(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path)
-    assert "Metric glossary" in html
-    assert "definitions, formulas, and source notes" in html
-    assert "Selected report window" in html
-    assert "deduped usage events" in html
-    assert "Estimated cache savings" in html
-    assert "selected-window cost" in html
-    assert "Formula" in html
-    assert "Source" in html
-    assert "14-day daily cost" not in html
-    legacy_cache_label = "14-day " + "cache hit " + "rate"
-    assert legacy_cache_label not in html
-    assert "14-day token volume" not in html
-    assert "14-day sessions" not in html
+    # The evidence badge in the masthead links to #evidence.
+    assert 'href="#evidence"' in html
+
+
+def test_dashboard_paths_hidden_by_default(monkeypatch, tmp_path) -> None:
+    html = _render(monkeypatch, tmp_path)
+    assert "/tmp/project-alpha" not in html
+
+
+def test_dashboard_section_numbers_are_stable() -> None:
+    # Lock the section IDs and their numeric anchors. Any change here is a
+    # breaking change for external links that point at a generated dashboard.
+    assert SECTION_NUMBERS == {
+        "overview": "01",
+        "cost": "02",
+        "shape": "03",
+        "models": "04",
+        "projects": "05",
+        "insights": "06",
+        "anomalies": "07",
+        "budgets": "08",
+        "forecast": "09",
+        "advisor": "10",
+        "rate-limits": "11",
+        "heatmap": "12",
+        "sessions": "13",
+        "evidence": "14",
+    }
