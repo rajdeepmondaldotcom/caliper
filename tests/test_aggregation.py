@@ -146,6 +146,8 @@ def test_aggregate_sessions_sorted_by_cost_usd_desc(tmp_path) -> None:
     rows = aggregate_sessions(_result(events), _options(tmp_path))
     assert rows[0].key == "sess-large"
     assert rows[1].key == "sess-small"
+    assert "sess-large" not in rows[0].label
+    assert "," in rows[0].label
 
 
 def test_aggregate_projects_groups_by_cwd(tmp_path) -> None:

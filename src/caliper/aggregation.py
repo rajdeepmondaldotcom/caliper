@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Callable
 
+from caliper.humanize import session_display_label
 from caliper.models import (
     UNKNOWN_PROJECT,
     Aggregate,
@@ -280,15 +281,12 @@ def aggregate_monthly(
 def aggregate_sessions(
     result: LoadResult, options: RuntimeOptions, rate_card: RateCard | None = None
 ) -> list[Aggregate]:
-    tz = load_timezone(options.timezone)
-
     def key(event: UsageEvent) -> tuple[str, str]:
-        local_time = event.timestamp.astimezone(tz).strftime("%Y-%m-%d %H:%M")
-        if options.show_prompts:
-            title = event.thread.title or event.thread.first_user_message or event.session_id
-        else:
-            title = event.session_id
-        return event.session_id, f"{local_time} | {title}"
+        return event.session_id, session_display_label(
+            event,
+            options.timezone,
+            include_title=options.show_prompts,
+        )
 
     return sorted(
         aggregate_events(result.events, key, options, rate_card=rate_card),

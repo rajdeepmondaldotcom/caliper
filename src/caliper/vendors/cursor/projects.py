@@ -6,17 +6,31 @@ from typing import Any
 
 from caliper.models import VENDOR_CURSOR, ThreadMeta, Usage, UsageEvent
 from caliper.normalize import normalize_model
+from caliper.progress import NULL_PROGRESS, ParseProgress, report_file_progress
 from caliper.timeutil import parse_event_timestamp
 
 
-def parse_project_jsonl(path: Path) -> list[UsageEvent]:
+def parse_project_jsonl(
+    path: Path,
+    progress: ParseProgress = NULL_PROGRESS,
+) -> list[UsageEvent]:
     events: list[UsageEvent] = []
     try:
         handle = path.open(encoding="utf-8", errors="replace")
     except OSError:
         return events
+    try:
+        total_bytes = path.stat().st_size
+    except OSError:
+        total_bytes = 0
+    bytes_read = 0
+    next_report = 1_000_000
     with handle:
         for line in handle:
+            bytes_read += len(line)
+            if total_bytes and bytes_read >= next_report:
+                report_file_progress(progress, path, min(bytes_read, total_bytes), total_bytes)
+                next_report = bytes_read + 1_000_000
             if not _line_has_usage_marker(line):
                 continue
             raw = _json_obj(line)
@@ -25,6 +39,8 @@ def parse_project_jsonl(path: Path) -> list[UsageEvent]:
             event = _event_from_json(raw, path)
             if event:
                 events.append(event)
+    if total_bytes:
+        report_file_progress(progress, path, total_bytes, total_bytes)
     return events
 
 

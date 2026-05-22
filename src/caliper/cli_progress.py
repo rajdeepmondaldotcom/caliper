@@ -35,6 +35,15 @@ from rich.progress import (
 from caliper.progress import NULL_PROGRESS, ParseProgress
 
 
+def _format_bytes(size: int) -> str:
+    value = float(max(size, 0))
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1000 or unit == "GB":
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1000
+    return f"{value:.1f} GB"
+
+
 class CliParseProgress:
     """Legacy single-task ParseProgress backed by a Rich ``Progress``.
 
@@ -87,6 +96,22 @@ class CliParseProgress:
     def stage_done(self, name: str, summary: str | None = None) -> None:
         return None
 
+    def file_progress(self, path: Path, bytes_read: int, total_bytes: int) -> None:
+        del path, bytes_read, total_bytes
+        return None
+
+    def usage_footprint(
+        self,
+        *,
+        total_files: int,
+        total_bytes: int,
+        vendor_summary: str,
+        window_label: str,
+        unreadable_files: int = 0,
+    ) -> None:
+        del total_files, total_bytes, vendor_summary, window_label, unreadable_files
+        return None
+
     def _tick(self, path: Path) -> None:
         suffix = Path(path).name
         if len(suffix) > 48:
@@ -120,6 +145,7 @@ class CliReportProgress:
         self._parse_total = 0
         self._parse_done = 0
         self._parse_cached = 0
+        self._active_path: Path | None = None
 
     # ---- Stage events ------------------------------------------------------
     def stage_start(self, name: str, total: int | None = None) -> None:
@@ -141,6 +167,7 @@ class CliReportProgress:
             self._parse_total = 0
             self._parse_done = 0
             self._parse_cached = 0
+            self._active_path = None
 
     def stage_advance(self, n: int = 1, detail: str | None = None) -> None:
         if self._current is None or self._current not in self._tasks:
@@ -201,10 +228,47 @@ class CliReportProgress:
             ),
         )
 
+    def file_progress(self, path: Path, bytes_read: int, total_bytes: int) -> None:
+        if "parse" not in self._tasks or total_bytes <= 0:
+            return None
+        self._active_path = Path(path)
+        suffix = self._short_name(path)
+        pct = min(100.0, max(0.0, (bytes_read / total_bytes) * 100.0))
+        self._progress.update(
+            self._tasks["parse"],
+            completed=min(self._parse_done, max(self._parse_total, 1)),
+            description=(
+                f"Reading {self._parse_done:,} / {self._parse_total:,}"
+                + (f"  cached {self._parse_cached:,}" if self._parse_cached else "")
+                + f"  current {pct:.0f}% ({_format_bytes(bytes_read)} / "
+                f"{_format_bytes(total_bytes)})  {suffix}"
+            ),
+        )
+
+    def usage_footprint(
+        self,
+        *,
+        total_files: int,
+        total_bytes: int,
+        vendor_summary: str,
+        window_label: str,
+        unreadable_files: int = 0,
+    ) -> None:
+        detail = (
+            f"Caliper will read {total_files:,} files ({_format_bytes(total_bytes)}) "
+            f"across {vendor_summary} for {window_label}."
+        )
+        if unreadable_files:
+            detail += f" {unreadable_files:,} files could not be sized."
+        if total_bytes >= 1_000_000_000 or total_files >= 1_000:
+            detail += " First runs and cache rebuilds can take a few minutes."
+        self._progress.console.print(detail, style="dim")
+
     # ---- Internals ---------------------------------------------------------
     @staticmethod
     def _describe(name: str) -> str:
         labels = {
+            "discover": "Discovering data",
             "parse": "Reading sessions",
             "aggregate": "Aggregating",
             "analyse": "Analysing",
@@ -215,9 +279,7 @@ class CliReportProgress:
         return labels.get(name, name.capitalize())
 
     def _tick(self, path: Path) -> None:
-        suffix = Path(path).name
-        if len(suffix) > 48:
-            suffix = "..." + suffix[-45:]
+        suffix = self._short_name(path)
         self._progress.update(
             self._tasks["parse"],
             completed=self._parse_done,
@@ -227,6 +289,13 @@ class CliReportProgress:
                 + f"  last: {suffix}"
             ),
         )
+
+    @staticmethod
+    def _short_name(path: Path) -> str:
+        suffix = Path(path).name
+        if len(suffix) > 48:
+            suffix = "..." + suffix[-45:]
+        return suffix
 
     def _task_index(self, task_id) -> int:
         for idx, task in enumerate(self._progress.tasks):

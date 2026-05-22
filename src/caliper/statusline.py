@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from caliper.aggregation import aggregate_total, event_cost
+from caliper.humanize import session_display_label
 from caliper.models import LoadResult, RuntimeOptions, UsageEvent, decimal_string
 from caliper.pricing import RateCard
 from caliper.render import _redact_paths, pricing_status, pricing_warnings
@@ -121,6 +122,10 @@ def statusline_payload(
         if latest is None
         else {
             "timestamp": iso_z(latest.timestamp),
+            "session": session_display_label(
+                latest,
+                options.timezone if options is not None else "UTC",
+            ),
             "session_id": latest.session_id,
             "project": latest.thread.cwd,
             "model": latest.model,

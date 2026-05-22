@@ -73,7 +73,7 @@ from caliper.health import (
     rate_card_age_days,
     worst_health_status,
 )
-from caliper.humanize import short_table_label
+from caliper.humanize import session_display_label, short_table_label
 from caliper.insights import build_insights, insights_payload, render_insights_markdown
 from caliper.intervals import parse_interval
 from caliper.live import run_live
@@ -91,14 +91,16 @@ from caliper.output import (
     records_to_markdown,
     with_caliper_envelope,
 )
-from caliper.parser import load_usage
+from caliper.parser import load_usage, scope_load_result
 from caliper.pricing import (
     MODEL_CARDS,
     PRICING_SOURCES,
     RateCard,
     available_model_names,
     load_rate_card,
+    normalize_service_tier,
     pricing_catalog_status,
+    resolve_hypothetical_model_alias,
 )
 from caliper.pricing_catalog import (
     catalog_model_records,
@@ -572,6 +574,8 @@ ROOT_OPTION_DEFAULTS: dict[str, Any] = {
     "include_all_rate_limit_samples": False,
     "vendors": None,
     "by_vendor": False,
+    "progress": False,
+    "quiet": False,
 }
 
 
@@ -655,11 +659,89 @@ def _safe_load_usage(options: RuntimeOptions, *, progress=None) -> Any:
     from caliper.progress import NULL_PROGRESS
 
     try:
-        if progress is None or progress is NULL_PROGRESS:
+        if progress is None:
+            from caliper.cli_progress import cli_report_progress
+
+            output_format, output, progress_flag, quiet = _progress_context_from_click()
+            with cli_report_progress(
+                output_format=output_format,
+                output=output,
+                progress=progress_flag,
+                quiet=quiet,
+            ) as auto_progress:
+                if auto_progress is NULL_PROGRESS:
+                    return load_usage(options)
+                return _load_usage_with_progress(options, auto_progress, finish_parse=True)
+        if progress is NULL_PROGRESS:
             return load_usage(options)
-        return load_usage(options, progress=progress)
+        return _load_usage_with_progress(options, progress)
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
+
+
+def _progress_context_from_click() -> tuple[str, Path | None, bool, bool]:
+    ctx = click.get_current_context(silent=True)
+    output_format = "table"
+    output: Path | None = None
+    saw_output_format = False
+    saw_output = False
+    progress = False
+    quiet = False
+    while ctx is not None:
+        params = getattr(ctx, "params", {}) or {}
+        if not saw_output_format and params.get("output_format") is not None:
+            output_format = str(params["output_format"])
+            saw_output_format = True
+        if not saw_output and "output" in params:
+            candidate_output = params.get("output")
+            if candidate_output is not None:
+                output = (
+                    candidate_output
+                    if isinstance(candidate_output, Path)
+                    else Path(candidate_output)
+                )
+                saw_output = True
+        progress = progress or bool(params.get("progress", False))
+        quiet = quiet or bool(params.get("quiet", False))
+        ctx = ctx.parent
+    return output_format, output, progress, quiet
+
+
+def _load_usage_with_progress(
+    options: RuntimeOptions,
+    progress,
+    *,
+    finish_parse: bool = False,
+) -> Any:
+    from caliper.vendors import discover_usage_files
+
+    discovery = discover_usage_files(options, progress=progress)
+    _emit_usage_footprint(progress, discovery, options)
+    progress.stage_start("parse", total=discovery.total_files)
+    result = load_usage(options, progress=progress, discovery=discovery)
+    if finish_parse:
+        vendors_count = len({event.vendor for event in result.events if event.vendor})
+        progress.stage_done(
+            "parse",
+            summary=(
+                f"{len(result.events):,} events · {vendors_count} "
+                f"vendor{'s' if vendors_count != 1 else ''}"
+            ),
+        )
+    return result
+
+
+def _emit_usage_footprint(progress, discovery, options: RuntimeOptions) -> None:
+    callback = getattr(progress, "usage_footprint", None)
+    if callback is None:
+        return
+    callback(
+        total_files=discovery.total_files,
+        total_bytes=discovery.total_bytes,
+        vendor_summary=discovery.vendor_summary(),
+        window_label=window_label(options.start, options.end, options.timezone),
+        unreadable_files=discovery.unreadable_files,
+    )
 
 
 def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
@@ -674,7 +756,6 @@ def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
         progress=bool(values.get("progress", False)),
         quiet=bool(values.get("quiet", False)),
     ) as progress:
-        progress.stage_start("parse")
         result = _safe_load_usage(options, progress=progress)
         progress.stage_done(
             "parse",
@@ -976,6 +1057,8 @@ def main(
     include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
     vendors: VendorOpt = None,
     by_vendor: ByVendorOpt = False,
+    progress: ProgressOpt = False,
+    quiet: QuietOpt = False,
     classic: ClassicOpt = False,
 ) -> None:
     if ctx.invoked_subcommand is None:
@@ -1004,7 +1087,6 @@ def _run_overview(values: dict) -> None:
         progress=bool(values.get("progress", False)),
         quiet=bool(values.get("quiet", False)),
     ) as progress:
-        progress.stage_start("parse")
         longest_result = _safe_load_usage(longest_options, progress=progress)
         progress.stage_done(
             "parse",
@@ -1750,7 +1832,6 @@ def limits(
         progress=progress,
         quiet=quiet,
     ) as prog:
-        prog.stage_start("parse")
         result = _safe_load_usage(options, progress=prog)
         prog.stage_done("parse", summary=f"{len(result.events):,} events")
         prog.stage_start("render")
@@ -1810,7 +1891,6 @@ def insights(
         progress=progress,
         quiet=quiet,
     ) as prog:
-        prog.stage_start("parse")
         result = _safe_load_usage(options, progress=prog)
         prog.stage_done("parse", summary=f"{len(result.events):,} events")
         prog.stage_start("analyse")
@@ -2325,28 +2405,29 @@ def dashboard(
                 values.pop(k, None)
             values["output_format"] = "table"
             options = _options(values)
-            prog.stage_start("parse")
-            result = _safe_load_usage(options, progress=prog)
-            vendors_count = len({event.vendor for event in result.events if event.vendor})
+            rolling_start = options.end - dt.timedelta(days=90)
+            load_start = min(options.start, rolling_start)
+            load_options = dataclasses.replace(options, start=load_start)
+            loaded_result = _safe_load_usage(load_options, progress=prog)
+            result = (
+                loaded_result
+                if load_options.start == options.start
+                else scope_load_result(loaded_result, start=options.start, end=options.end)
+            )
+            rolling_options = dataclasses.replace(options, start=rolling_start)
+            rolling_result = (
+                loaded_result
+                if load_options.start == rolling_start
+                else scope_load_result(loaded_result, start=rolling_start, end=options.end)
+            )
+            vendors_count = len({event.vendor for event in loaded_result.events if event.vendor})
             prog.stage_done(
                 "parse",
                 summary=(
-                    f"{len(result.events):,} events · {vendors_count} "
+                    f"{len(loaded_result.events):,} events · {vendors_count} "
                     f"vendor{'s' if vendors_count != 1 else ''}"
                 ),
             )
-            rolling_start = options.end - dt.timedelta(days=90)
-            if options.start == rolling_start:
-                rolling_options = options
-                rolling_result = result
-            else:
-                prog.stage_start("parse")
-                rolling_options = dataclasses.replace(options, start=rolling_start)
-                rolling_result = _safe_load_usage(rolling_options, progress=prog)
-                prog.stage_done(
-                    "parse",
-                    summary=f"{len(rolling_result.events):,} events · 90-day rolling baseline",
-                )
             prog.stage_start("build")
             budget_config = load_config(config) if config else load_config()
             payload = build_handoff_dashboard(
@@ -2505,11 +2586,10 @@ def tail(
         progress=progress,
         quiet=quiet,
     ) as prog:
-        prog.stage_start("parse")
         result = _safe_load_usage(options, progress=prog)
         prog.stage_done("parse", summary=f"{len(result.events):,} events")
         prog.stage_start("render")
-        rows = _recent_tail_rows(result, n, by)
+        rows = _recent_tail_rows(result, n, by, options.timezone)
         if output_format == "json":
             text = json_dumps_enveloped({"by": by, f"{by}s": rows}) + "\n"
         elif output_format == "csv":
@@ -2527,27 +2607,28 @@ def tail(
         typer.echo(text, nl=False)
 
 
-def _recent_tail_rows(result: LoadResult, n: int, by: str) -> list[dict]:
+def _recent_tail_rows(result: LoadResult, n: int, by: str, timezone: str = "UTC") -> list[dict]:
     events = sorted(result.events, key=lambda event: event.timestamp, reverse=True)
     if by == "event":
-        return [_tail_event_dict(event) for event in events[:n]]
+        return [_tail_event_dict(event, timezone) for event in events[:n]]
     seen: set[str] = set()
     rows: list[dict] = []
     for event in events:
         if event.session_id in seen:
             continue
         seen.add(event.session_id)
-        item = _tail_event_dict(event)
-        item["label"] = event.thread.title or event.thread.first_user_message or event.session_id
+        item = _tail_event_dict(event, timezone)
+        item["label"] = session_display_label(event, timezone, include_title=True)
         rows.append(item)
         if len(rows) >= n:
             break
     return rows
 
 
-def _tail_event_dict(event) -> dict:
+def _tail_event_dict(event, timezone: str = "UTC") -> dict:
     return {
         "timestamp": iso_z(event.timestamp),
+        "session": session_display_label(event, timezone),
         "session_id": event.session_id,
         "model": event.model,
         "service_tier": event.service_tier,
@@ -2576,6 +2657,7 @@ def _tail_table(rows: list[dict], by: str, options: RuntimeOptions) -> str:
     local_console.print(f"[bold]Caliper - Recent {by.title()}s[/bold]")
     table = Table(show_lines=False, expand=True)
     table.add_column("Time")
+    table.add_column("Session")
     table.add_column("Model")
     table.add_column("Tier")
     table.add_column("Tokens", justify="right")
@@ -2583,6 +2665,7 @@ def _tail_table(rows: list[dict], by: str, options: RuntimeOptions) -> str:
     for row in rows:
         table.add_row(
             row["timestamp"],
+            row.get("label") or row.get("session") or "-",
             row["model"],
             row["service_tier"],
             format_int(row["total_tokens"]),
@@ -3285,7 +3368,6 @@ def forecast(
         progress=progress,
         quiet=quiet,
     ) as prog:
-        prog.stage_start("parse")
         result = _safe_load_usage(options, progress=prog)
         prog.stage_done("parse", summary=f"{len(result.events):,} events")
         prog.stage_start("aggregate")
@@ -3492,7 +3574,6 @@ def compare(
         progress=progress,
         quiet=quiet,
     ) as prog:
-        prog.stage_start("parse")
         result = _safe_load_usage(options, progress=prog)
         prog.stage_done("parse", summary=f"{len(result.events):,} events")
         prog.stage_start("aggregate")
@@ -3991,20 +4072,33 @@ def _commit_scope_vendor_rows(
     return rows
 
 
-def _validate_whatif_inputs(tier: str | None, model: str | None, output_format: str) -> None:
+def _validate_whatif_inputs(
+    tier: str | None, model: str | None, output_format: str
+) -> tuple[str | None, str | None]:
     if tier is None and model is None:
         raise _exit_error(
             "Provide --hypothetical-service-tier and/or --hypothetical-model "
             "to evaluate a hypothetical."
         )
-    if tier is not None and tier not in {"standard", "fast"}:
-        raise _exit_error("--hypothetical-service-tier must be one of: standard, fast")
-    if model is not None and model not in available_model_names():
+    normalized_tier = normalize_service_tier(tier) if tier is not None else None
+    if tier is not None and normalized_tier not in {"standard", "fast"}:
+        raise _exit_error(
+            "--hypothetical-service-tier must be one of: standard, fast "
+            "(priority/high/xhigh/max are accepted as fast aliases)"
+        )
+    available = available_model_names()
+    normalized_model = (
+        resolve_hypothetical_model_alias(model, available_models=available)
+        if model is not None
+        else None
+    )
+    if model is not None and normalized_model not in available:
         raise _exit_error(
             f"--hypothetical-model {model!r} is not in the active rate card/catalog. "
-            f"Use one of: {', '.join(sorted(available_model_names()))}"
+            f"Use one of: {', '.join(sorted(available))}"
         )
     _validate_format(output_format)
+    return normalized_tier, normalized_model
 
 
 def _render_whatif_report(report, output_format: str) -> None:
@@ -4125,7 +4219,7 @@ def whatif(
         typer.Option(
             "--hypothetical-service-tier",
             "--tier",
-            help="Hypothetical tier: standard or fast.",
+            help="Hypothetical tier: standard or fast. priority/high/xhigh/max count as fast.",
         ),
     ] = None,
     model: Annotated[
@@ -4133,7 +4227,7 @@ def whatif(
         typer.Option(
             "--hypothetical-model",
             "--model",
-            help="Hypothetical model name (must be in rate card).",
+            help="Hypothetical model name or family alias (must resolve to a priced model).",
         ),
     ] = None,
     output_format: FormatOpt = "table",
@@ -4155,7 +4249,7 @@ def whatif(
     """Re-price the window as if you had used a different tier or model."""
     from caliper.cli_progress import cli_report_progress
 
-    _validate_whatif_inputs(tier, model, output_format)
+    tier, model = _validate_whatif_inputs(tier, model, output_format)
 
     try:
         options = build_options(
@@ -4180,7 +4274,6 @@ def whatif(
         progress=progress,
         quiet=quiet,
     ) as prog:
-        prog.stage_start("parse")
         result = _safe_load_usage(options, progress=prog)
         prog.stage_done("parse", summary=f"{len(result.events):,} events")
         prog.stage_start("aggregate")
@@ -4471,7 +4564,6 @@ def agents(
         progress=progress,
         quiet=quiet,
     ) as prog:
-        prog.stage_start("parse")
         result = _safe_load_usage(options, progress=prog)
         prog.stage_done("parse", summary=f"{len(result.events):,} events")
         prog.stage_start("analyse")
@@ -4550,7 +4642,6 @@ def skills(
         progress=progress,
         quiet=quiet,
     ) as prog:
-        prog.stage_start("parse")
         result = _safe_load_usage(options, progress=prog)
         prog.stage_done("parse", summary=f"{len(result.events):,} events")
         prog.stage_start("analyse")
@@ -4627,7 +4718,6 @@ def inefficiencies(
         progress=progress,
         quiet=quiet,
     ) as prog:
-        prog.stage_start("parse")
         result = _safe_load_usage(options, progress=prog)
         prog.stage_done("parse", summary=f"{len(result.events):,} events")
         prog.stage_start("analyse")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,68 @@ def short_table_label(text: str) -> str:
     if clean.startswith(("/", "~")):
         return Path(clean).name or clean
     return clean
+
+
+def human_datetime(
+    value: dt.datetime | None,
+    timezone: str = "UTC",
+    *,
+    fallback: str = "",
+) -> str:
+    """Format a timestamp as a readable, traceable local session label."""
+
+    if value is None:
+        return fallback
+    from caliper.timeutil import load_timezone
+
+    local = value.astimezone(load_timezone(timezone))
+    hour = local.strftime("%I").lstrip("0") or "0"
+    minute = local.strftime("%M")
+    ampm = local.strftime("%p").lower()
+    return f"{hour}:{minute} {ampm}, {local:%A} {local.day} {local:%B} {local.year}"
+
+
+def session_display_label(
+    event: Any,
+    timezone: str = "UTC",
+    *,
+    include_title: bool = False,
+) -> str:
+    """Return the human-facing label for a usage event's session."""
+
+    fallback = str(
+        getattr(event, "session_id", "") or getattr(getattr(event, "path", None), "stem", "")
+    )
+    label = human_datetime(getattr(event, "timestamp", None), timezone, fallback=fallback)
+    if not include_title:
+        return label
+    thread = getattr(event, "thread", None)
+    title = str(
+        getattr(thread, "title", "") or getattr(thread, "first_user_message", "") or ""
+    ).strip()
+    return f"{label} | {redact(title, show=True, limit=72)}" if title else label
+
+
+def session_label_lookup(events: Any, timezone: str = "UTC") -> dict[str, str]:
+    """Map raw session IDs to first-seen human labels."""
+
+    first_by_id: dict[str, Any] = {}
+    for event in events:
+        session_id = str(getattr(event, "session_id", "") or "")
+        if not session_id:
+            continue
+        current = first_by_id.get(session_id)
+        timestamp = getattr(event, "timestamp", None)
+        if current is None or (
+            isinstance(timestamp, dt.datetime)
+            and isinstance(getattr(current, "timestamp", None), dt.datetime)
+            and timestamp < current.timestamp
+        ):
+            first_by_id[session_id] = event
+    return {
+        session_id: session_display_label(event, timezone)
+        for session_id, event in first_by_id.items()
+    }
 
 
 _SPARKLINE_BARS = "▁▂▃▄▅▆▇█"

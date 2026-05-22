@@ -197,7 +197,7 @@ def billing_calculation_checks() -> list[dict[str, object]]:
                 reasoning_output_tokens=25_000,
                 total_tokens=1_100_000,
             ),
-            "expected_cost_usd": "10",
+            "expected_cost_usd": "25",
             "expected_long_context": True,
         },
         {

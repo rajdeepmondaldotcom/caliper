@@ -162,7 +162,7 @@ text_ok shape_help "$VENV/bin/caliper" shape --help
 text_ok dashboard_help "$VENV/bin/caliper" dashboard --help
 text_ok dashboard "$VENV/bin/caliper" dashboard "${COMMON[@]}" --days 1 --no-deltas --output "$OUT/dashboard.html"
 test -s "$OUT/dashboard.html"
-python - "$OUT/dashboard.html" <<'PY'
+"$VENV/bin/python" - "$OUT/dashboard.html" <<'PY'
 from pathlib import Path
 import sys
 

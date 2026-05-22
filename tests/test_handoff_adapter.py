@@ -176,6 +176,8 @@ def test_build_handoff_dashboard_decimal_to_float(monkeypatch, tmp_path) -> None
     assert len(d.totals.daily_session_sparkline) == len(d.daily)
     assert d.command_center
     assert d.top_sessions
+    assert d.top_sessions[0].label == "10:01 am, Tuesday 12 May 2026"
+    assert "s1" not in d.top_sessions[0].label
     assert d.usage_mix
     assert d.rate_limit_pressure is not None
     assert d.quality_score is not None
@@ -323,6 +325,9 @@ def test_build_handoff_dashboard_adds_project_tracking_and_anomalies(monkeypatch
     assert len(project.daily_cost_sparkline) == (options.end.date() - options.start.date()).days
     assert any(row.kind == "Project-day spike" for row in d.anomalies)
     assert any(row.kind == "Session spike" for row in d.anomalies)
+    session_spike = next(row for row in d.anomalies if row.kind == "Session spike")
+    assert "huge" not in session_spike.label
+    assert "2026" in session_spike.label
 
 
 def test_build_handoff_dashboard_rolling_windows_are_deduped(monkeypatch, tmp_path) -> None:

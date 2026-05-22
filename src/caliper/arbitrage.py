@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from caliper.aggregation import event_cost
 from caliper.arbitrage_rules import HEURISTICS_VERSION, RULES
+from caliper.humanize import session_display_label
 from caliper.models import UsageEvent, decimal_string
 from caliper.pricing import MODELS_BY_NAME, RateCard, normalize_model
 
@@ -377,6 +378,7 @@ def _zero_savings_note(rule_id: str) -> str:
 
 def _evidence(event: UsageEvent) -> dict[str, object]:
     return {
+        "session": session_display_label(event, "UTC"),
         "session_id": event.session_id,
         "vendor": event.vendor,
         "model": event.model,

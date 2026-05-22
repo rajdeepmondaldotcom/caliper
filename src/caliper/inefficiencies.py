@@ -31,6 +31,7 @@ from caliper.budgets import (
     usage_for_periods,
 )
 from caliper.efficiency import run_audit
+from caliper.humanize import session_label_lookup
 from caliper.models import Finding, LoadResult, RuntimeOptions, UsageEvent, decimal_string
 from caliper.pricing import RateCard
 
@@ -157,6 +158,7 @@ def _rework_loop_findings(
     if len(positive_costs) < MIN_REWORK_BASELINE:
         return []
     median = statistics.median(positive_costs)
+    labels = session_label_lookup(result.events, options.timezone)
     findings: list[Finding] = []
     for session_id, counts in tool_counts.items():
         diagnostic = sum(count for name, count in counts.items() if name in DIAGNOSTIC_TOOLS)
@@ -173,7 +175,7 @@ def _rework_loop_findings(
                 severity="warn",
                 title="Debug/edit loop cost outlier",
                 detail=(
-                    f"Session {session_id} mixed {diagnostic:,} diagnostic and "
+                    f"{labels.get(session_id, session_id)} mixed {diagnostic:,} diagnostic and "
                     f"{execution:,} edit tools across {total_tools:,} tool calls."
                 ),
                 action="Inspect the session before repeating the same debug loop.",
@@ -182,9 +184,10 @@ def _rework_loop_findings(
                 impact_usd_exact=excess,
                 monthly_projected_savings_usd=_scale_to_monthly(excess, options),
                 confidence="medium",
-                evidence=(session_id, f"{total_tools:,} tool calls"),
+                evidence=(labels.get(session_id, session_id), f"{total_tools:,} tool calls"),
                 evidence_metrics={
                     "session_id": session_id,
+                    "session_label": labels.get(session_id, session_id),
                     "diagnostic_tool_calls": diagnostic,
                     "execution_tool_calls": execution,
                     "total_tool_calls": total_tools,

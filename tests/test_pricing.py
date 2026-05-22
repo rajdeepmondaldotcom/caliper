@@ -7,6 +7,7 @@ from caliper.pricing import (
     estimate_event_cost,
     normalize_model,
     normalize_service_tier,
+    resolve_hypothetical_model_alias,
 )
 
 
@@ -17,7 +18,21 @@ def test_model_and_tier_normalization() -> None:
     assert normalize_model("gpt-5.3-codex-spark") == "gpt-5.3-codex-spark"
     assert normalize_model("gpt-5.5-pro") == "gpt-5.5-pro"
     assert normalize_service_tier("priority") == "fast"
+    assert normalize_service_tier("xhigh") == "fast"
+    assert normalize_service_tier("max") == "fast"
     assert normalize_service_tier("regular") == "standard"
+    assert resolve_hypothetical_model_alias("claude-3-haiku") == "claude-haiku-4.5"
+    assert (
+        resolve_hypothetical_model_alias("gpt-5.5-nano", available_models={"gpt-5.4-mini"})
+        == "gpt-5.4-mini"
+    )
+    assert (
+        resolve_hypothetical_model_alias(
+            "gpt-5.5-nano",
+            available_models={"gpt-5.4-mini", "gpt-5.4-nano"},
+        )
+        == "gpt-5.4-nano"
+    )
 
 
 def test_estimate_event_cost_applies_cached_input_and_long_context_usd() -> None:
@@ -34,12 +49,12 @@ def test_estimate_event_cost_applies_cached_input_and_long_context_usd() -> None
     # gpt-5.5 long-context: input ×2, output ×1.5. This token shape has
     # total_tokens == input_tokens + output_tokens, so reasoning is already
     # included in output_tokens and must not be billed again.
-    # USD ($/M): uncached 500K × 5 × 2 + cached 500K × 0.5 × 2 +
-    #            output 100K × 30 × 1.5 = 10.00
+    # USD ($/M): (uncached 500K × 5 × 2 + cached 500K × 0.5 × 2 +
+    #            output 100K × 30 × 1.5) × gpt-5.5 fast multiplier 2.5 = 25.00
     assert long_context is True
     assert unknown_model is False
-    assert cost.cost_usd == Decimal("10.00")
-    assert cost.calculated_cost_usd == Decimal("10.00")
+    assert cost.cost_usd == Decimal("25.000")
+    assert cost.calculated_cost_usd == Decimal("25.000")
 
 
 def test_reasoning_tokens_contribute_at_output_rate_when_unspecified() -> None:

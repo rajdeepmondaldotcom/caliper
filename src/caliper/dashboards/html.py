@@ -860,7 +860,7 @@ SECTION_NUMBERS: dict[str, str] = {
 }
 
 _SECTION_TITLES: dict[str, str] = {
-    "action-center": "Action center",
+    "action-center": "Operator brief",
     "overview": "Overview",
     "cost": "Cost over time",
     "shape": "Session shape",
@@ -869,14 +869,14 @@ _SECTION_TITLES: dict[str, str] = {
     "insights": "Insights",
     "anomalies": "Anomalies",
     "budgets": "Budget burn",
-    "forecast": "Forecast",
+    "forecast": "Forward look",
     "advisor": "Advisor",
     "rate-limits": "Rate-limit pressure",
     "heatmap": "Activity heatmap",
-    "sessions": "Top sessions",
-    "evidence": "Evidence",
-    "usage-windows": "Rolling windows",
-    "usage-mix": "Usage mix",
+    "sessions": "Session drilldown",
+    "evidence": "Trust & evidence",
+    "usage-windows": "Spend windows",
+    "usage-mix": "Spend drivers",
     "inefficiencies": "Savings opportunities",
     "outlook": "Outlook drivers",
     "attribution": "Attribution",
@@ -895,10 +895,69 @@ _SHAPE_COLORS: dict[str, str] = {
 }
 
 
+def _has_rich_operator_findings(d: Dashboard) -> bool:
+    """Return true when richer, more actionable sections supersede Insights."""
+    return bool(
+        d.decision_queue
+        or d.advisor_recommendations
+        or d.inefficiencies
+        or d.anomalies
+        or d.usage_mix
+        or d.top_sessions
+    )
+
+
+def _command_card_is_useful(card: Any) -> bool:
+    value = str(getattr(card, "value", "")).lower()
+    label = str(getattr(card, "label", ""))
+    tone = str(getattr(card, "tone", "neutral"))
+    if value in {"none", "no budgets", "no samples", "$0.00"}:
+        return False
+    return not (label == "Evidence quality" and tone in {"neutral", "good"})
+
+
+def _has_operator_brief(d: Dashboard) -> bool:
+    return bool(
+        d.decision_queue
+        or any(_command_card_is_useful(card) for card in d.command_center)
+        or d.impact_cards
+    )
+
+
+def _shape_is_useful(d: Dashboard) -> bool:
+    shape = d.shape
+    if not shape or not shape.top_tools or not shape.total_sessions:
+        return False
+    if shape.coverage_total_events <= 0:
+        return bool(shape.tool_use_total)
+    return (shape.coverage_events / shape.coverage_total_events) >= 0.25
+
+
+def _rate_limit_is_actionable(d: Dashboard) -> bool:
+    pressure = d.rate_limit_pressure
+    if pressure is None:
+        return False
+    return pressure.tone in {"critical", "warn"} or pressure.reached_count > 0
+
+
+def _heatmap_is_useful(d: Dashboard) -> bool:
+    if d.recap is None or not d.recap.hours:
+        return False
+    # The hour grid earns its space when it helps plan around reliability or
+    # spend rhythm; otherwise it is diagnostic noise for the default operator.
+    return _rate_limit_is_actionable(d) or d.seasonality is not None
+
+
 def _should_render(section_id: str, d: Dashboard) -> bool:
-    """Hide-when-empty rules. Sections not listed always render."""
+    """Hide sections unless they add action, explanation, or audit value."""
     if section_id == "action-center":
-        return bool(d.command_center or d.decision_queue or d.comparisons or d.executive_brief)
+        return _has_operator_brief(d)
+    if section_id == "overview":
+        return True
+    if section_id == "shape":
+        return _shape_is_useful(d)
+    if section_id == "insights":
+        return bool(d.insights) and not _has_rich_operator_findings(d)
     if section_id == "cost":
         return bool(d.daily)
     if section_id == "models":
@@ -910,13 +969,17 @@ def _should_render(section_id: str, d: Dashboard) -> bool:
     if section_id == "budgets":
         return bool(d.budgets)
     if section_id == "forecast":
-        return d.forecast is not None
+        return bool(
+            d.forecast or d.outlook or d.model_forecasts or d.forecast_drivers or d.seasonality
+        )
     if section_id == "advisor":
-        return bool(d.advisor_recommendations)
+        # Advisor recommendations are rendered inside Savings opportunities
+        # so the same savings claim is not repeated in two sections.
+        return False
     if section_id == "rate-limits":
-        return d.rate_limit_pressure is not None
+        return _rate_limit_is_actionable(d)
     if section_id == "heatmap":
-        return d.recap is not None and bool(d.recap.hours)
+        return _heatmap_is_useful(d)
     if section_id == "sessions":
         return bool(d.top_sessions)
     if section_id == "evidence":
@@ -926,13 +989,12 @@ def _should_render(section_id: str, d: Dashboard) -> bool:
     if section_id == "usage-mix":
         return bool(d.usage_mix)
     if section_id == "inefficiencies":
-        return bool(d.inefficiencies or d.cache_leverage)
+        return bool(d.advisor_recommendations or d.inefficiencies or d.cache_leverage)
     if section_id == "outlook":
-        return bool(d.outlook or d.model_forecasts or d.forecast_drivers or d.seasonality)
+        return False
     if section_id == "attribution":
         return bool(d.agents or d.skills or d.tier_provenance or d.long_context_histogram)
-    # overview / shape / insights always render (placeholder when empty)
-    return True
+    return False
 
 
 # ============================================================================
@@ -1159,6 +1221,8 @@ _ANCHOR_ALIASES = {
     "usage-windows": "usage-windows",
     "top-sessions": "sessions",
     "metric-glossary": "evidence",
+    "advisor": "inefficiencies",
+    "cost-over-time": "cost",
 }
 
 
@@ -1327,7 +1391,7 @@ def _bar_chart(
     nice_max = _nice_ceil(mx)
     total = sum(v for _, _, v, _, _ in data)
     avg = total / len(data) if data else 0.0
-    pad_l, pad_r, pad_t, pad_b = 44, 16, 18, 28
+    pad_l, pad_r, pad_t, pad_b = 44, 16, 50, 28
     inner_w = max(50, width - pad_l - pad_r)
     inner_h = height - pad_t - pad_b
     bar_w = inner_w / len(data)
@@ -1336,7 +1400,7 @@ def _bar_chart(
     avg_y = pad_t + inner_h - (avg / nice_max) * inner_h if avg > 0 else None
     parts = [
         f'<svg width="100%" viewBox="0 0 {width} {height}" preserveAspectRatio="xMinYMin meet" '
-        f'role="img" aria-label="Daily cost bar chart" style="display:block;height:{height}px">',
+        f'role="img" aria-label="Daily cost bar chart" style="display:block;height:{height}px;overflow:visible">',
     ]
     for i in range(y_ticks + 1):
         t = (nice_max / y_ticks) * i
@@ -1390,9 +1454,12 @@ def _bar_chart(
         aria_label = (
             f"{day or label}: {fmt_money(value)}, {fmt_int(events)} events, {shape}, {delta_label}"
         )
-        tip_w, tip_h = 168, 42
+        tip_w, tip_h = 184, 46
         tip_x = min(max(pad_l, center_x - tip_w / 2), width - pad_r - tip_w)
-        tip_y = y - tip_h - 8 if y - tip_h - 8 >= pad_t else y + 8
+        tip_y = y - tip_h - 8
+        if tip_y < 4:
+            tip_y = y + 8
+        tip_y = min(max(4.0, tip_y), height - tip_h - 4)
         parts.append(
             f'<g class="cal-bar-group" tabindex="0" role="listitem" '
             f'aria-label="{_esc(aria_label)}">'
@@ -1420,7 +1487,7 @@ def _bar_chart(
             'rx="4" fill="var(--panel)" stroke="var(--border-strong)" />'
             f'<text x="{tip_x + 8:.1f}" y="{tip_y + 16:.1f}" font-size="11" '
             f'fill="var(--ink)" font-weight="600">{_esc(label)} · {_esc(fmt_money(value))}</text>'
-            f'<text x="{tip_x + 8:.1f}" y="{tip_y + 31:.1f}" font-size="10" '
+            f'<text x="{tip_x + 8:.1f}" y="{tip_y + 32:.1f}" font-size="10" '
             f'fill="var(--mute)">{fmt_int(events)} events · {_esc(delta_label)}</text>'
             "</g>"
         )
@@ -2203,7 +2270,31 @@ def _small_table(
 
 
 def _section_action_center(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
-    cards = list(d.command_center)[:7]
+    priority_items = list(d.decision_queue)[:5]
+    queue_rows = "".join(
+        _compact_row(
+            label=f"{item.rank}. {item.title}",
+            value=item.evidence,
+            detail=f"{item.detail} Action: {item.action}",
+            tone=item.tone,
+            href=item.anchor,
+            pm=pm,
+        )
+        for item in priority_items
+    )
+
+    if queue_rows:
+        body = (
+            '<div style="background:var(--panel);border:1px solid var(--border);'
+            'border-radius:var(--r-md);overflow:hidden">'
+            '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
+            'color:var(--ink-2);font-weight:600">Next actions</div>'
+            f"{queue_rows}</div>"
+        )
+        meta = f"{len(priority_items)} priority actions"
+        return _section_wrap("action-center", rhythm=rhythm, body=body, meta=meta)
+
+    cards = [card for card in d.command_center if _command_card_is_useful(card)][:4]
     if not cards and d.impact_cards:
         cards = [
             type(
@@ -2217,7 +2308,7 @@ def _section_action_center(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str
                     "metric": "impact",
                 },
             )()
-            for card in d.impact_cards[:5]
+            for card in d.impact_cards[:4]
         ]
     card_html = "".join(
         _value_card(
@@ -2231,54 +2322,13 @@ def _section_action_center(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str
         )
         for card in cards
     )
-    if card_html:
-        card_html = (
-            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));'
-            f'gap:10px">{card_html}</div>'
-        )
-    queue_rows = "".join(
-        _compact_row(
-            label=f"{item.rank}. {item.title}",
-            value=item.evidence,
-            detail=f"{item.detail} Action: {item.action}",
-            tone=item.tone,
-            href=item.anchor,
-            pm=pm,
-        )
-        for item in d.decision_queue[:7]
-    )
-    comparisons = "".join(
-        _compact_row(
-            label=item.label,
-            value=item.value,
-            detail=item.detail,
-            tone=item.tone,
-            href=item.anchor,
-            pm=pm,
-        )
-        for item in d.comparisons[:5]
-    )
-    queue_panel = (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);overflow:hidden">'
-        '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
-        'color:var(--ink-2);font-weight:600">Decision queue</div>'
-        f"{queue_rows or _empty_placeholder('No decision queue item was generated.')}</div>"
-    )
-    signal_panel = (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);overflow:hidden">'
-        '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
-        'color:var(--ink-2);font-weight:600">Signals checked</div>'
-        f"{comparisons or _empty_placeholder('No comparison signals were generated.')}</div>"
-    )
+    if not card_html:
+        return ""
     body = (
-        f"{card_html}"
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));'
-        'gap:12px;margin-top:12px">'
-        f"{queue_panel}{signal_panel}</div>"
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));'
+        f'gap:10px">{card_html}</div>'
     )
-    meta = f"{len(d.decision_queue)} decisions · {len(d.comparisons)} signals"
+    meta = f"{len(cards)} useful checks"
     return _section_wrap("action-center", rhythm=rhythm, body=body, meta=meta)
 
 
@@ -2315,11 +2365,19 @@ def _section_usage_mix(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     by_dimension: dict[str, list[Any]] = {}
     for row in d.usage_mix:
         by_dimension.setdefault(row.dimension, []).append(row)
+    dimension_labels = {
+        "vendor": "Vendor spend",
+        "model/tier": "Model and tier",
+        "tier": "Service tier",
+        "source": "Source",
+    }
     panels: list[str] = []
+    displayed = 0
     for dimension in ("vendor", "model/tier", "tier", "source"):
         rows = sorted(by_dimension.get(dimension, []), key=lambda r: -r.cost_usd)[:5]
         if not rows:
             continue
+        displayed += len(rows)
         max_cost = max((row.cost_usd for row in rows), default=1.0) or 1.0
         row_html = []
         for row in rows:
@@ -2343,19 +2401,49 @@ def _section_usage_mix(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             'border-radius:var(--r-md);overflow:hidden">'
             f'<div style="padding:10px 12px;background:var(--panel-2);font-size:11px;'
             f'letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-weight:650">'
-            f"{_esc(dimension)}</div>" + "".join(row_html) + "</div>"
+            f"{_esc(dimension_labels.get(dimension, dimension))}</div>"
+            + "".join(row_html)
+            + "</div>"
         )
     body = (
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">'
         + "".join(panels)
         + "</div>"
     )
-    return _section_wrap("usage-mix", rhythm=rhythm, body=body, meta=f"{len(d.usage_mix)} rows")
+    meta = f"Top {displayed} spend drivers" if displayed else None
+    return _section_wrap("usage-mix", rhythm=rhythm, body=body, meta=meta)
 
 
 def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    recommendation_rows = []
+    for row in d.advisor_recommendations[:5]:
+        detail = (
+            f"{row.detail} Action: {row.action} Confidence: {int(round(row.confidence * 100))}%."
+        )
+        recommendation_rows.append(
+            _compact_row(
+                label=row.title,
+                value=fmt_money(row.savings_usd),
+                detail=detail,
+                tone=row.tone,
+                pm=pm,
+            )
+        )
+    recommendations = ""
+    if recommendation_rows:
+        recommendations = (
+            '<div style="background:var(--panel);border:1px solid var(--border);'
+            'border-radius:var(--r-md);overflow:hidden">'
+            '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
+            'color:var(--ink-2);font-weight:600">Recommended changes</div>'
+            f"{''.join(recommendation_rows)}</div>"
+        )
+
+    advisor_amounts = [row.savings_usd for row in d.advisor_recommendations]
     finding_rows = []
     for row in d.inefficiencies[:6]:
+        if any(abs(row.impact_usd - savings) < 0.01 for savings in advisor_amounts):
+            continue
         value = fmt_money(row.impact_usd)
         detail = (
             f"{row.detail} Action: {row.action} Confidence: {row.confidence}; "
@@ -2370,13 +2458,15 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
                 pm=pm,
             )
         )
-    findings = (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);overflow:hidden">'
-        '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
-        'color:var(--ink-2);font-weight:600">Evidence-labelled findings</div>'
-        f"{''.join(finding_rows) if finding_rows else _empty_placeholder('No inefficiency finding crossed thresholds.')}</div>"
-    )
+    findings = ""
+    if finding_rows:
+        findings = (
+            '<div style="background:var(--panel);border:1px solid var(--border);'
+            'border-radius:var(--r-md);overflow:hidden">'
+            '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
+            'color:var(--ink-2);font-weight:600">Detected waste</div>'
+            f"{''.join(finding_rows)}</div>"
+        )
     cache_rows = []
     for row in d.cache_leverage[:6]:
         cache_rows.append(
@@ -2387,16 +2477,23 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
                 fmt_tokens(row.cached_input_tokens),
             ]
         )
-    cache = _small_table(
-        ["Cache leverage", "Savings", "Hit rate", "Cached tokens"],
-        cache_rows,
-        empty="No cache leverage rows.",
+    cache = (
+        _small_table(["Cache leverage", "Savings", "Hit rate", "Cached tokens"], cache_rows)
+        if cache_rows
+        else ""
     )
+    panels = "".join(panel for panel in (recommendations, findings, cache) if panel)
+    if not panels:
+        return ""
     body = (
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">'
-        f"{findings}{cache}</div>"
+        f"{panels}</div>"
     )
-    meta = f"{len(d.inefficiencies)} findings · {len(d.cache_leverage)} cache rows"
+    total_savings = sum(row.savings_usd for row in d.advisor_recommendations)
+    if total_savings > 0:
+        meta = f"{fmt_money(total_savings)} estimated savings"
+    else:
+        meta = f"{len(finding_rows)} findings · {len(cache_rows)} cache rows"
     return _section_wrap("inefficiencies", rhythm=rhythm, body=body, meta=meta)
 
 
@@ -2663,10 +2760,10 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
         f"{sample_n}."
     )
     sessions_formula = (
-        "session = continuous AI coding conversation (one ID upstream).\n"
-        "Caliper dedupes by parser session id, so a session is counted once\n"
+        "session = continuous AI coding conversation.\n"
+        "Caliper dedupes by upstream session identity, so a session is counted once\n"
         "even if it spans multiple JSONL files.\n"
-        f"{fmt_int(t.sessions)} unique session IDs across "
+        f"{fmt_int(t.sessions)} unique sessions across "
         f"{fmt_int(t.turns)} turns; {t.tools_per_turn:.2f} tools/turn."
     )
 
@@ -2793,10 +2890,7 @@ def _section_shape(d: Dashboard, *, rhythm: str) -> str:
         f"{s.total_sessions} sessions · {s.total_turns} turns" if s and s.total_sessions else None
     )
     if not s or not s.top_tools:
-        body = _empty_placeholder(
-            "No tool-use signal yet in this window. Session shape is currently extracted from Claude Code only."
-        )
-        return _section_wrap("shape", rhythm=rhythm, body=body, meta=meta)
+        return ""
     segments: list[tuple[str, float, str]] = []
     for c in s.categories:
         color = _SHAPE_COLORS.get(c.category, "var(--mixed)")
@@ -2906,7 +3000,7 @@ def _section_models(d: Dashboard, *, rhythm: str) -> str:
     if not d.by_model:
         return ""
     body = render_models(d.by_model, total_cost=d.totals.cost_usd)
-    meta = f"{len(d.by_model)} models"
+    meta = f"{len(d.by_model)} model/tier rows · sorted by cost"
     return _section_wrap("models", rhythm=rhythm, body=body, meta=meta)
 
 
@@ -3025,7 +3119,7 @@ def _section_projects(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     body = render_projects(
         d.by_project, show_paths=d.show_paths, total_cost=d.totals.cost_usd, pm=pm
     )
-    meta = f"{len(d.by_project)} projects · sorted by cost"
+    meta = f"{len(d.by_project)} cost-ranked projects"
     return _section_wrap("projects", rhythm=rhythm, body=body, meta=meta)
 
 
@@ -3096,8 +3190,7 @@ def _insight_row(it: Insight, *, dense: bool, pm: _PrivacyMap) -> str:
 def _section_insights(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap) -> str:
     insights = list(d.insights)
     if not insights:
-        body = _empty_placeholder("No insights for this window.")
-        return _section_wrap("insights", rhythm=rhythm, body=body)
+        return ""
     order = {"critical": 0, "warn": 1, "info": 2}
     insights.sort(key=lambda it: order.get(it.severity, 9))
     body = (
@@ -3246,34 +3339,103 @@ def _forecast_card(label: str, value: str, sub: str, band: str | None) -> str:
     )
 
 
-def _section_forecast(d: Dashboard, *, rhythm: str) -> str:
+def _section_forecast(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    panels: list[str] = []
     f: Forecast | None = d.forecast
-    if f is None:
+    if f is not None:
+        intro = (
+            f'<div style="font-size:12px;color:var(--mute);margin-bottom:10px">'
+            f"Based on {f.days_analyzed} days · projected through next "
+            f"{f.days_remaining} days.</div>"
+        )
+        band1 = f"1σ band: {fmt_money(f.linear_low)} to {fmt_money(f.linear_high)}"
+        band2 = f"Delta vs linear: {fmt_money(f.ewma_total - f.linear_total)}"
+        cards = _forecast_card(
+            "Selected-window run rate",
+            fmt_money(f.linear_total),
+            f"daily mean ${f.daily_mean:.0f} ± ${f.daily_stdev:.0f}",
+            band1,
+        ) + _forecast_card(
+            "Recent-days weighted",
+            fmt_money(f.ewma_total),
+            "Weights recent spend higher",
+            band2,
+        )
+        panels.append(
+            intro + '<div class="cal-forecast-grid" style="display:grid;'
+            'grid-template-columns:1fr 1fr;gap:12px">' + cards + "</div>"
+        )
+
+    if d.outlook:
+        out = d.outlook
+        panels.append(
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">'
+            + _value_card(
+                label="30d outlook",
+                value=fmt_money(out.horizon_30d.linear_total),
+                detail=(
+                    f"Band {fmt_money(out.horizon_30d.linear_low)} to "
+                    f"{fmt_money(out.horizon_30d.linear_high)}; recency-weighted "
+                    f"{fmt_money(out.horizon_30d.ewma_total)}."
+                ),
+                tone="warn"
+                if out.horizon_30d.ewma_total > out.horizon_30d.linear_total
+                else "neutral",
+            )
+            + _value_card(
+                label="90d outlook",
+                value=fmt_money(out.horizon_90d.linear_total),
+                detail=(
+                    f"Band {fmt_money(out.horizon_90d.linear_low)} to "
+                    f"{fmt_money(out.horizon_90d.linear_high)} from {out.days_analyzed} days."
+                ),
+                tone="neutral",
+            )
+            + "</div>"
+        )
+
+    if d.model_forecasts:
+        rows = []
+        for row in d.model_forecasts[:6]:
+            rows.append(
+                [
+                    _esc(row.model),
+                    fmt_money(row.projected_30d_cost_usd),
+                    _esc(row.trend_label),
+                    _sparkline(row.daily_cost_sparkline, width=72, height=18),
+                ]
+            )
+        panels.append(_small_table(["Model", "30d", "Trend", "Recent"], rows))
+    if d.forecast_drivers:
+        rows = []
+        for row in d.forecast_drivers[:8]:
+            rows.append(
+                [
+                    _private_text(f"{row.dimension}: {row.label}", pm),
+                    fmt_money(row.projected_30d_cost_usd),
+                    fmt_pct(row.share, 0),
+                    _esc(row.evidence_status),
+                ]
+            )
+        panels.append(_small_table(["Driver", "30d", "Share", "Evidence"], rows))
+    if d.seasonality:
+        s = d.seasonality
+        panels.append(
+            '<div style="background:var(--panel);border:1px solid var(--border);'
+            'border-radius:var(--r-md);padding:14px">'
+            '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px">'
+            '<span style="font-size:12px;color:var(--ink);font-weight:600">Cost-weighted rhythm</span>'
+            f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">peak {s.peak_hour:02d}:00 · off-peak {fmt_pct(s.off_peak_share, 0)}</span>'
+            "</div>"
+            f"{_hour_bars(s.by_hour_cost_usd)}"
+            f'<div style="font-size:11px;color:var(--mute);margin-top:9px">{_esc(s.timezone)} · {fmt_money(s.total_cost_usd)} distributed by local hour</div>'
+            "</div>"
+        )
+    if not panels:
         return ""
-    intro = (
-        f'<div style="font-size:12px;color:var(--mute);margin-bottom:10px">'
-        f"Based on {f.days_analyzed} days · projected through next {f.days_remaining} days.</div>"
-    )
-    band1 = f"1σ band: {fmt_money(f.linear_low)} – {fmt_money(f.linear_high)}"
-    band2 = f"Δ vs linear: {fmt_money(f.ewma_total - f.linear_total)}"
-    cards = _forecast_card(
-        "Linear projection",
-        fmt_money(f.linear_total),
-        f"daily mean ${f.daily_mean:.0f} ± ${f.daily_stdev:.0f}",
-        band1,
-    ) + _forecast_card(
-        "EWMA (recency-weighted)",
-        fmt_money(f.ewma_total),
-        "Weights recent days higher",
-        band2,
-    )
-    body = (
-        intro
-        + '<div class="cal-forecast-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
-        + cards
-        + "</div>"
-    )
-    return _section_wrap("forecast", rhythm=rhythm, body=body)
+    body = '<div style="display:grid;gap:12px">' + "".join(panels) + "</div>"
+    meta = f"{len(d.model_forecasts)} model forecasts · {len(d.forecast_drivers)} drivers"
+    return _section_wrap("forecast", rhythm=rhythm, body=body, meta=meta)
 
 
 def _section_advisor(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
@@ -3503,24 +3665,24 @@ def _section_evidence(d: Dashboard, *, dense: bool, rhythm: str) -> str:
 _SECTION_ORDER: list[str] = [
     "action-center",
     "overview",
-    "usage-windows",
     "cost",
-    "shape",
-    "models",
-    "projects",
+    "usage-windows",
     "usage-mix",
-    "insights",
     "anomalies",
-    "budgets",
     "inefficiencies",
     "forecast",
-    "outlook",
-    "advisor",
+    "budgets",
+    "models",
+    "projects",
+    "sessions",
+    "shape",
     "rate-limits",
     "heatmap",
-    "sessions",
     "attribution",
     "evidence",
+    "insights",
+    "outlook",
+    "advisor",
 ]
 
 
@@ -3552,7 +3714,7 @@ def _render_section(
     if section_id == "inefficiencies":
         return _section_inefficiencies(d, rhythm=rhythm, pm=pm)
     if section_id == "forecast":
-        return _section_forecast(d, rhythm=rhythm)
+        return _section_forecast(d, rhythm=rhythm, pm=pm)
     if section_id == "outlook":
         return _section_outlook(d, rhythm=rhythm, pm=pm)
     if section_id == "advisor":

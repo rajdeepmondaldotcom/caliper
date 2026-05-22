@@ -134,7 +134,8 @@ def test_session_json_hides_prompt_labels_by_default(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     assert "Synthetic private prompt" not in result.output
     payload = json.loads(result.output)
-    assert payload["breakdowns"][0]["label"].endswith("private")
+    assert payload["breakdowns"][0]["label"].endswith("2026")
+    assert "private" not in payload["breakdowns"][0]["label"]
 
 
 def test_invalid_format_exits_with_usage_error() -> None:

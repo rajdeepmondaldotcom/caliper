@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,10 +23,11 @@ class CodexParser:
         self,
         options: RuntimeOptions,
         progress: ParseProgress = NULL_PROGRESS,
+        paths: Iterable[Path] | None = None,
     ) -> LoadResult:
         from caliper.parser import load_codex_usage
 
-        return load_codex_usage(options, progress=progress)
+        return load_codex_usage(options, progress=progress, paths=paths)
 
 
 PARSER = CodexParser()

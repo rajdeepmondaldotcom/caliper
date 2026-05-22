@@ -52,7 +52,7 @@ def _make_console(buffer: io.StringIO, options: RuntimeOptions) -> Console:
 
 def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
     reported = item.costs.reported_cost_usd if item.costs.vendor_reported_events else None
-    return {
+    payload = {
         "key": item.key,
         "label": redact(item.label, show_prompts),
         "events": item.totals.events,
@@ -109,6 +109,9 @@ def aggregate_to_dict(item: Aggregate, show_prompts: bool = False) -> dict:
         "local_rate_override_events": item.costs.local_override_events,
         "vendor_reported_events": item.costs.vendor_reported_events,
     }
+    if item.key in item.session_ids:
+        payload["session"] = item.label
+    return payload
 
 
 def sorted_model_breakdowns(item: Aggregate) -> list[ModelBreakdown]:

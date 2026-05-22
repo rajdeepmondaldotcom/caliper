@@ -5,6 +5,18 @@ ROOT="$(mktemp -d)"
 OUT="$ROOT/out"
 mkdir -p "$OUT"
 
+PYTHON_BIN="${PYTHON:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+  else
+    echo "error: python3 or python is required for release smoke." >&2
+    exit 127
+  fi
+fi
+
 export CALIPER_CACHE_DIR="$ROOT/cache"
 export XDG_DATA_HOME="$ROOT/data"
 export CODEX_HOME="$ROOT/codex-empty"
@@ -20,7 +32,7 @@ json_ok() {
   shift
   local file="$OUT/$name.json"
   "$@" > "$file"
-  python -m json.tool "$file" >/dev/null
+  "$PYTHON_BIN" -m json.tool "$file" >/dev/null
   local bytes
   bytes="$(wc -c < "$file" | tr -d ' ')"
   printf '%s ok json bytes=%s\n' "$name" "$bytes"
@@ -66,7 +78,7 @@ text_ok receipt_md uv run caliper export receipt --receipt-month 2026-05 --recei
 text_ok receipt_html uv run caliper export receipt --receipt-month 2026-05 --receipt-format html --receipt-row-limit 2
 text_ok dashboard uv run caliper dashboard --lookback-days 1 --no-deltas --output "$OUT/caliper.html"
 test -s "$OUT/caliper.html"
-python - "$OUT/caliper.html" <<'PY'
+"$PYTHON_BIN" - "$OUT/caliper.html" <<'PY'
 from pathlib import Path
 import sys
 
@@ -81,7 +93,7 @@ json_ok budgets uv run caliper budgets check --config "$ROOT/.caliper.toml" --ou
 text_ok live uv run caliper live --refresh-max-ticks 1 --refresh-interval 0.5
 
 if command -v curl >/dev/null 2>&1; then
-  PORT="$(python - <<'PY'
+  PORT="$("$PYTHON_BIN" - <<'PY'
 import socket
 
 sock = socket.socket()
@@ -113,7 +125,7 @@ fi
 
 if [[ "${CALIPER_SMOKE_ALLOW_NETWORK:-0}" == "1" ]]; then
   uv run caliper rates refresh --allow-network --output "$OUT/rates-live.json" > "$OUT/rates-refresh.txt"
-  python -m json.tool "$OUT/rates-live.json" >/dev/null
+  "$PYTHON_BIN" -m json.tool "$OUT/rates-live.json" >/dev/null
   printf 'rates_refresh ok json bytes=%s\n' "$(wc -c < "$OUT/rates-live.json" | tr -d ' ')"
 fi
 

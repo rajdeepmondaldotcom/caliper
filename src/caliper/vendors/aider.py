@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -19,7 +20,7 @@ from caliper.models import (
     VendorParseStats,
 )
 from caliper.parse_cache import ParseCache
-from caliper.progress import NULL_PROGRESS, ParseProgress
+from caliper.progress import NULL_PROGRESS, ParseProgress, report_file_progress
 
 SUPPORTED_VERSIONS = ("inline-cost-v1",)
 PARSER_CACHE_SIGNATURE = json.dumps(
@@ -50,13 +51,14 @@ class AiderParser:
         self,
         options: RuntimeOptions,
         progress: ParseProgress = NULL_PROGRESS,
+        paths: Iterable[Path] | None = None,
     ) -> LoadResult:
         start = options.start.astimezone(dt.UTC)
         end = options.end.astimezone(dt.UTC)
         cache = ParseCache.default() if options.parse_cache else None
         events: list[UsageEvent] = []
         warnings: list[str] = []
-        paths = self.discover(options)
+        paths = list(paths) if paths is not None else self.discover(options)
         unsupported_paths: list[Path] = []
         files_with_events = 0
         try:
@@ -81,6 +83,7 @@ class AiderParser:
                     cache,
                     start=start,
                     end=end,
+                    progress=progress,
                 )
                 if unsupported:
                     unsupported_paths.append(path)
@@ -133,9 +136,10 @@ def _parse_cached_history(
     *,
     start: dt.datetime,
     end: dt.datetime,
+    progress: ParseProgress = NULL_PROGRESS,
 ) -> tuple[list[UsageEvent], bool, bool]:
     if cache is None:
-        events = _parse_history(path)
+        events = _parse_history(path, progress=progress)
         return _events_in_window(events, start=start, end=end), bool(events), not events
     indexed = cache.get_indexed_events(path, PARSER_CACHE_SIGNATURE, start=start, end=end)
     if indexed is not None:
@@ -153,7 +157,7 @@ def _parse_cached_history(
             unsupported=not cached,
         )
         return _events_in_window(cached, start=start, end=end), bool(cached), not cached
-    events = _parse_history(path)
+    events = _parse_history(path, progress=progress)
     cache.put_indexed_events(
         path,
         PARSER_CACHE_SIGNATURE,
@@ -173,11 +177,17 @@ def _events_in_window(
     return [event for event in events if start <= event.timestamp < end]
 
 
-def _parse_history(path: Path) -> list[UsageEvent]:
+def _parse_history(path: Path, progress: ParseProgress = NULL_PROGRESS) -> list[UsageEvent]:
+    try:
+        total_bytes = path.stat().st_size
+    except OSError:
+        total_bytes = 0
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return []
+    if total_bytes:
+        report_file_progress(progress, path, total_bytes, total_bytes)
     events: list[UsageEvent] = []
     timestamp = dt.datetime.fromtimestamp(path.stat().st_mtime, tz=dt.UTC)
     for index, line in enumerate(lines, start=1):

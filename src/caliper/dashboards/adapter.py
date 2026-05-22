@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import json
 from decimal import Decimal
 from typing import Any
 
@@ -113,6 +114,8 @@ from caliper.dashboards.data_models import (
 from caliper.evidence import evidence_dimensions
 from caliper.forecasts import project as project_forecast
 from caliper.health import rate_card_age_days
+from caliper.humanize import human_datetime as _format_human_datetime
+from caliper.humanize import session_label_lookup
 from caliper.inefficiencies import build_inefficiency_findings
 from caliper.insights import build_insights
 from caliper.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions
@@ -1282,7 +1285,7 @@ def _build_top_sessions(
     options: RuntimeOptions,
     rate_card: RateCard,
 ) -> list[SessionRow]:
-    """Cost/token/tool outliers, deduped by parser session id."""
+    """Cost/token/tool outliers, deduped by upstream session identity."""
     if not result.events:
         return []
     from caliper.models import project_name_from_path
@@ -1297,10 +1300,19 @@ def _build_top_sessions(
 
     rows: list[SessionRow] = []
     for agg in aggregate_sessions(result, options, rate_card=rate_card)[:10]:
-        label = _session_label(agg.label, agg.key)
-        started = (
-            agg.first_seen.astimezone(dt.UTC).strftime("%Y-%m-%d %H:%M") if agg.first_seen else ""
+        raw_label = _session_label(agg.label, agg.key)
+        label = _human_session_label(
+            agg.first_seen,
+            options.timezone,
+            fallback=raw_label,
         )
+        started = _human_datetime(agg.first_seen, options.timezone, fallback="")
+        if started == label:
+            started = (
+                agg.first_seen.astimezone(dt.UTC).strftime("%Y-%m-%d %H:%M UTC")
+                if agg.first_seen
+                else ""
+            )
         project = " · ".join(sorted(agg.project_names)) if agg.project_names else UNKNOWN_PROJECT
         if project == UNKNOWN_PROJECT and agg.project_paths:
             project = project_name_from_path(sorted(agg.project_paths)[0])
@@ -1354,6 +1366,86 @@ def _session_outlier_reason(agg: Aggregate, tool_calls: int) -> str:
     return "high activity"
 
 
+def _session_label_lookup(events: list[Any], timezone: str) -> dict[str, str]:
+    return session_label_lookup(events, timezone)
+
+
+def _human_session_label(
+    value: dt.datetime | None,
+    timezone: str,
+    *,
+    fallback: str,
+) -> str:
+    label = _human_datetime(value, timezone, fallback="")
+    if label:
+        return label
+    return fallback
+
+
+def _human_datetime(
+    value: dt.datetime | None,
+    timezone: str,
+    *,
+    fallback: str,
+) -> str:
+    return _format_human_datetime(value, timezone, fallback=fallback)
+
+
+def _reasoning_effort_label(event: Any) -> str:
+    effort = str(getattr(getattr(event, "thread", None), "reasoning_effort", "") or "")
+    effort = effort.strip().lower().replace("_", "-")
+    if effort == "x-high":
+        return "xhigh"
+    return effort
+
+
+def _tier_with_reasoning_label(event: Any) -> str:
+    tier = str(getattr(event, "service_tier", "") or "unknown").strip() or "unknown"
+    effort = _reasoning_effort_label(event)
+    if effort and effort not in {tier, "none", "default"}:
+        return f"{tier} / {effort}"
+    return tier
+
+
+def _human_source_label(raw: str, event: Any) -> str:
+    text = (raw or "").strip()
+    thread = getattr(event, "thread", None)
+    role = str(getattr(thread, "agent_role", "") or "").strip()
+    nickname = str(getattr(thread, "agent_nickname", "") or "").strip()
+    if text.startswith("{"):
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = {}
+        if isinstance(payload, dict):
+            role = str(payload.get("agent_role") or role).strip()
+            nickname = str(payload.get("agent_nickname") or nickname).strip()
+            if payload.get("subagent") or role or nickname:
+                if role and nickname:
+                    return f"Subagent: {nickname} ({role})"
+                if role:
+                    return f"Subagent: {role}"
+                if nickname:
+                    return f"Subagent: {nickname}"
+                return "Subagent"
+    if role or nickname:
+        if role and nickname:
+            return f"Subagent: {nickname} ({role})"
+        return f"Subagent: {role or nickname}"
+    lowered = text.lower()
+    return {
+        "cli": "CLI",
+        "local": "Local CLI",
+        "openai-codex": "Codex CLI",
+        "claude-code": "Claude Code",
+        "cursor": "Cursor",
+        "aider": "Aider",
+        "copilot": "Copilot",
+        "unknown": "Unknown",
+        "": "Unknown",
+    }.get(lowered, text if len(text) <= 64 else f"{text[:61]}...")
+
+
 def _build_usage_mix(
     result: LoadResult,
     options: RuntimeOptions,
@@ -1363,12 +1455,13 @@ def _build_usage_mix(
         return []
 
     def tier_key(event) -> tuple[str, str]:
-        tier = event.service_tier or "unknown"
+        tier = _tier_with_reasoning_label(event)
         return tier, tier
 
     def source_key(event) -> tuple[str, str]:
         source = event.thread.source or event.thread.thread_source or event.vendor or "unknown"
-        return source, source
+        label = _human_source_label(source, event)
+        return label, label
 
     def vendor_key(event) -> tuple[str, str]:
         vendor = event.vendor or "unknown"
@@ -1376,7 +1469,7 @@ def _build_usage_mix(
 
     def model_tier_key(event) -> tuple[str, str]:
         model = event.model or "unknown model"
-        tier = event.service_tier or "unknown tier"
+        tier = _tier_with_reasoning_label(event)
         return f"{model}\0{tier}", f"{model} / {tier}"
 
     dimensions = [
@@ -1702,7 +1795,11 @@ def _build_cache_leverage(
         project = next(iter(agg.projects), "") if hasattr(agg, "projects") else ""
         rows.append(
             CacheLeverageRow(
-                session_label=agg.label[:40],
+                session_label=_human_session_label(
+                    agg.first_seen,
+                    options.timezone,
+                    fallback=_session_label(agg.label, agg.key),
+                ),
                 project=project,
                 savings_usd=savings,
                 hit_rate=hit_rate,
@@ -1773,22 +1870,26 @@ def _build_anomaly_rows(
     rate_card: RateCard,
     daily_aggregates: list[Aggregate],
 ) -> list[AnomalyRow]:
-    from caliper.timeutil import load_timezone
-
-    tz = load_timezone(options.timezone)
     raw = (
         detect_session_anomalies(result.events, rate_card)
         + detect_daily_anomalies(daily_aggregates)
         + detect_model_anomalies(result.events, rate_card)
         + detect_project_daily_anomalies(result.events, rate_card, options.timezone)
     )
+    session_labels = _session_label_lookup(result.events, options.timezone)
     rows: list[AnomalyRow] = []
     for item in raw:
+        label = _anomaly_label(item.kind, item.label, show_paths=options.show_paths)
+        if item.kind == "session_spike":
+            label = session_labels.get(
+                item.label,
+                _human_session_label(item.timestamp, options.timezone, fallback=label),
+            )
         rows.append(
             AnomalyRow(
                 kind=_anomaly_kind_label(item.kind),
-                label=_anomaly_label(item.kind, item.label, show_paths=options.show_paths),
-                timestamp=item.timestamp.astimezone(tz).strftime("%Y-%m-%d %H:%M"),
+                label=label,
+                timestamp=_human_datetime(item.timestamp, options.timezone, fallback=""),
                 observed_usd=item.observed,
                 baseline_usd=item.baseline_center,
                 baseline_scale_usd=item.baseline_scale,
@@ -2392,12 +2493,12 @@ def _build_command_center(
             label="Largest savings candidate",
             value=_format_money(largest_candidate),
             detail=(
-                "Largest evidence-labelled finding"
+                "Largest savings finding"
                 if inefficiencies
                 else (
                     "Largest advisor recommendation"
                     if advisor_recommendations
-                    else "No evidence-labelled savings candidate."
+                    else "No savings candidate crossed thresholds."
                 )
             ),
             tone="good" if largest_candidate > 0 else "neutral",
@@ -2683,10 +2784,10 @@ def _build_decision_queue(
         add(
             "Review budget posture",
             budget.detail,
-            "Open the Impact section and decide whether the configured budget needs action.",
+            "Open Budget burn and decide whether the configured budget needs action.",
             budget.value,
             tone=budget.tone,
-            anchor="impact",
+            anchor="budgets",
             lens="finance",
         )
 
@@ -2741,17 +2842,20 @@ def _build_decision_queue(
         add(
             "Review estimated savings",
             f"Largest advisor recommendation is {_format_money(savings)}.",
-            "Review recommendations, then validate quality and latency before changing routing.",
+            (
+                "Review Savings opportunities, then validate quality and latency "
+                "before changing routing."
+            ),
             f"{len(advisor_recommendations):,} recommendations",
             tone="good",
-            anchor="advisor",
+            anchor="inefficiencies",
             lens="executive",
         )
 
     if inefficiencies:
         top_finding = max(inefficiencies, key=lambda row: row.impact_usd)
         add(
-            "Review evidence-labelled inefficiency finding",
+            "Review savings finding",
             top_finding.detail,
             top_finding.action,
             f"{_format_money(top_finding.impact_usd)} · {top_finding.evidence_status}",
@@ -2798,16 +2902,6 @@ def _build_decision_queue(
             anchor="rate-limits",
             lens="audit",
         )
-    elif rate_limit_pressure.sample_count == 0:
-        add(
-            "Rate-limit pressure is unknown",
-            "No rate-limit samples were recorded in this window.",
-            "Treat missing pressure as unknown, not zero.",
-            "0 samples",
-            tone="neutral",
-            anchor="rate-limits",
-            lens="audit",
-        )
 
     if quality_score.score < 75:
         add(
@@ -2834,7 +2928,7 @@ def _build_decision_queue(
     ordered = sorted(
         raw,
         key=lambda item: (_tone_rank(item.tone), item.lens != "executive", item.title),
-    )[:7]
+    )[:5]
     return [dataclasses.replace(item, rank=index) for index, item in enumerate(ordered, start=1)]
 
 
@@ -2908,10 +3002,10 @@ def _build_executive_brief(
         findings = [
             BriefFinding(
                 title="Stable report",
-                detail="No decision-queue item was generated for this window.",
+                detail="No cost, reliability, or evidence issue crossed an action threshold.",
                 impact=f"{len(comparisons):,} comparisons checked",
                 tone="good",
-                anchor="command-center",
+                anchor="action-center",
                 lens="executive",
             )
         ]

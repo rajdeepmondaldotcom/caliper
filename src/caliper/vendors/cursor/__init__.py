@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,13 +54,14 @@ class CursorParser:
         self,
         options: RuntimeOptions,
         progress: ParseProgress = NULL_PROGRESS,
+        paths: Iterable[Path] | None = None,
     ) -> LoadResult:
         start = options.start.astimezone(dt.UTC)
         end = options.end.astimezone(dt.UTC)
         cache = ParseCache.default() if options.parse_cache else None
         events = []
         warnings: list[str] = []
-        paths = self.discover(options)
+        paths = list(paths) if paths is not None else self.discover(options)
         unsupported_paths: list[Path] = []
         files_with_events = 0
         try:
@@ -84,6 +86,7 @@ class CursorParser:
                     cache,
                     start=start,
                     end=end,
+                    progress=progress,
                 )
                 if unsupported:
                     unsupported_paths.append(path)
@@ -129,9 +132,10 @@ def _parse_cached_path(
     *,
     start: dt.datetime,
     end: dt.datetime,
+    progress: ParseProgress = NULL_PROGRESS,
 ) -> tuple[list[UsageEvent], bool, bool]:
     if cache is None:
-        events = _parse_path(path)
+        events = _parse_path(path, progress=progress)
         return _events_in_window(events, start=start, end=end), bool(events), not events
     indexed = cache.get_indexed_events(path, PARSER_CACHE_SIGNATURE, start=start, end=end)
     if indexed is not None:
@@ -149,7 +153,7 @@ def _parse_cached_path(
             unsupported=not cached,
         )
         return _events_in_window(cached, start=start, end=end), bool(cached), not cached
-    events = _parse_path(path)
+    events = _parse_path(path, progress=progress)
     cache.put_indexed_events(
         path,
         PARSER_CACHE_SIGNATURE,
@@ -160,12 +164,12 @@ def _parse_cached_path(
     return _events_in_window(events, start=start, end=end), bool(events), not events
 
 
-def _parse_path(path: Path) -> list[UsageEvent]:
+def _parse_path(path: Path, progress: ParseProgress = NULL_PROGRESS) -> list[UsageEvent]:
     if path.name == "state.vscdb":
         return parse_vscdb(path)
     if "projects" in path.parts:
-        return parse_project_jsonl(path)
-    return parse_chat_jsonl(path)
+        return parse_project_jsonl(path, progress=progress)
+    return parse_chat_jsonl(path, progress=progress)
 
 
 def _events_in_window(

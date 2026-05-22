@@ -260,7 +260,8 @@ def test_export_receipt_show_sensitive_restores_full_labels(tmp_path) -> None:
 
     assert result.exit_code == 0, result.output
     assert "/tmp/project-alpha" in result.output
-    assert "2026-05-12T00-00-00-test" in result.output
+    assert "2026-05-12T00-00-00-test" not in result.output
+    assert "2026" in result.output
 
 
 def test_export_receipt_includes_last_moment_of_month(tmp_path) -> None:

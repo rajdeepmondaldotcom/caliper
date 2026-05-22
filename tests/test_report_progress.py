@@ -31,6 +31,16 @@ def test_null_progress_stage_methods_return_none() -> None:
     assert null.stage_advance(n=3, detail="reading abc") is None
     assert null.stage_done("parse") is None
     assert null.stage_done("parse", summary="42 files") is None
+    assert null.file_progress(Path("/tmp/session.jsonl"), 10, 100) is None
+    assert (
+        null.usage_footprint(
+            total_files=1,
+            total_bytes=100,
+            vendor_summary="OpenAI Codex 1",
+            window_label="Last 7 days",
+        )
+        is None
+    )
 
 
 def test_null_progress_singleton_has_stage_methods() -> None:
@@ -138,6 +148,35 @@ def test_cli_report_progress_stage_lifecycle_drives_rich_progress() -> None:
     # Stage completion summaries
     assert "3 files (cached 1)" in transcript
     assert "ok" in transcript
+
+
+def test_cli_report_progress_shows_footprint_and_file_byte_progress() -> None:
+    from rich.console import Console
+    from rich.progress import Progress
+
+    from caliper.cli_progress import CliReportProgress
+
+    console = Console(file=io.StringIO(), record=True, width=140, color_system=None)
+    with Progress(console=console, transient=False) as rich_progress:
+        progress = CliReportProgress(rich_progress)
+        progress.stage_start("discover", total=1)
+        progress.usage_footprint(
+            total_files=3_523,
+            total_bytes=12_300_000_000,
+            vendor_summary="Claude Code 1,890, OpenAI Codex 153",
+            window_label="Last 90 days",
+        )
+        progress.stage_done("discover", summary="3,523 files")
+        progress.stage_start("parse", total=3_523)
+        progress.starting(3_523)
+        progress.file_progress(Path("very-large-session.jsonl"), 50_000_000, 100_000_000)
+
+    transcript = console.export_text()
+    assert "Caliper will read 3,523 files" in transcript
+    assert "First runs" in transcript
+    assert "few minutes" in transcript
+    assert "current 50%" in transcript
+    assert "very-large-session.jsonl" in transcript
 
 
 def test_cli_report_progress_preserves_parse_callbacks_for_load_usage(tmp_path, monkeypatch):
@@ -388,6 +427,8 @@ def test_cli_progress_flag_keeps_json_stdout_clean(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
     # stdout must be valid JSON
     json.loads(result.stdout)
+    assert "Caliper will read" in (result.stderr or "")
+    assert "First runs" not in (result.stderr or "")
 
 
 def test_cli_quiet_flag_silences_progress(tmp_path, monkeypatch):
@@ -432,3 +473,45 @@ def test_cli_quiet_flag_silences_progress(tmp_path, monkeypatch):
     stderr_text = result.stderr or ""
     for word in ("Reading", "Aggregating", "Parsing"):
         assert word not in stderr_text, f"--quiet did not suppress stderr: {stderr_text!r}"
+
+
+def test_root_progress_flag_covers_reports_without_local_progress_option(tmp_path, monkeypatch):
+    """Root-level ``--progress`` gives every usage-report command the same
+    footprint preflight, even commands that predate the local progress flag."""
+    import json
+
+    from typer.testing import CliRunner
+
+    from caliper.cli import app
+
+    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
+    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    codex_home = tmp_path / "codex"
+    codex_home.mkdir()
+    codex_config = tmp_path / "codex.toml"
+    codex_config.write_text("")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "--progress",
+            "evidence",
+            "--format",
+            "json",
+            "--session-root",
+            str(codex_home),
+            "--state-db",
+            str(tmp_path / "state.db"),
+            "--codex-config",
+            str(codex_config),
+            "--since",
+            "2026-04-01",
+            "--until",
+            "2026-05-01",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    json.loads(result.stdout)
+    assert "Caliper will read" in (result.stderr or "")

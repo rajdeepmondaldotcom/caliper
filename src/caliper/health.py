@@ -206,6 +206,8 @@ def check_pricing_catalog(options: RuntimeOptions) -> HealthCheck:
         detail = f"{detail}; {warnings[0]}"
     if age_hours is None or float(age_hours) <= 24:
         return doctor_check("Pricing catalog", "ok", detail)
+    if options.offline:
+        return doctor_check("Pricing catalog", "warn", detail)
     if float(age_hours) <= 24 * 7:
         return doctor_check("Pricing catalog", "warn", detail)
     return doctor_check("Pricing catalog", "fail", detail)

@@ -15,6 +15,7 @@ from collections.abc import Callable
 from decimal import Decimal
 
 from caliper.aggregation import event_cost
+from caliper.humanize import session_label_lookup
 from caliper.models import (
     Finding,
     LoadResult,
@@ -302,6 +303,7 @@ def find_low_cache_reuse(
         poor_sessions.append(session_id)
     if not poor_sessions or total_saving <= Decimal("0"):
         return findings
+    labels = session_label_lookup(result.events, options.timezone)
     findings.append(
         Finding(
             code=CODE_LOW_CACHE_REUSE,
@@ -321,9 +323,12 @@ def find_low_cache_reuse(
             impact_usd_exact=total_saving,
             monthly_projected_savings_usd=_scale_to_monthly(total_saving, options),
             confidence="medium",
-            evidence=tuple(poor_sessions[:3]),
+            evidence=tuple(labels.get(session_id, session_id) for session_id in poor_sessions[:3]),
             evidence_metrics={
                 "sessions": len(poor_sessions),
+                "session_labels": [
+                    labels.get(session_id, session_id) for session_id in poor_sessions[:3]
+                ],
                 "ratio_threshold": LOW_CACHE_REUSE_RATIO,
             },
             commands=("caliper audit",),
@@ -441,6 +446,7 @@ def find_tier_mismatch(
         flagged_sessions.append(session_id)
     if not flagged_sessions or total_saving <= Decimal("0"):
         return []
+    labels = session_label_lookup(result.events, options.timezone)
     return [
         Finding(
             code=CODE_TIER_MISMATCH,
@@ -456,8 +462,15 @@ def find_tier_mismatch(
             impact_usd_exact=total_saving,
             monthly_projected_savings_usd=_scale_to_monthly(total_saving, options),
             confidence="medium",
-            evidence=tuple(flagged_sessions[:3]),
-            evidence_metrics={"sessions": len(flagged_sessions)},
+            evidence=tuple(
+                labels.get(session_id, session_id) for session_id in flagged_sessions[:3]
+            ),
+            evidence_metrics={
+                "sessions": len(flagged_sessions),
+                "session_labels": [
+                    labels.get(session_id, session_id) for session_id in flagged_sessions[:3]
+                ],
+            },
             commands=("caliper audit", "caliper --service-tier standard"),
             event_ids=tuple(flagged_sessions),
             evidence_status="estimated",
@@ -521,6 +534,7 @@ def find_duplicate_sessions(
             _ = keep
     if not duplicate_session_ids or duplicate_total <= Decimal("0"):
         return []
+    labels = session_label_lookup(result.events, options.timezone)
     return [
         Finding(
             code=CODE_DUPLICATE_SESSIONS,
@@ -537,8 +551,15 @@ def find_duplicate_sessions(
             impact_usd_exact=duplicate_total,
             monthly_projected_savings_usd=_scale_to_monthly(duplicate_total, options),
             confidence="medium",
-            evidence=tuple(duplicate_session_ids[:3]),
-            evidence_metrics={"sessions": len(duplicate_session_ids)},
+            evidence=tuple(
+                labels.get(session_id, session_id) for session_id in duplicate_session_ids[:3]
+            ),
+            evidence_metrics={
+                "sessions": len(duplicate_session_ids),
+                "session_labels": [
+                    labels.get(session_id, session_id) for session_id in duplicate_session_ids[:3]
+                ],
+            },
             commands=("caliper audit",),
             event_ids=tuple(duplicate_session_ids),
             evidence_status="estimated",
@@ -591,6 +612,7 @@ def find_prompt_rot(
         flagged_sessions.append(session_id)
     if not flagged_sessions or total_saving <= Decimal("0"):
         return []
+    labels = session_label_lookup(result.events, options.timezone)
     return [
         Finding(
             code=CODE_PROMPT_ROT,
@@ -606,8 +628,15 @@ def find_prompt_rot(
             impact_usd_exact=total_saving,
             monthly_projected_savings_usd=_scale_to_monthly(total_saving, options),
             confidence="medium",
-            evidence=tuple(flagged_sessions[:3]),
-            evidence_metrics={"sessions": len(flagged_sessions)},
+            evidence=tuple(
+                labels.get(session_id, session_id) for session_id in flagged_sessions[:3]
+            ),
+            evidence_metrics={
+                "sessions": len(flagged_sessions),
+                "session_labels": [
+                    labels.get(session_id, session_id) for session_id in flagged_sessions[:3]
+                ],
+            },
             commands=("caliper audit",),
             event_ids=tuple(flagged_sessions),
             evidence_status="estimated",

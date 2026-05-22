@@ -37,6 +37,20 @@ class ParseProgress(Protocol):
     def finished(self) -> None:
         """Called once after the last file."""
 
+    def file_progress(self, path: Path, bytes_read: int, total_bytes: int) -> None:
+        """Called while a large file is being parsed, before ``file_done``."""
+
+    def usage_footprint(
+        self,
+        *,
+        total_files: int,
+        total_bytes: int,
+        vendor_summary: str,
+        window_label: str,
+        unreadable_files: int = 0,
+    ) -> None:
+        """Called after discovery so the CLI can set scan-size expectations."""
+
     # ---- Stage callbacks (multi-stage report progress) --------------------
     def stage_start(self, name: str, total: int | None = None) -> None:
         """Called at the beginning of a named stage (``parse``, ``aggregate``,
@@ -67,6 +81,20 @@ class NullProgress:
     def finished(self) -> None:
         return None
 
+    def file_progress(self, path: Path, bytes_read: int, total_bytes: int) -> None:
+        return None
+
+    def usage_footprint(
+        self,
+        *,
+        total_files: int,
+        total_bytes: int,
+        vendor_summary: str,
+        window_label: str,
+        unreadable_files: int = 0,
+    ) -> None:
+        return None
+
     def stage_start(self, name: str, total: int | None = None) -> None:
         return None
 
@@ -78,3 +106,21 @@ class NullProgress:
 
 
 NULL_PROGRESS: ParseProgress = NullProgress()
+
+
+def report_file_progress(
+    progress: object,
+    path: Path,
+    bytes_read: int,
+    total_bytes: int,
+) -> None:
+    """Best-effort byte progress for implementations that support it.
+
+    Older ``ParseProgress`` stand-ins used by tests and integrations do
+    not implement ``file_progress``. Keep this as an optional callback so
+    parser instrumentation does not break those callers.
+    """
+    callback = getattr(progress, "file_progress", None)
+    if callback is None:
+        return
+    callback(path, bytes_read, total_bytes)

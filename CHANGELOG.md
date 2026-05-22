@@ -2,6 +2,39 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.45 - 2026-05-22
+
+### Added
+
+- **Multi-stage dashboard progress.** `caliper dashboard` now sets expectations before
+  the wait: it counts local Codex/Claude/Cursor/Aider files, shows estimated data size,
+  then reports parse, aggregate, render, and write stages.
+- **Human-readable session labels.** Dashboard sessions and anomaly rows now lead with
+  local time/date labels instead of raw session IDs, while preserving traceability.
+- **Current-model what-if labels.** Claude and GPT scenario copy now uses current family
+  names such as Claude Haiku 4.5, Claude Sonnet 4.6, and GPT-5.5 Mini/Nano where the
+  catalog supports them.
+
+### Changed
+
+- **Operator-first dashboard.** The browser dashboard now opens with a compact
+  Operator brief, cost timeline, spend drivers, anomalies, savings opportunities, and
+  forward look before lower-priority diagnostics.
+- **Pruned low-value sections.** Generic `Insights`, `Advisor`, `Outlook drivers`,
+  `Signals checked`, and empty tool-use/insight placeholders are hidden or merged when
+  richer action sections already cover the same claim.
+- **Savings and forecast consolidation.** Advisor recommendations now live inside
+  Savings opportunities, and forecast/outlook/model-driver content lives inside one
+  Forward look section.
+
+### Fixed
+
+- **Dashboard hover stability.** Table and chart hover affordances no longer shift layout,
+  and cost-chart hover labels stay visible inside the SVG viewport.
+- **Offline doctor robustness.** A stale optional live pricing catalog is now a warning in
+  offline doctor mode instead of a hard failure, so release/test runs do not depend on a
+  user-local cache state.
+
 ## 0.0.44 - 2026-05-22
 
 ### Added

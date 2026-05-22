@@ -130,11 +130,9 @@ def test_dashboard_does_not_leak_tool_use_input(monkeypatch, tmp_path) -> None:
 def test_dashboard_renders_section_markers(monkeypatch, tmp_path) -> None:
     """§NN markers are the design's audit anchors."""
     html = _render(monkeypatch, tmp_path)
-    # At minimum §01 (overview), §03 (shape), §06 (insights) — these always
-    # render regardless of payload density. The mono prefix is rendered as
-    # the literal "§NN" (no separator) to match the design prototype.
-    for marker in ("§01", "§03", "§06"):
-        assert f">{marker}<" in html, f"Section marker {marker!r} missing"
+    # Overview is the only unconditional section. Other sections render only
+    # when they add action, explanation, or audit value.
+    assert ">§01<" in html
     # Every rendered section's id and data-screen-label come from SECTION_NUMBERS.
     for sid, num in SECTION_NUMBERS.items():
         if f'id="{sid}"' in html:
@@ -205,6 +203,10 @@ def test_dashboard_renders_when_no_events(tmp_path) -> None:
     _assert_private_html(html)
     # Empty state surfaces a friendly placeholder in the summary cards.
     assert "No events for this window" in html
+    assert 'id="shape"' not in html
+    assert 'id="insights"' not in html
+    assert "No insights for this window" not in html
+    assert "No tool-use signal yet" not in html
 
 
 def test_dashboard_rejects_invalid_options() -> None:
@@ -356,6 +358,8 @@ def test_cost_chart_includes_average_line_and_hover_labels(monkeypatch, tmp_path
 
     assert "cal-chart-average-line" in html
     assert "cal-bar-hover-label" in html
+    assert "overflow:visible" in html
+    assert 'height="46"' in html
     assert "avg " in html
     assert "events · " in html
 
@@ -397,19 +401,46 @@ def test_dashboard_renders_operator_first_sections() -> None:
 
     for section_id in (
         "action-center",
+        "cost",
         "usage-windows",
         "usage-mix",
+        "anomalies",
         "inefficiencies",
-        "outlook",
+        "forecast",
         "attribution",
+        "evidence",
     ):
         assert f'id="{section_id}"' in html
 
-    assert "Decision queue" in html
-    assert "Signals checked" in html
-    assert "Evidence-labelled findings" in html
+    assert "Operator brief" in html
+    assert "Next actions" in html
+    assert "Spend drivers" in html
+    assert "Forward look" in html
+    assert "Recommended changes" in html
+    assert "Detected waste" in html
+    assert 'id="advisor"' not in html
+    assert 'id="outlook"' not in html
+    assert 'id="insights"' not in html
+    assert "Decision queue" not in html
+    assert "Signals checked" not in html
+    assert "Evidence-labelled findings" not in html
+    assert "No insights for this window" not in html
+    assert "No tool-use signal yet" not in html
     assert "Cost-weighted rhythm" in html
     assert "Long-context boundary" in html
+
+    section_order = [
+        'id="action-center"',
+        'id="overview"',
+        'id="cost"',
+        'id="usage-windows"',
+        'id="usage-mix"',
+        'id="anomalies"',
+        'id="inefficiencies"',
+        'id="forecast"',
+    ]
+    positions = [html.index(marker) for marker in section_order]
+    assert positions == sorted(positions)
 
 
 def test_new_dashboard_sections_obey_share_safe_redaction() -> None:
@@ -552,7 +583,21 @@ def test_insights_carry_sample_size_lineage() -> None:
     """Every insight that ships ``evidence_metrics`` (events / sessions /
     tokens) renders a lineage chip so the reader can verify the basis
     without trusting the headline alone."""
-    html_text = render_dashboard(sample_dashboard())
+    import dataclasses
+
+    # Insights are a legacy/lean payload section now. Rich operator dashboards
+    # render the same findings through actions, anomalies, and savings instead.
+    lean = dataclasses.replace(
+        sample_dashboard(),
+        command_center=[],
+        decision_queue=[],
+        advisor_recommendations=[],
+        top_sessions=[],
+        usage_mix=[],
+        inefficiencies=[],
+        anomalies=[],
+    )
+    html_text = render_dashboard(lean)
     # Class is the anchor; copy is the lineage prefix.
     assert 'class="cal-insight-meta"' in html_text
     # Sample data: the cache-reuse insight is computed over 480 events.

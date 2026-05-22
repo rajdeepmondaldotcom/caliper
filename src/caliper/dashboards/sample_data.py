@@ -399,8 +399,8 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             ),
             AnomalyRow(
                 "Session spike",
-                "session-018",
-                "2026-05-10 15:42",
+                "3:42 pm, Sunday 10 May 2026",
+                "3:42 pm, Sunday 10 May 2026",
                 84.10,
                 20.00,
                 15.20,
@@ -439,8 +439,8 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             Insight(
                 "critical",
                 "Outlier session",
-                "Session session-018 cost $84 against a median of $20. "
-                "Review with `caliper session 018`.",
+                "The session at 3:42 pm, Sunday 10 May 2026 cost $84 against a median of $20. "
+                "Review the matching row in Top sessions.",
                 impact="$84 · 4.2× median",
                 evidence_metrics={"events": 58, "sessions": 1, "tokens": 820_000},
             ),
@@ -779,8 +779,8 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
         ],
         top_sessions=[
             SessionRow(
-                "session-018",
-                "2026-05-10 15:42",
+                "3:42 pm, Sunday 10 May 2026",
+                "2026-05-10 15:42 UTC",
                 "api-server",
                 84.10,
                 820_000,
@@ -790,8 +790,8 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "long context",
             ),
             SessionRow(
-                "session-024",
-                "2026-05-15 11:04",
+                "11:04 am, Friday 15 May 2026",
+                "2026-05-15 11:04 UTC",
                 "frontend-app",
                 62.20,
                 410_000,
@@ -801,8 +801,8 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "tool-heavy",
             ),
             SessionRow(
-                "session-011",
-                "2026-05-08 09:18",
+                "9:18 am, Friday 8 May 2026",
+                "2026-05-08 09:18 UTC",
                 "data-pipeline",
                 44.75,
                 280_000,
@@ -1057,8 +1057,17 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             ),
         ],
         cache_leverage=[
-            CacheLeverageRow("session-018", "api-server", 144.20, 0.82, 720_000, 158_000),
-            CacheLeverageRow("session-024", "frontend-app", 88.10, 0.74, 410_000, 144_000),
+            CacheLeverageRow(
+                "3:42 pm, Sunday 10 May 2026", "api-server", 144.20, 0.82, 720_000, 158_000
+            ),
+            CacheLeverageRow(
+                "11:04 am, Friday 15 May 2026",
+                "frontend-app",
+                88.10,
+                0.74,
+                410_000,
+                144_000,
+            ),
         ],
         long_context_histogram=LongContextHistogram(
             bins=(0, 1_000, 4_000, 16_000, 64_000, 200_000, 1_000_000),

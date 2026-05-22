@@ -51,6 +51,7 @@ def _options(tmp_path: Path):
         session_root=tmp_path / "sessions",
         state_db=tmp_path / "state.sqlite",
         codex_config=tmp_path / "config.toml",
+        timezone="UTC",
     )
 
 
@@ -166,6 +167,8 @@ def test_low_cache_reuse_triggers_on_long_uncached_session(tmp_path: Path):
     assert len(findings) == 1
     assert findings[0].code == CODE_LOW_CACHE_REUSE
     assert findings[0].impact_usd_exact > Decimal("0")
+    assert findings[0].evidence[0] == "2:00 pm, Tuesday 12 May 2026"
+    assert "long" not in findings[0].evidence[0]
 
 
 def test_low_cache_reuse_skips_when_well_cached(tmp_path: Path):
@@ -228,12 +231,9 @@ def test_tier_mismatch_triggers_on_short_priority_session(tmp_path: Path):
         for _ in range(2)
     ]
     findings = find_tier_mismatch(_result(events), _options(tmp_path), _card())
-    # gpt-5.5 in MODELS_BY_NAME has identical rates for fast vs standard (no
-    # tier multiplier in the embedded card), so this happens to dedupe to zero
-    # cost. Either the finder emits with > 0 saving, or returns nothing — both
-    # are acceptable for the embedded rate card.
-    if findings:
-        assert findings[0].code == CODE_TIER_MISMATCH
+    assert findings
+    assert findings[0].code == CODE_TIER_MISMATCH
+    assert findings[0].evidence[0] == "2:00 pm, Tuesday 12 May 2026"
 
 
 def test_duplicate_sessions_flag_same_prompt_within_24h(tmp_path: Path):
@@ -255,6 +255,7 @@ def test_duplicate_sessions_flag_same_prompt_within_24h(tmp_path: Path):
     assert len(findings) == 1
     assert findings[0].code == CODE_DUPLICATE_SESSIONS
     assert findings[0].evidence_metrics["sessions"] == 2
+    assert all(label.endswith("2026") for label in findings[0].evidence)
 
 
 def test_duplicate_sessions_skips_distinct_prompts(tmp_path: Path):
@@ -282,6 +283,7 @@ def test_prompt_rot_flags_doubling_uncached_input(tmp_path: Path):
     findings = find_prompt_rot(_result(events), _options(tmp_path), _card())
     assert len(findings) == 1
     assert findings[0].code == CODE_PROMPT_ROT
+    assert findings[0].evidence[0] == "12:00 pm, Tuesday 12 May 2026"
 
 
 def test_prompt_rot_skips_when_output_also_grows(tmp_path: Path):

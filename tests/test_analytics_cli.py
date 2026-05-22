@@ -172,10 +172,10 @@ def test_whatif_tier_swap_reduces_cost_usd_when_going_from_fast_to_standard(tmp_
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["actual"]["cost_usd"] == payload["projected"]["cost_usd"]
+    assert payload["actual"]["cost_usd"] > payload["projected"]["cost_usd"]
     assert "cost_usd_exact" in payload["actual"]
     assert "cost_usd_exact" in payload["projected"]
-    assert payload["delta"]["cost_usd"] == 0
+    assert payload["delta"]["cost_usd"] < 0
     assert "cost_usd_exact" in payload["delta"]
 
 
@@ -199,6 +199,34 @@ def test_whatif_rejects_unknown_model(tmp_path) -> None:
     )
     assert result.exit_code == 2
     assert "rate card" in result.output
+
+
+def test_whatif_accepts_latest_family_aliases(tmp_path) -> None:
+    session_root, state_db, missing_cfg = _build_fixture(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "whatif",
+            "--days",
+            "1",
+            "--model",
+            "claude-3-haiku",
+            "--tier",
+            "xhigh",
+            "--session-root",
+            str(session_root),
+            "--state-db",
+            str(state_db),
+            "--codex-config",
+            str(missing_cfg),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["hypothetical"] == {"tier": "fast", "model": "claude-haiku-4.5"}
 
 
 def test_compare_returns_balanced_delta(tmp_path) -> None:

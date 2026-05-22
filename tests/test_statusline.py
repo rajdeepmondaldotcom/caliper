@@ -76,6 +76,8 @@ def test_statusline_json_exposes_latest_usage_and_limit_windows(tmp_path) -> Non
     assert payload["sessions"] == 1
     assert payload["latest"]["model"] == "gpt-5.5"
     assert payload["latest"]["service_tier"] == "standard"
+    assert "statusline" not in payload["latest"]["session"]
+    assert "," in payload["latest"]["session"]
     assert payload["latest"]["session_id"] == "<redacted-session>"
     assert payload["latest"]["project"] == "<redacted-path>"
     assert payload["top_project"]["label"] == "<redacted-path>"
@@ -96,6 +98,7 @@ def test_statusline_json_show_paths_restores_latest_usage_identity(tmp_path) -> 
     payload = json.loads(result.output)
     assert payload["latest"]["project"] == "/tmp/project-alpha"
     assert payload["top_project"]["label"] == "/tmp/project-alpha"
+    assert "statusline" not in payload["latest"]["session"]
     assert payload["latest"]["session_id"] == "2026-05-12T00-00-00-statusline"
 
 

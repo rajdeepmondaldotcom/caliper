@@ -325,6 +325,56 @@ def test_dashboard_days_still_renders_rolling_windows(monkeypatch, tmp_path) -> 
     assert "Last 7 days" in html
 
 
+def test_dashboard_loads_once_for_selected_and_rolling_windows(monkeypatch, tmp_path) -> None:
+    """Dashboard should scan the superset window once, then scope in memory."""
+    from caliper.models import LoadResult
+
+    calls = 0
+
+    def fake_load_usage(_options, *, progress=None):
+        nonlocal calls
+        del progress
+        calls += 1
+        return LoadResult(
+            events=[],
+            duplicates=0,
+            tier_sources={},
+            plan_types=set(),
+            rate_limit_samples=[],
+            warnings=[],
+        )
+
+    monkeypatch.setattr("caliper.cli._safe_load_usage", fake_load_usage)
+    out = tmp_path / "single-load.html"
+    result = runner.invoke(
+        app,
+        [
+            "dashboard",
+            "--days",
+            "7",
+            "--until",
+            "2026-05-13T00:00:00Z",
+            "--tz",
+            "UTC",
+            "--session-root",
+            str(tmp_path / "missing-codex"),
+            "--state-db",
+            str(tmp_path / "missing-state.sqlite"),
+            "--codex-config",
+            str(tmp_path / "missing-config.toml"),
+            "--include-vendor",
+            "claude-code",
+            "--no-parse-cache",
+            "--output",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == 1
+    assert out.exists()
+
+
 def test_dashboard_demo_renders_without_local_logs(tmp_path) -> None:
     out = tmp_path / "demo.html"
     result = runner.invoke(app, ["dashboard", "--demo", "--output", str(out)])

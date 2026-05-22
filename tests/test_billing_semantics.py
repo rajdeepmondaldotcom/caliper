@@ -122,10 +122,10 @@ def test_codex_max_usd_rate_is_exact(tmp_path: Path) -> None:
     assert pricing_warnings(total) == []
 
 
-def test_fast_mode_does_not_change_usd_cost() -> None:
+def test_fast_mode_applies_codex_multiplier_for_supported_models() -> None:
     card = RateCard.load(None, "model")
     standard_cost, _, _ = event_cost(card, _event(model="gpt-5.5", tier="standard"))
     fast_cost, _, _ = event_cost(card, _event(model="gpt-5.5", tier="fast"))
 
-    assert fast_cost.cost_usd == standard_cost.cost_usd
-    assert fast_cost.calculated_cost_usd == standard_cost.calculated_cost_usd
+    assert fast_cost.cost_usd == standard_cost.cost_usd * Decimal("2.5")
+    assert fast_cost.calculated_cost_usd == standard_cost.calculated_cost_usd * Decimal("2.5")

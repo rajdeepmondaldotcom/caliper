@@ -29,6 +29,12 @@ from caliper.pricing_catalog import (
 
 LONG_CONTEXT_INPUT_THRESHOLD = 272_000
 ZERO = Decimal("0")
+FAST_TIER_COST_MULTIPLIERS = {
+    "gpt-5.5": Decimal("2.5"),
+    "gpt-5.4": Decimal("2"),
+    "gpt-5.4-mini": Decimal("2"),
+    "gpt-5.4-nano": Decimal("2"),
+}
 
 DEFAULT_API_RATES = Rates(input=5.0, cached_input=0.5, output=30.0)
 LONG_CONTEXT_1050K = LongContextRule(
@@ -161,7 +167,7 @@ PRICING_SOURCES = [
     PricingSource(
         name="Codex fast mode multipliers",
         url="https://developers.openai.com/codex/speed",
-        checked="2026-05-13",
+        checked="2026-05-22",
     ),
     PricingSource(
         name="GPT-5.1-Codex-Max model pricing",
@@ -232,6 +238,33 @@ def normalize_model(model: str | None) -> str:
     return raw
 
 
+def resolve_hypothetical_model_alias(
+    model: str | None,
+    *,
+    available_models: set[str] | None = None,
+) -> str:
+    """Resolve user-facing what-if aliases to a priced model id.
+
+    This is intentionally narrower than :func:`normalize_model`: it accepts
+    old family names people naturally type in scenario planning and maps them
+    to the newest matching model that the active rate card can price.
+    """
+
+    normalized = normalize_model(model)
+    if not normalized:
+        return ""
+    alias_candidates = _WHATIF_MODEL_ALIAS_CANDIDATES.get(_alias_key(model))
+    available = available_model_names() if available_models is None else available_models
+    if alias_candidates is None and normalized in available:
+        return normalized
+    if alias_candidates is None:
+        return normalized
+    for candidate in alias_candidates:
+        if candidate in available:
+            return candidate
+    return alias_candidates[-1]
+
+
 def _is_snapshot_variant(raw: str, prefix: str) -> bool:
     if not raw.startswith(f"{prefix}-"):
         return False
@@ -250,11 +283,64 @@ def _looks_like_model_date(value: str) -> bool:
 
 def normalize_service_tier(value: str | None) -> str:
     raw = (value or "").strip().lower()
-    if raw in {"fast", "priority"}:
+    raw = raw.replace("_", "-")
+    if raw in {"fast", "priority", "high", "xhigh", "x-high", "max"}:
         return "fast"
     if raw in {"standard", "default", "regular"}:
         return "standard"
     return ""
+
+
+def service_tier_cost_multiplier(model: str | None, service_tier: str | None) -> Decimal:
+    """Return the Codex credit multiplier implied by the service tier.
+
+    OpenAI documents fast-mode multipliers by model family. We only apply the
+    multiplier where the active model family has a documented multiplier; all
+    other models remain at 1x until a sourced multiplier exists.
+    """
+
+    if normalize_service_tier(service_tier) != "fast":
+        return Decimal("1")
+    normalized = normalize_model(model)
+    if normalized in FAST_TIER_COST_MULTIPLIERS:
+        return FAST_TIER_COST_MULTIPLIERS[normalized]
+    if normalized.startswith("gpt-5.4-"):
+        return FAST_TIER_COST_MULTIPLIERS["gpt-5.4"]
+    return Decimal("1")
+
+
+def _alias_key(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")
+
+
+_WHATIF_MODEL_ALIAS_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "haiku": ("claude-haiku-4.5",),
+    "claude-haiku": ("claude-haiku-4.5",),
+    "claude-haiku-latest": ("claude-haiku-4.5",),
+    "claude-3-haiku": ("claude-haiku-4.5",),
+    "claude-3-5-haiku": ("claude-haiku-4.5",),
+    "claude-3-7-haiku": ("claude-haiku-4.5",),
+    "sonnet": ("claude-sonnet-4.6",),
+    "claude-sonnet": ("claude-sonnet-4.6",),
+    "claude-sonnet-latest": ("claude-sonnet-4.6",),
+    "claude-3-sonnet": ("claude-sonnet-4.6",),
+    "claude-3-5-sonnet": ("claude-sonnet-4.6",),
+    "claude-3-7-sonnet": ("claude-sonnet-4.6",),
+    "opus": ("claude-opus-4.7",),
+    "claude-opus": ("claude-opus-4.7",),
+    "claude-opus-latest": ("claude-opus-4.7",),
+    "claude-3-opus": ("claude-opus-4.7",),
+    "gpt-mini": ("gpt-5.4-mini",),
+    "mini": ("gpt-5.4-mini",),
+    "gpt-5-mini": ("gpt-5.4-mini",),
+    "gpt-5-5-mini": ("gpt-5.4-mini",),
+    "gpt-5-4-mini": ("gpt-5.4-mini",),
+    "gpt-nano": ("gpt-5.4-nano", "gpt-5.4-mini"),
+    "nano": ("gpt-5.4-nano", "gpt-5.4-mini"),
+    "gpt-5-nano": ("gpt-5.4-nano", "gpt-5.4-mini"),
+    "gpt-5-5-nano": ("gpt-5.4-nano", "gpt-5.4-mini"),
+    "gpt-5-4-nano": ("gpt-5.4-nano", "gpt-5.4-mini"),
+}
 
 
 def _parse_overrides(raw: object, section: str) -> dict[str, Rates]:
@@ -355,7 +441,8 @@ class RateCard:
         self, usage: Usage, model: str, service_tier: str
     ) -> tuple[CostTotals, bool, bool]:
         normalized = normalize_model(model)
-        cache_key = _cost_cache_key(usage, normalized, service_tier, self.pricing_mode)
+        normalized_tier = normalize_service_tier(service_tier) or service_tier
+        cache_key = _cost_cache_key(usage, normalized, normalized_tier, self.pricing_mode)
         cached = self._cost_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -366,6 +453,7 @@ class RateCard:
         rates, rate_unpriced, local_override = self._resolve_usd_rates(normalized, card, flat)
         cache_rate_estimated = _cache_rate_estimated(billable_usage, rates)
         calculated = _estimate(billable_usage, rates, input_mult, output_mult)
+        calculated *= service_tier_cost_multiplier(normalized, normalized_tier)
         result = (
             CostTotals(
                 cost_usd=calculated,

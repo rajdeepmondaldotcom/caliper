@@ -28,7 +28,7 @@ from caliper.models import (
 )
 from caliper.normalize import normalize_model, normalize_tier
 from caliper.parse_cache import ParseCache
-from caliper.progress import NULL_PROGRESS, ParseProgress
+from caliper.progress import NULL_PROGRESS, ParseProgress, report_file_progress
 from caliper.timeutil import parse_datetime, parse_event_timestamp
 
 PARSER_CACHE_VERSION = 6
@@ -481,6 +481,7 @@ def _rate_limit_window_fields(prefix: str, raw_window: object) -> dict:
 def load_codex_usage(
     options: RuntimeOptions,
     progress: ParseProgress = NULL_PROGRESS,
+    paths: Iterable[Path] | None = None,
 ) -> LoadResult:
     start_utc = options.start.astimezone(dt.UTC)
     end_utc = options.end.astimezone(dt.UTC)
@@ -493,7 +494,7 @@ def load_codex_usage(
     if not options.session_root.exists():
         accumulator.warnings.append(f"Session root does not exist: {options.session_root}")
 
-    paths = list(session_files(options.session_root))
+    paths = list(paths) if paths is not None else list(session_files(options.session_root))
     try:
         for path in paths:
             thread_meta = metadata.get(
@@ -519,6 +520,7 @@ def load_codex_usage(
                         options=options,
                         config_tier=config_tier,
                         overrides=overrides,
+                        progress=progress,
                     )
                 )
                 if cache:
@@ -584,6 +586,7 @@ def _parse_cache_signature(
 def load_usage(
     options: RuntimeOptions,
     progress: ParseProgress = NULL_PROGRESS,
+    discovery: Any | None = None,
 ) -> LoadResult:
     from caliper.evidence import warnings_from_parser_issues
     from caliper.vendors import enabled_vendors
@@ -600,15 +603,23 @@ def load_usage(
     rate_limit_sample_duplicates = 0
     rate_limit_sample_dedupe_stats = DedupeStats()
     vendors = enabled_vendors(options)
-    total_files = 0
-    for vendor in vendors:
-        try:
-            total_files += sum(1 for _ in vendor.discover(options))
-        except OSError:
-            continue
+    if discovery is not None:
+        total_files = discovery.total_files
+        paths_by_vendor = {vendor.id: discovery.paths_for(vendor.id) for vendor in vendors}
+    else:
+        total_files = 0
+        paths_by_vendor = {}
+        for vendor in vendors:
+            try:
+                paths = list(vendor.discover(options))
+            except OSError:
+                paths_by_vendor[vendor.id] = []
+                continue
+            paths_by_vendor[vendor.id] = paths
+            total_files += len(paths)
     progress.starting(total_files)
     for vendor in vendors:
-        result = vendor.parse(options, progress=progress)
+        result = vendor.parse(options, progress=progress, paths=paths_by_vendor.get(vendor.id))
         events.extend(result.events)
         duplicates += result.duplicates
         for key, value in result.tier_sources.items():
@@ -658,6 +669,17 @@ def load_usage(
         dedupe_stats=dedupe_stats.by_strategy,
         rate_limit_sample_duplicates=rate_limit_sample_duplicates,
         rate_limit_sample_dedupe_stats=rate_limit_sample_dedupe_stats.by_strategy,
+    )
+
+
+def scope_load_result(result: LoadResult, *, start: dt.datetime, end: dt.datetime) -> LoadResult:
+    events = [event for event in result.events if start <= event.timestamp < end]
+    samples = [sample for sample in result.rate_limit_samples if start <= sample.timestamp < end]
+    return replace(
+        result,
+        events=events,
+        rate_limit_samples=samples,
+        vendor_stats=_recount_vendor_stats(result.vendor_stats, events),
     )
 
 
@@ -722,17 +744,28 @@ def _parse_session(
     options: RuntimeOptions,
     config_tier: str,
     overrides: list[TierOverride],
+    progress: ParseProgress = NULL_PROGRESS,
 ):
     try:
         handle = path.open(encoding="utf-8", errors="replace")
     except OSError:
         return
+    try:
+        total_bytes = path.stat().st_size
+    except OSError:
+        total_bytes = 0
+    bytes_read = 0
+    next_report = 1_000_000
     current_meta = thread_meta
     logged_tier = ""
     current_model_source = "state-db" if thread_meta.model else ""
     previous_total_usage: Usage | None = None
     with handle:
         for line in handle:
+            bytes_read += len(line)
+            if total_bytes and bytes_read >= next_report:
+                report_file_progress(progress, path, min(bytes_read, total_bytes), total_bytes)
+                next_report = bytes_read + 1_000_000
             event = _json_event_from_line(line)
             if event is None:
                 continue
@@ -755,6 +788,8 @@ def _parse_session(
             )
             if record is not None:
                 yield record
+    if total_bytes:
+        report_file_progress(progress, path, total_bytes, total_bytes)
 
 
 def _json_event_from_line(line: str) -> dict | None:

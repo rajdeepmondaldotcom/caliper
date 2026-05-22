@@ -616,5 +616,5 @@ def test_live_catalog_rates_override_embedded_known_models() -> None:
     cost, _long_context, unknown = card.cost_for(usage, "gpt-5.5", "fast")
 
     assert unknown is False
-    assert cost.cost_usd == Decimal("0.9")
-    assert cost.calculated_cost_usd == Decimal("0.9")
+    assert cost.cost_usd == Decimal("2.25")
+    assert cost.calculated_cost_usd == Decimal("2.25")

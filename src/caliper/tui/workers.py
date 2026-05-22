@@ -15,6 +15,7 @@ from caliper.aggregation import (
     aggregate_overview_windows,
     budget_impact_sort_key,
 )
+from caliper.humanize import session_display_label
 from caliper.insights import build_insights_from
 from caliper.models import UNKNOWN_PROJECT, LoadResult, RuntimeOptions, UsageEvent
 from caliper.parser import load_usage
@@ -106,12 +107,11 @@ def _tui_key_functions(options: RuntimeOptions):
         return month, month
 
     def session_key(event: UsageEvent) -> tuple[str, str]:
-        local_time = event.timestamp.astimezone(tz).strftime("%Y-%m-%d %H:%M")
-        if options.show_prompts:
-            title = event.thread.title or event.thread.first_user_message or event.session_id
-        else:
-            title = event.session_id
-        return event.session_id, f"{local_time} | {title}"
+        return event.session_id, session_display_label(
+            event,
+            options.timezone,
+            include_title=options.show_prompts,
+        )
 
     def project_key(event: UsageEvent) -> tuple[str, str]:
         project = event.thread.cwd or UNKNOWN_PROJECT

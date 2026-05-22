@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -48,13 +49,14 @@ class ClaudeCodeParser:
         self,
         options: RuntimeOptions,
         progress: ParseProgress = NULL_PROGRESS,
+        paths: Iterable[Path] | None = None,
     ) -> LoadResult:
         start = options.start.astimezone(dt.UTC)
         end = options.end.astimezone(dt.UTC)
         events: list[UsageEvent] = []
         warnings: list[str] = []
         cache = ParseCache.default() if options.parse_cache else None
-        paths = self.discover(options)
+        paths = list(paths) if paths is not None else self.discover(options)
         files_with_events = 0
         try:
             paths_to_parse = paths
@@ -80,6 +82,7 @@ class ClaudeCodeParser:
                         options,
                         start=start,
                         end=end,
+                        progress=progress,
                     )
                 except OSError as exc:
                     warnings.append(f"Claude Code session unreadable: {path}: {exc}")
@@ -152,9 +155,12 @@ def _parse_cached_session(
     *,
     start: dt.datetime,
     end: dt.datetime,
+    progress: ParseProgress = NULL_PROGRESS,
 ) -> list[UsageEvent]:
     if cache is None:
-        return _events_in_window(list(_parse_session(path, options)), start=start, end=end)
+        return _events_in_window(
+            list(_parse_session(path, options, progress=progress)), start=start, end=end
+        )
     signature = _parser_cache_signature(options)
     cached = cache.get_indexed_events(path, signature, start=start, end=end)
     if cached is not None:
@@ -163,7 +169,7 @@ def _parse_cached_session(
     if legacy is not None:
         cache.put_indexed_events(path, signature, legacy, vendor=VENDOR_CLAUDE_CODE)
         return _events_in_window(legacy, start=start, end=end)
-    events = list(_parse_session(path, options))
+    events = list(_parse_session(path, options, progress=progress))
     cache.put_indexed_events(path, signature, events, vendor=VENDOR_CLAUDE_CODE)
     return _events_in_window(events, start=start, end=end)
 
@@ -177,17 +183,37 @@ def _events_in_window(
     return [event for event in events if start <= event.timestamp < end]
 
 
-def _parse_session(path: Path, options: RuntimeOptions) -> list[UsageEvent]:
+def _parse_session(
+    path: Path,
+    options: RuntimeOptions,
+    progress: ParseProgress = NULL_PROGRESS,
+) -> list[UsageEvent]:
     events: list[UsageEvent] = []
     turn_counter: dict[str, int] = {}
+    try:
+        total_bytes = path.stat().st_size
+    except OSError:
+        total_bytes = 0
+    bytes_read = 0
+    next_report = 1_000_000
     with path.open(encoding="utf-8", errors="replace") as handle:
         for line_number, line in enumerate(handle, start=1):
+            bytes_read += len(line)
+            if total_bytes and bytes_read >= next_report:
+                from caliper.progress import report_file_progress
+
+                report_file_progress(progress, path, min(bytes_read, total_bytes), total_bytes)
+                next_report = bytes_read + 1_000_000
             raw = _json_event_from_line(line)
             if raw is None:
                 continue
             event = _usage_event(raw, path, line_number, options, turn_counter)
             if event is not None:
                 events.append(event)
+    if total_bytes:
+        from caliper.progress import report_file_progress
+
+        report_file_progress(progress, path, total_bytes, total_bytes)
     return events
 
 

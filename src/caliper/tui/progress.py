@@ -103,3 +103,19 @@ class TextualParseProgress:
         self._stage = "aggregating"
         self._emit(force=True)
         self._app.post_message(LoadFinished(generation=self._generation))
+
+    def file_progress(self, path: Path, bytes_read: int, total_bytes: int) -> None:
+        del path, bytes_read, total_bytes
+        self._check_cancelled()
+
+    def usage_footprint(
+        self,
+        *,
+        total_files: int,
+        total_bytes: int,
+        vendor_summary: str,
+        window_label: str,
+        unreadable_files: int = 0,
+    ) -> None:
+        del total_files, total_bytes, vendor_summary, window_label, unreadable_files
+        self._check_cancelled()

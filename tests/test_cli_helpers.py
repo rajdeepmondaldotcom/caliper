@@ -274,6 +274,27 @@ def test_health_checks_cover_warning_and_ok_paths(monkeypatch, tmp_path) -> None
     )
     assert health.check_cache_creation_rates([explicit_rate_event], options).status == "ok"
 
+
+def test_pricing_catalog_doctor_warns_for_stale_offline_catalog(monkeypatch) -> None:
+    options = build_options(days=7, offline=True)
+    stale_card = RateCard.load(None, "model")
+    monkeypatch.setattr(
+        health,
+        "pricing_catalog_status",
+        lambda _card: {
+            "source": "auto",
+            "models": 1200,
+            "age_hours": 24 * 30,
+            "warnings": ["pricing catalog refresh failed: unit"],
+        },
+    )
+    monkeypatch.setattr(health, "load_rate_card", lambda _options: stale_card)
+
+    check = health.check_pricing_catalog(options)
+
+    assert check.status == "warn"
+    assert "1200" in check.detail.replace(",", "")
+
     cursor_gap = _event(usage=Usage(), vendor=VENDOR_CURSOR)
     assert health.check_cursor_token_sentinel([cursor_gap]).status == "warn"
     assert health.check_cursor_token_sentinel([_event()]).status == "ok"
@@ -322,14 +343,16 @@ def test_tail_helpers_cover_event_and_session_rows() -> None:
     older = _event(dt.datetime(2026, 5, 11, tzinfo=dt.UTC), total=1000)
     rows = cli._recent_tail_rows(_result(older, newest), 1, "event")
     assert rows[0]["total_tokens"] == 2000
+    assert rows[0]["session"] == "12:00 am, Tuesday 12 May 2026"
 
     session_rows = cli._recent_tail_rows(_result(older, newest), 1, "session")
-    assert session_rows[0]["label"] == "Session One"
+    assert session_rows[0]["label"] == "12:00 am, Tuesday 12 May 2026 | Session One"
     assert "total_tokens" in cli._tail_csv(rows)
 
     options = build_options(days=7)
     table = cli._tail_table(rows, "event", options)
     assert "Recent Events" in table
+    assert "Tuesday 12 May 2026" in table
 
 
 def test_forecast_csv_and_markdown_paths(monkeypatch, tmp_path) -> None:
