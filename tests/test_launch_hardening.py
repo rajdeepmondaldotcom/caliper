@@ -156,7 +156,7 @@ def test_insight_actions_are_copy_pasteable_commands(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "<cheaper>" not in result.output
     assert " against " not in result.output
-    assert "caliper whatif --hypothetical-model claude-sonnet-4.6" in result.output
+    assert "caliper advise --strict" in result.output
 
 
 def test_statusline_json_redacts_paths_and_session_identity_by_default(tmp_path: Path) -> None:

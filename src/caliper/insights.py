@@ -332,12 +332,12 @@ def _model_concentration_insight(total) -> Insight | None:
         title=f"{top.model} is {share:.0%} of selected-window cost",
         detail=(
             f"{top.model} accounts for {share:.0%} of selected-window cost. "
-            "Run a what-if check before changing routing."
+            "Run advisor with the active rate card before changing routing."
         ),
-        action="caliper whatif --hypothetical-model claude-sonnet-4.6",
+        action="caliper advise --strict",
         scope=SCOPE_HOME,
         evidence=(f"{share:.0%} on {top.model}",),
-        next_command="caliper whatif --hypothetical-model claude-sonnet-4.6",
+        next_command="caliper advise --strict",
         category="optimization",
         priority=80,
         confidence="medium",
@@ -348,7 +348,7 @@ def _model_concentration_insight(total) -> Insight | None:
             "model": top.model,
             "events": top.totals.events,
         },
-        commands=("caliper models", "caliper whatif --hypothetical-model claude-sonnet-4.6"),
+        commands=("caliper models", "caliper advise --strict"),
     )
 
 

@@ -4,7 +4,15 @@
 .mypy_cache/
 .cursor/
 .venv/
-docs/
+# Internal docs subdirs + loose notes stay local. Only docs/screenshots/
+# is committed so the README hero image renders on GitHub.
+docs/launch/
+docs/messaging/
+docs/migrations/
+docs/qa/
+docs/release-and-ux-overhaul/
+docs/agents/
+docs/*.md
 docs-site/
 design-brief/
 editor/

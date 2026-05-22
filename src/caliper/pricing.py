@@ -130,18 +130,18 @@ def model_vendor_glyph(vendor: str) -> str:
 PRICING_SOURCES = [
     PricingSource(
         name="OpenAI API pricing",
-        url="https://developers.openai.com/api/docs/pricing",
-        checked="2026-05-13",
+        url="https://openai.com/api/pricing/",
+        checked="2026-05-22",
     ),
     PricingSource(
         name="GPT-5.5 model pricing and long-context rule",
-        url="https://developers.openai.com/api/docs/models/gpt-5.5",
-        checked="2026-05-13",
+        url="https://developers.openai.com/api/docs/models",
+        checked="2026-05-22",
     ),
     PricingSource(
         name="GPT-5.4 model pricing and long-context rule",
-        url="https://developers.openai.com/api/docs/models/gpt-5.4",
-        checked="2026-05-13",
+        url="https://developers.openai.com/api/docs/models",
+        checked="2026-05-22",
     ),
     PricingSource(
         name="Codex rate card",
@@ -170,8 +170,8 @@ PRICING_SOURCES = [
     ),
     PricingSource(
         name="Anthropic API pricing",
-        url="https://www.anthropic.com/pricing",
-        checked="2026-05-13",
+        url="https://platform.claude.com/docs/en/about-claude/pricing",
+        checked="2026-05-22",
     ),
     PricingSource(
         name="Anthropic prompt caching (cache write 1.25x, cache read 0.1x)",
@@ -180,18 +180,18 @@ PRICING_SOURCES = [
     ),
     PricingSource(
         name="Claude Haiku 4.5 model pricing",
-        url="https://www.anthropic.com/claude/haiku",
-        checked="2026-05-13",
+        url="https://platform.claude.com/docs/en/about-claude/models/overview",
+        checked="2026-05-22",
     ),
     PricingSource(
         name="Claude Sonnet 4.6 model pricing",
-        url="https://www.anthropic.com/claude/sonnet",
-        checked="2026-05-13",
+        url="https://platform.claude.com/docs/en/about-claude/models/overview",
+        checked="2026-05-22",
     ),
     PricingSource(
         name="Claude Opus 4.7 model pricing",
-        url="https://www.anthropic.com/claude/opus",
-        checked="2026-05-13",
+        url="https://platform.claude.com/docs/en/about-claude/models/overview",
+        checked="2026-05-22",
     ),
     PricingSource(
         name="Anthropic extended cache (1h cache write 2x)",

@@ -265,9 +265,112 @@ a:hover { color: var(--accent-strong); text-decoration: underline; text-underlin
 code { font-family: var(--mono); font-size: 0.92em; }
 table { font-variant-numeric: tabular-nums lining-nums; }
 
+/* Layout primitives emitted by the Python renderer. These classes let the
+   static report respond to real browser viewports, not only the prototype's
+   data-viewport frame. */
+.cal-dashboard-root { min-width: 0; }
+.cal-receipt-root {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 28px 64px;
+  font-family: var(--font);
+  color: var(--ink);
+}
+.cal-terminal-root {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+}
+.cal-terminal-layout {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 0;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+.cal-terminal-main {
+  min-width: 0;
+  padding: 24px 28px 64px;
+}
+.cal-summary-row {
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+}
+.cal-stat-card {
+  min-width: 0;
+  min-height: 142px;
+  display: flex;
+  flex-direction: column;
+}
+.cal-stat-card-value { overflow-wrap: anywhere; }
+.cal-card-sparkline {
+  min-width: 0;
+  margin-top: auto;
+  padding-top: 8px;
+}
+.cal-cost-panel {
+  min-width: 0;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+/* Hero verdict — the single line a screenshot reader can quote. Reads the
+   selected window cost, the trend chip, and the highest-leverage advisor
+   savings. Hairline border with an accent left rail; no novel tokens so
+   light/print themes inherit cleanly. */
+.cal-hero-verdict {
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+.cal-hero-verdict:hover { background: var(--panel-hover); }
+.cal-hero-cost { font-variant-numeric: tabular-nums lining-nums; }
+.cal-hero-action-command::selection { background: var(--accent-tint-2); }
+
+/* Show-the-math disclosure on KPI cards. Hides the default summary marker
+   so the eye reads our "?" affordance; otherwise styling stays inline. */
+.cal-card-formula > summary { list-style: none; }
+.cal-card-formula > summary::-webkit-details-marker { display: none; }
+.cal-card-formula > summary::marker { display: none; }
+.cal-card-formula > summary:hover { color: var(--ink-2) !important; }
+.cal-card-formula[open] > summary { color: var(--ink-2) !important; }
+
+/* Per-insight lineage chip ("based on N events · M sessions · X tokens").
+   Only rendered when Insight.evidence_metrics carries those keys. */
+.cal-insight-meta { font-variant-numeric: tabular-nums lining-nums; }
+
 /* Hover on table rows */
 .cal-table tbody tr { transition: background-color 80ms ease-out; }
 .cal-table tbody tr:hover { background: var(--panel-hover); }
+.cal-table {
+  min-width: 0;
+  /* Auto layout so columns size to their content. Fixed layout was
+     squeezing the model · tier column and forcing hyphen-breaks like
+     "claude-/sonnet-4-6 ·/standard". */
+  table-layout: auto;
+}
+.cal-table th,
+.cal-table td {
+  vertical-align: middle;
+}
+.cal-table td {
+  /* Breaks at word boundaries only — never inside identifiers like
+     "claude-sonnet-4-6" or numerics like "65%". */
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.cal-table td > div {
+  min-width: 0;
+}
+/* Numeric / mono cells never wrap and align on their decimal column. */
+.cal-table td[data-num="true"],
+.cal-table th[data-num="true"] {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+/* Model · tier cells: tokens stay whole; wrap only at the separator. */
+.cal-cell-model { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.cal-cell-model > span { white-space: nowrap; }
+/* Share cells: percentage and meter ride together; no orphan "%" lines. */
+.cal-cell-share { white-space: nowrap; }
 
 /* Section spacing */
 section[id] { scroll-margin-top: 24px; }
@@ -293,7 +396,96 @@ section[id]:target > [class*="cal-section-head"] {
 [data-viewport="mobile"] main { padding: 16px 14px 48px !important; }
 [data-viewport="mobile"] [data-screen-label] { min-width: 0; }
 [data-viewport="mobile"] .cal-stat-card { padding: 12px !important; }
-[data-viewport="mobile"] .cal-stat-card > div:nth-child(2) { font-size: 22px !important; }
+[data-viewport="mobile"] .cal-stat-card-value { font-size: 22px !important; }
+[data-viewport="mobile"] .cal-receipt-root { padding: 16px 14px 48px !important; }
+[data-viewport="mobile"] .cal-terminal-layout { grid-template-columns: 1fr !important; }
+[data-viewport="mobile"] .cal-terminal-main { padding: 20px 16px 64px !important; }
+
+@media (max-width: 720px) {
+  body { overflow-x: hidden; }
+  .cal-receipt-root { padding: 16px 14px 48px !important; }
+  .cal-terminal-layout { grid-template-columns: 1fr !important; }
+  .cal-terminal-main { padding: 20px 16px 64px !important; }
+  .cal-summary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+  .cal-shape-grid,
+  .cal-forecast-grid { grid-template-columns: 1fr !important; }
+  .cal-table {
+    font-size: 12px !important;
+    width: 100%;
+  }
+  .cal-table th,
+  .cal-table td {
+    padding: 8px 9px !important;
+  }
+  table th:nth-child(n+5),
+  table td:nth-child(n+5) { display: none; }
+  aside { display: none !important; }
+  header {
+    grid-template-columns: 1fr !important;
+    gap: 18px !important;
+  }
+  header > div:last-child {
+    text-align: left !important;
+    align-items: flex-start !important;
+  }
+  header > div:last-child > div {
+    flex-wrap: wrap !important;
+    justify-content: flex-start !important;
+    max-width: 100%;
+  }
+  .cal-evidence-badge,
+  .cal-window-badge {
+    max-width: 100%;
+  }
+  .cal-window-badge {
+    flex-wrap: wrap;
+    white-space: normal !important;
+    row-gap: 2px;
+  }
+  .cal-section-head.receipt {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .cal-section-head.receipt > * { min-width: 0; }
+  .cal-section-head.receipt > span:last-child {
+    width: 100%;
+    text-align: left !important;
+    white-space: normal !important;
+  }
+  [class*="cal-verdict"] { font-size: 13px; }
+  main { padding: 16px 14px 48px !important; }
+  [data-screen-label] { min-width: 0; }
+  .cal-stat-card {
+    padding: 12px !important;
+    min-height: 136px;
+  }
+  .cal-stat-card-value { font-size: 22px !important; }
+  .cal-terminal-mast {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    padding: 14px 16px !important;
+  }
+  .cal-terminal-mast .cal-terminal-brand,
+  .cal-terminal-mast .cal-terminal-badges {
+    border: 0 !important;
+    padding: 0 !important;
+    justify-content: flex-start !important;
+  }
+  .cal-terminal-mast .cal-terminal-stats {
+    justify-content: flex-start !important;
+  }
+  .cal-tweaks-panel {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    flex-wrap: wrap;
+    border-radius: var(--r-md);
+    justify-content: center;
+  }
+}
 
 /* Mobile viewport: render at 390px wide in a phone-shaped frame */
 .viewport-mobile-frame {
@@ -338,12 +530,40 @@ section[id]:target > [class*="cal-section-head"] {
     --mixed: #4a4a4a !important;
   }
   .tweaks-host, .preview-chrome, [class*="twk-"] { display: none !important; }
-  /* Hide stretch sections to make a 1-page receipt-style PDF */
-  section#heatmap, section#anomalies, section#sessions, section#advisor,
-  section#rate-limits, section#budgets { display: none !important; }
+  /* Print densification — every section stays visible so a board pack
+     never quietly drops anomalies, advisor, or budget burn. We scale the
+     tokens instead of hiding rows. Each section still gets break-inside:
+     avoid so a card doesn't split across pages, but the page itself can
+     grow to as many sheets as the content honestly needs. */
+  :root, .theme-dark, .theme-light {
+    --num-xl: 22px !important;
+    --num-lg: 19px !important;
+    --num-md: 16px !important;
+    --num-sm: 13px !important;
+    --row-pad-y: 6px !important;
+    --row-pad-x: 10px !important;
+  }
+  .cal-stat-card {
+    min-height: 0 !important;
+    padding: 10px !important;
+  }
+  .cal-stat-card-value { font-size: 22px !important; }
+  .cal-table th, .cal-table td { padding: 6px 10px !important; }
+  .cal-section-head.receipt h2,
+  .cal-section-head.term span { font-size: 11px !important; }
+  /* Heatmap and per-day strips: keep them but scale the cells so the
+     yearly grid prints as a compact ribbon, not a half-page mural. */
+  .cal-heatmap-cell { width: 9px !important; height: 9px !important; }
+  /* Sparklines: small but kept so the trend story prints. */
+  .cal-card-sparkline svg { max-height: 18px !important; }
+  /* Hide the show-the-math disclosure when printing — the formulas are
+     intentionally interactive ink. The body stays legible without them. */
+  .cal-card-formula { display: none !important; }
+  /* Interactive toggle panel never belongs in PDF. */
+  .cal-tweaks-panel { display: none !important; }
   section { break-inside: avoid; }
   .cal-stat-card, .cal-banner, .cal-table, [data-screen-label] { break-inside: avoid; }
-  body { font-size: 12pt !important; line-height: 1.5 !important; }
+  body { font-size: 10.5pt !important; line-height: 1.45 !important; }
 }
 
 /* Lift focus rings */
@@ -366,24 +586,31 @@ p, h1, h2, h3 { text-wrap: pretty; }
    Hover polish — only on devices with real pointers, never during print.
    Disabled cleanly by the print theme + @media print blocks above. */
 @media (hover: hover) and (pointer: fine) {
-  /* Stat cards: subtle lift + brighter border, so hover feels alive. */
+  /* Stat cards: stable hover state that never changes layout geometry. */
   .cal-stat-card {
-    transition: transform 140ms ease-out, border-color 140ms ease-out,
-                box-shadow 140ms ease-out;
+    transition: border-color 120ms ease-out, box-shadow 120ms ease-out,
+                background-color 120ms ease-out;
   }
   .cal-stat-card:hover {
-    transform: translateY(-2px);
     border-color: var(--border-strong);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    background: var(--panel-hover);
+    box-shadow: inset 0 0 0 1px var(--hairline);
   }
-  /* Bar chart rects: brighten the filled bar on hover so the tooltip
-     (native SVG <title>) is preceded by a visible affordance. */
+  /* Bar chart rects: brighten the filled bar and reveal the built-in
+     SVG label without shifting anything around it. */
   .cal-bar-rect { transition: fill-opacity 120ms ease-out; }
-  .cal-bar-rect:hover { fill-opacity: 0.78; }
-  /* Verdict-strip pill links: existing <a> gets underline; lift the pill
-     background a touch so the whole chip reads as interactive. */
-  .cal-verdict-chip { display: inline-block; transition: transform 100ms ease-out; }
-  .cal-verdict-chip:hover { transform: translateY(-1px); }
+  .cal-bar-group:hover .cal-bar-rect,
+  .cal-bar-group:focus .cal-bar-rect { fill-opacity: 0.82; }
+  .cal-bar-hover-label {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 80ms ease-out;
+  }
+  .cal-bar-group:hover .cal-bar-hover-label,
+  .cal-bar-group:focus .cal-bar-hover-label { opacity: 1; }
+  /* Verdict-strip pill links: existing <a> gets underline; the chip gets
+     a stable contrast state. */
+  .cal-verdict-chip { display: inline-block; }
   .cal-verdict-chip:hover > span {
     background: var(--panel-hover) !important;
     border-color: var(--accent-tint-2) !important;
@@ -391,11 +618,10 @@ p, h1, h2, h3 { text-wrap: pretty; }
   /* Heatmap cells: highlight the hovered cell so the user can scan
      the matrix without losing their place. */
   .cal-heatmap-cell {
-    transition: box-shadow 100ms ease-out, transform 100ms ease-out;
+    transition: box-shadow 100ms ease-out, border-color 100ms ease-out;
   }
   .cal-heatmap-cell:hover {
-    box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 3px var(--accent-tint);
-    transform: scale(1.15);
+    box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent-tint);
     z-index: 1;
     position: relative;
   }
@@ -409,6 +635,8 @@ p, h1, h2, h3 { text-wrap: pretty; }
     width: 2px;
     background: var(--accent);
   }
+  .cal-session-row { cursor: help; }
+  .cal-session-row:hover td { background: var(--panel-hover); }
   /* Pills/badges sitting outside the verdict strip — soft highlight. */
   a:hover > span[class=""], a:hover > span:not([class]) {
     background: var(--panel-hover);
@@ -430,6 +658,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
   gap: 20px;
   align-items: center;
   font-family: var(--mono);
+  min-width: 0;
 }
 .cal-terminal-mast .cal-terminal-brand {
   display: flex;
@@ -437,6 +666,8 @@ p, h1, h2, h3 { text-wrap: pretty; }
   gap: 14px;
   padding-right: 20px;
   border-right: 1px solid var(--border);
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .cal-terminal-mast .cal-terminal-stats {
   display: flex;
@@ -447,6 +678,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
   color: var(--mute);
   flex-wrap: wrap;
   row-gap: 4px;
+  min-width: 0;
 }
 .cal-terminal-mast .cal-terminal-badges {
   display: flex;
@@ -455,6 +687,8 @@ p, h1, h2, h3 { text-wrap: pretty; }
   justify-content: flex-end;
   padding-left: 20px;
   border-left: 1px solid var(--border);
+  min-width: 0;
+  flex-wrap: wrap;
 }
 [data-viewport="mobile"] .cal-terminal-mast {
   grid-template-columns: 1fr;
@@ -469,8 +703,8 @@ p, h1, h2, h3 { text-wrap: pretty; }
 
 /* Disable any hover transforms during actual print so the PDF is static. */
 @media print {
-  .cal-stat-card:hover { transform: none !important; box-shadow: none !important; }
-  .cal-heatmap-cell:hover { transform: none !important; box-shadow: none !important; }
+  .cal-stat-card:hover { box-shadow: none !important; }
+  .cal-heatmap-cell:hover { box-shadow: none !important; }
 }
 
 /* Interactive playground — rhythm swap, tweaks panel, save button.
@@ -555,10 +789,10 @@ p, h1, h2, h3 { text-wrap: pretty; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: background 120ms ease-out, transform 80ms ease-out;
+  transition: background 120ms ease-out, color 120ms ease-out;
 }
 .cal-tweaks-panel .cal-tweaks-save:hover { background: var(--accent); color: var(--bg); }
-.cal-tweaks-panel .cal-tweaks-save:active { transform: scale(0.97); }
+.cal-tweaks-panel .cal-tweaks-save:active { background: var(--accent-strong); color: var(--bg); }
 .cal-tweaks-panel .cal-tweaks-arrow {
   display: inline-block;
   width: 10px;
@@ -603,6 +837,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
 # Numbered audit anchors. The order is the rendering order; renumbering is a
 # breaking change for any external links into a generated dashboard.
 SECTION_NUMBERS: dict[str, str] = {
+    "action-center": "00",
     "overview": "01",
     "cost": "02",
     "shape": "03",
@@ -617,9 +852,15 @@ SECTION_NUMBERS: dict[str, str] = {
     "heatmap": "12",
     "sessions": "13",
     "evidence": "14",
+    "usage-windows": "15",
+    "usage-mix": "16",
+    "inefficiencies": "17",
+    "outlook": "18",
+    "attribution": "19",
 }
 
 _SECTION_TITLES: dict[str, str] = {
+    "action-center": "Action center",
     "overview": "Overview",
     "cost": "Cost over time",
     "shape": "Session shape",
@@ -634,6 +875,11 @@ _SECTION_TITLES: dict[str, str] = {
     "heatmap": "Activity heatmap",
     "sessions": "Top sessions",
     "evidence": "Evidence",
+    "usage-windows": "Rolling windows",
+    "usage-mix": "Usage mix",
+    "inefficiencies": "Savings opportunities",
+    "outlook": "Outlook drivers",
+    "attribution": "Attribution",
 }
 
 # Map session-shape categories to CSS color tokens.
@@ -651,6 +897,8 @@ _SHAPE_COLORS: dict[str, str] = {
 
 def _should_render(section_id: str, d: Dashboard) -> bool:
     """Hide-when-empty rules. Sections not listed always render."""
+    if section_id == "action-center":
+        return bool(d.command_center or d.decision_queue or d.comparisons or d.executive_brief)
     if section_id == "cost":
         return bool(d.daily)
     if section_id == "models":
@@ -673,6 +921,16 @@ def _should_render(section_id: str, d: Dashboard) -> bool:
         return bool(d.top_sessions)
     if section_id == "evidence":
         return bool(d.evidence)
+    if section_id == "usage-windows":
+        return bool(d.usage_windows)
+    if section_id == "usage-mix":
+        return bool(d.usage_mix)
+    if section_id == "inefficiencies":
+        return bool(d.inefficiencies or d.cache_leverage)
+    if section_id == "outlook":
+        return bool(d.outlook or d.model_forecasts or d.forecast_drivers or d.seasonality)
+    if section_id == "attribution":
+        return bool(d.agents or d.skills or d.tier_provenance or d.long_context_histogram)
     # overview / shape / insights always render (placeholder when empty)
     return True
 
@@ -788,22 +1046,31 @@ class _PrivacyMap:
     rather than raising — the renderer is defensive about partial data.
     """
 
-    __slots__ = ("mode", "projects", "sessions", "path_label")
+    __slots__ = ("mode", "projects", "sessions", "paths", "path_label")
 
-    def __init__(self, mode: str, projects: dict[str, str], sessions: dict[str, str]):
+    def __init__(
+        self,
+        mode: str,
+        projects: dict[str, str],
+        sessions: dict[str, str],
+        paths: dict[str, str] | None = None,
+    ):
         self.mode = mode
         self.projects = projects
         self.sessions = sessions
+        self.paths = paths or {}
         self.path_label = "[path]"
 
 
 def _build_privacy_map(d: Dashboard, mode: str) -> _PrivacyMap:
     project_names = sorted({p.name for p in d.by_project if p.name})
     session_labels = sorted({s.label for s in d.top_sessions if s.label})
+    project_paths = sorted({p.path for p in d.by_project if p.path})
     return _PrivacyMap(
         mode=mode,
         projects={name: f"Project {i}" for i, name in enumerate(project_names, start=1)},
         sessions={label: f"Session {i}" for i, label in enumerate(session_labels, start=1)},
+        paths={path: "[path]" for path in project_paths},
     )
 
 
@@ -847,6 +1114,59 @@ def _private_path(path: str | None, pm: _PrivacyMap) -> str:
     if pm.mode == "off":
         return _esc(path)
     return _private(path, pm.path_label, pm)
+
+
+def _private_text(text: str | None, pm: _PrivacyMap) -> str:
+    """Escape arbitrary copy while swapping known sensitive labels.
+
+    Many high-level findings are already composed by the adapter as human
+    strings. Rather than parsing those strings for structure, replace exact
+    known project names, session labels, and project paths with the same
+    privacy spans used by the tables.
+    """
+    raw = "" if text is None else str(text)
+    if not raw:
+        return ""
+    if pm.mode == "off":
+        return _esc(raw)
+    replacements: dict[str, str] = {}
+    replacements.update(pm.paths)
+    replacements.update(pm.projects)
+    replacements.update(pm.sessions)
+    keys = sorted((key for key in replacements if key), key=len, reverse=True)
+    if not keys:
+        return _esc(raw)
+    out: list[str] = []
+    pos = 0
+    while pos < len(raw):
+        match = next((key for key in keys if raw.startswith(key, pos)), None)
+        if match is None:
+            next_pos = min(
+                [idx for key in keys if (idx := raw.find(key, pos + 1)) != -1],
+                default=len(raw),
+            )
+            out.append(_esc(raw[pos:next_pos]))
+            pos = next_pos
+            continue
+        out.append(_private(match, replacements[match], pm))
+        pos += len(match)
+    return "".join(out)
+
+
+_ANCHOR_ALIASES = {
+    "command-center": "action-center",
+    "impact": "action-center",
+    "usage-windows": "usage-windows",
+    "top-sessions": "sessions",
+    "metric-glossary": "evidence",
+}
+
+
+def _anchor_id(anchor: str | None) -> str:
+    raw = (anchor or "").strip()
+    if not raw:
+        return "action-center"
+    return _ANCHOR_ALIASES.get(raw, raw)
 
 
 # ============================================================================
@@ -997,19 +1317,23 @@ def _bar_chart(
     """
     if not daily:
         return ""
-    data: list[tuple[str, float, str]] = []
+    data: list[tuple[str, str, float, int, str]] = []
     for d in daily:
         day = getattr(d, "day", "")
         label = day[5:] if len(day) > 5 else day
-        data.append((label, float(d.cost_usd), (getattr(d, "shape", None) or "mixed")))
-    mx = max((v for _, v, _ in data), default=1.0) or 1.0
+        events = int(getattr(d, "events", 0) or 0)
+        data.append((day, label, float(d.cost_usd), events, (getattr(d, "shape", None) or "mixed")))
+    mx = max((v for _, _, v, _, _ in data), default=1.0) or 1.0
     nice_max = _nice_ceil(mx)
+    total = sum(v for _, _, v, _, _ in data)
+    avg = total / len(data) if data else 0.0
     pad_l, pad_r, pad_t, pad_b = 44, 16, 18, 28
     inner_w = max(50, width - pad_l - pad_r)
     inner_h = height - pad_t - pad_b
     bar_w = inner_w / len(data)
     gap = max(2.0, min(8.0, bar_w * 0.18))
     y_ticks = 4
+    avg_y = pad_t + inner_h - (avg / nice_max) * inner_h if avg > 0 else None
     parts = [
         f'<svg width="100%" viewBox="0 0 {width} {height}" preserveAspectRatio="xMinYMin meet" '
         f'role="img" aria-label="Daily cost bar chart" style="display:block;height:{height}px">',
@@ -1027,16 +1351,53 @@ def _bar_chart(
             f'<text x="{pad_l - 10}" y="{y + 4:.1f}" font-size="11" text-anchor="end" '
             f'fill="var(--mute)">{label}</text>'
         )
+    avg_overlay = ""
+    if avg_y is not None:
+        avg_label = f"avg {fmt_money(avg)}/day"
+        avg_label_w = max(74, min(148, int(len(avg_label) * 6.2 + 14)))
+        avg_label_x = width - pad_r - avg_label_w
+        avg_label_y = max(8.0, avg_y - 19)
+        avg_overlay = (
+            f'<line class="cal-chart-average-line" x1="{pad_l}" y1="{avg_y:.1f}" '
+            f'x2="{width - pad_r}" y2="{avg_y:.1f}" stroke="var(--warn)" '
+            'stroke-width="1.5" stroke-dasharray="6 5" />'
+            f'<rect x="{avg_label_x:.1f}" y="{avg_label_y:.1f}" '
+            f'width="{avg_label_w}" height="16" rx="3" fill="var(--panel)" '
+            'stroke="var(--border)" />'
+            f'<text x="{width - pad_r - 7}" y="{avg_label_y + 11:.1f}" '
+            'font-size="11" text-anchor="end" fill="var(--warn)" font-weight="600">'
+            f"{_esc(avg_label)}</text>"
+        )
     peak_value = -1.0
     peak_idx = -1
-    for i, (label, value, shape) in enumerate(data):
+    for i, (day, label, value, events, shape) in enumerate(data):
         x = pad_l + i * bar_w + gap / 2
         bw = bar_w - gap
         bar_h = (value / nice_max) * inner_h
         y = pad_t + inner_h - bar_h
+        center_x = x + bw / 2
+        shape_key = shape.lower().replace("_", "-")
+        bar_color = _SHAPE_COLORS.get(shape_key, accent)
         if value > peak_value:
             peak_value = value
             peak_idx = i
+        delta = value - avg
+        delta_label = (
+            "at average"
+            if abs(delta) < 0.005
+            else (f"{fmt_money(abs(delta))} {'above' if delta > 0 else 'below'} avg")
+        )
+        aria_label = (
+            f"{day or label}: {fmt_money(value)}, {fmt_int(events)} events, {shape}, {delta_label}"
+        )
+        tip_w, tip_h = 168, 42
+        tip_x = min(max(pad_l, center_x - tip_w / 2), width - pad_r - tip_w)
+        tip_y = y - tip_h - 8 if y - tip_h - 8 >= pad_t else y + 8
+        parts.append(
+            f'<g class="cal-bar-group" tabindex="0" role="listitem" '
+            f'aria-label="{_esc(aria_label)}">'
+        )
+        parts.append(f"<title>{_esc(aria_label)}</title>")
         parts.append(
             f'<rect x="{x:.1f}" y="{pad_t}" width="{bw:.1f}" height="{inner_h:.1f}" '
             f'fill="var(--bar-ghost)" />'
@@ -1045,18 +1406,36 @@ def _bar_chart(
             parts.append(
                 f'<rect class="cal-bar-rect" x="{x:.1f}" y="{y:.1f}" '
                 f'width="{bw:.1f}" height="{bar_h:.1f}" '
-                f'fill="{accent}" rx="1"><title>{_esc(label)}: '
-                f"{_esc(fmt_money(value))} · {_esc(shape)}</title></rect>"
+                f'fill="{bar_color}" rx="1"><title>{_esc(label)}: '
+                f"{_esc(fmt_money(value))} · {fmt_int(events)} events · "
+                f"{_esc(shape)} · {_esc(delta_label)}</title></rect>"
             )
+        parts.append(
+            f'<rect class="cal-bar-hit" x="{x:.1f}" y="{pad_t}" width="{bw:.1f}" '
+            f'height="{inner_h:.1f}" fill="transparent" pointer-events="all" />'
+        )
+        parts.append(
+            f'<g class="cal-bar-hover-label" aria-hidden="true">'
+            f'<rect x="{tip_x:.1f}" y="{tip_y:.1f}" width="{tip_w}" height="{tip_h}" '
+            'rx="4" fill="var(--panel)" stroke="var(--border-strong)" />'
+            f'<text x="{tip_x + 8:.1f}" y="{tip_y + 16:.1f}" font-size="11" '
+            f'fill="var(--ink)" font-weight="600">{_esc(label)} · {_esc(fmt_money(value))}</text>'
+            f'<text x="{tip_x + 8:.1f}" y="{tip_y + 31:.1f}" font-size="10" '
+            f'fill="var(--mute)">{fmt_int(events)} events · {_esc(delta_label)}</text>'
+            "</g>"
+        )
+        parts.append("</g>")
     for idx in {0, len(data) // 2, len(data) - 1}:
         if idx < 0 or idx >= len(data):
             continue
-        label = data[idx][0]
+        label = data[idx][1]
         x = pad_l + idx * bar_w + bar_w / 2
         parts.append(
             f'<text x="{x:.1f}" y="{height - 10}" font-size="11" text-anchor="middle" '
             f'fill="var(--mute)">{_esc(label)}</text>'
         )
+    if avg_overlay:
+        parts.append(avg_overlay)
     if peak_idx >= 0:
         parts.append(
             f'<text x="{width - pad_r}" y="{pad_t - 4}" font-size="11" text-anchor="end" '
@@ -1197,13 +1576,16 @@ def _stat_card(
     spark_color: str = "var(--accent)",
     rail: str | None = None,
     dense: bool = False,
+    formula: str = "",
+    formula_source: str = "",
 ) -> str:
     pad = 12 if dense else 16
     delta_color = _tone_color(delta_tone)
     value_color = "var(--ghost)" if value == "—" else "var(--ink)"
     parts = [
         f'<div class="cal-stat-card" style="position:relative;background:var(--panel);'
-        f'border:1px solid var(--border);border-radius:var(--r-md);padding:{pad}px;overflow:hidden">'
+        f"border:1px solid var(--border);border-radius:var(--r-md);padding:{pad}px;"
+        'overflow:hidden;display:flex;flex-direction:column;min-height:142px">'
     ]
     if rail:
         parts.append(
@@ -1220,7 +1602,7 @@ def _stat_card(
         )
     parts.append("</div>")
     parts.append(
-        f'<div style="font-size:var(--num-xl);line-height:1.05;font-weight:600;color:{value_color};'
+        f'<div class="cal-stat-card-value" style="font-size:var(--num-xl);line-height:1.05;font-weight:600;color:{value_color};'
         f'margin-bottom:4px;letter-spacing:-0.01em">{_esc(value)}</div>'
     )
     if sub:
@@ -1232,9 +1614,36 @@ def _stat_card(
         spark_w = 100 if dense else 140
         spark_h = 22 if dense else 26
         parts.append(
-            f'<div style="margin-top:8px">'
+            f'<div class="cal-card-sparkline">'
             f"{_sparkline(sparkline, width=spark_w, height=spark_h, stroke=spark_color)}"
             f"</div>"
+        )
+    if formula:
+        # Pure-HTML disclosure. No JS, no aria roles needed — <details> is a
+        # native interactive element and CI's "max 1 script tag" gate still
+        # passes. The summary is a small "?" affordance the eye can dismiss
+        # until the reader is curious.
+        source_html = (
+            f'<div style="color:var(--ghost);font-size:10px;margin-top:6px">{_esc(formula_source)}</div>'
+            if formula_source
+            else ""
+        )
+        parts.append(
+            '<details class="cal-card-formula" style="margin-top:auto;padding-top:8px">'
+            '<summary style="cursor:pointer;list-style:none;font-family:var(--mono);'
+            "font-size:10px;letter-spacing:.04em;color:var(--ghost);"
+            "user-select:none;display:inline-flex;align-items:center;gap:4px;"
+            'outline:none" aria-label="Show the formula for this KPI">'
+            '<span aria-hidden="true" style="display:inline-block;width:11px;height:11px;'
+            "border:1px solid var(--border-strong);border-radius:50%;text-align:center;"
+            'line-height:9px;font-size:9px;color:var(--mute)">?</span>'
+            "<span>show the math</span></summary>"
+            '<div style="margin-top:8px;padding:8px 10px;background:var(--panel-2);'
+            "border:1px solid var(--border);border-radius:3px;"
+            "font-family:var(--mono);font-size:11px;line-height:1.55;"
+            f'color:var(--ink-2);white-space:pre-wrap;word-break:break-word">{_esc(formula)}</div>'
+            f"{source_html}"
+            "</details>"
         )
     parts.append("</div>")
     return "".join(parts)
@@ -1281,7 +1690,7 @@ def _evidence_badge(qs: QualityScore) -> str:
         color = "var(--bad)"
     return (
         '<a href="#evidence" style="text-decoration:none">'
-        '<span title="Evidence quality — click to jump to §14" '
+        '<span class="cal-evidence-badge" title="Evidence quality — click to jump to §14" '
         'style="display:inline-flex;align-items:baseline;gap:6px;padding:5px 10px;'
         "border-radius:3px;background:var(--panel-2);border:1px solid var(--border);"
         'font-family:var(--mono);font-size:12px;white-space:nowrap">'
@@ -1296,7 +1705,7 @@ def _evidence_badge(qs: QualityScore) -> str:
 
 def _window_badge(w: WindowMeta) -> str:
     return (
-        '<span style="display:inline-flex;align-items:center;gap:10px;padding:5px 10px;'
+        '<span class="cal-window-badge" style="display:inline-flex;align-items:center;gap:10px;padding:5px 10px;'
         "border-radius:3px;background:var(--panel-2);border:1px solid var(--border);"
         'font-family:var(--mono);font-size:12px;white-space:nowrap">'
         f'<span style="color:var(--ink)">{_esc(w.label)}</span>'
@@ -1344,11 +1753,14 @@ def _section_head(section_id: str, *, rhythm: str, meta: str | None = None) -> s
             "border-bottom:1px solid var(--border);background:var(--panel-2);"
             'margin-bottom:16px;gap:16px">'
             '<div style="display:flex;align-items:baseline;gap:12px;min-width:0">'
-            f'<span style="font-family:var(--mono);font-size:11px;color:var(--mute);'
+            f'<span aria-hidden="true" style="font-family:var(--mono);font-size:11px;color:var(--mute);'
             f'letter-spacing:.04em">§{num}</span>'
-            f'<span style="font-family:var(--mono);font-size:12px;letter-spacing:.18em;'
+            # Real <h2> in terminal mode too — screen readers shouldn't have
+            # to guess that this monospace, accent-coloured span is the
+            # section heading.
+            f'<h2 style="margin:0;font-family:var(--mono);font-size:12px;letter-spacing:.18em;'
             f"color:var(--accent);text-transform:uppercase;font-weight:600;"
-            f'white-space:nowrap">{_esc(title)}</span>'
+            f'white-space:nowrap">{_esc(title)}</h2>'
             "</div>"
             f"{meta_html}</div>"
         )
@@ -1395,6 +1807,173 @@ def _category_legend(items: Iterable[tuple[str, str]]) -> str:
     return "".join(parts)
 
 
+def _hero_verdict_data(d: Dashboard) -> dict[str, Any] | None:
+    """Compute the headline numbers for the hero verdict strip.
+
+    Returns ``None`` when the dashboard is empty (no events). All numeric
+    fields come from existing ``Totals`` / ``AdvisorRecommendations`` /
+    ``WindowMeta`` so this function adds no new state — it is purely a
+    presentation projection of data the adapter already builds.
+
+    Keys returned:
+    * ``period_label`` — "Last 14 days"
+    * ``period_range`` — "2026-05-03 → 2026-05-17"
+    * ``cost`` — display string (``$1,243``)
+    * ``delta_pct`` — signed float or None
+    * ``delta_text`` — display string ("+8.2% vs prior 14d") or ""
+    * ``delta_tone`` — "warn" | "good" | "default"
+    * ``recoverable_usd`` — float (sum of top-3 advisor savings)
+    * ``recoverable_text`` — "$184" / ""
+    * ``rec_count`` — int (advisor recs counted toward recoverable)
+    * ``top_action_title`` — str (highest-savings rec title) or ""
+    * ``top_action_value`` — str (highest-savings rec value) or ""
+    * ``top_action_command`` — str (rec.action — copy-pasteable CLI)
+    * ``top_action_confidence`` — float in [0,1] or None
+    """
+    t = d.totals
+    if t is None or t.events == 0:
+        return None
+
+    delta = t.delta_cost_pct
+    delta_text = ""
+    delta_tone = "default"
+    if delta is not None:
+        sign = "+" if delta >= 0 else ""
+        delta_text = f"{sign}{delta * 100:.1f}% vs prior {d.window.label.lower()}"
+        if abs(delta) < 0.02:
+            delta_tone = "default"
+        elif delta > 0:
+            delta_tone = "warn"
+        else:
+            delta_tone = "good"
+
+    recs = list(d.advisor_recommendations or [])
+    # Rank by dollar savings; the adapter already does this but we don't
+    # assume order here (the dashboard data contract doesn't lock it).
+    recs.sort(key=lambda r: (-float(r.savings_usd or 0.0), -float(r.confidence or 0.0)))
+    top_three = [r for r in recs if (r.savings_usd or 0.0) > 0][:3]
+    recoverable = sum(float(r.savings_usd or 0.0) for r in top_three)
+    top = top_three[0] if top_three else None
+
+    return {
+        "period_label": d.window.label,
+        "period_range": d.window.range,
+        "cost": fmt_money(t.cost_usd),
+        "delta_pct": delta,
+        "delta_text": delta_text,
+        "delta_tone": delta_tone,
+        "recoverable_usd": recoverable,
+        "recoverable_text": fmt_money(recoverable) if recoverable > 0 else "",
+        "rec_count": len(top_three),
+        "top_action_title": top.title if top else "",
+        "top_action_value": top.value if top else "",
+        "top_action_command": top.action if top else "",
+        "top_action_confidence": top.confidence if top else None,
+    }
+
+
+def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
+    """Hero verdict strip — the single line a screenshot reader can quote.
+
+    Rendered above the existing ``_verdict_strip`` (which surfaces the
+    executive brief). Reads from existing ``Totals`` + ``WindowMeta`` +
+    ``AdvisorRecommendations``; adds no new dashboard fields. Hidden when
+    the window has no events.
+    """
+    data = _hero_verdict_data(d)
+    if data is None:
+        return ""
+
+    delta_color = (
+        "var(--warn)"
+        if data["delta_tone"] == "warn"
+        else "var(--ok)"
+        if data["delta_tone"] == "good"
+        else "var(--mute)"
+    )
+    delta_html = (
+        f'<span class="cal-hero-delta" style="color:{delta_color};font-size:13px;'
+        f'font-weight:500;margin-left:14px;letter-spacing:-0.005em">{_esc(data["delta_text"])}</span>'
+        if data["delta_text"]
+        else ""
+    )
+
+    if data["recoverable_text"]:
+        rec_count = data["rec_count"]
+        plural = "" if rec_count == 1 else "s"
+        recoverable_html = (
+            '<div class="cal-hero-savings" style="display:flex;align-items:baseline;gap:10px;'
+            'flex-wrap:wrap;margin-top:8px">'
+            f'<span style="color:var(--ok);font-family:var(--mono);font-size:11px;'
+            'letter-spacing:.18em;text-transform:uppercase;font-weight:600">FIXABLE</span>'
+            f'<span style="color:var(--ink);font-size:14px;font-weight:600">'
+            f'{_esc(data["recoverable_text"])}<span style="color:var(--mute);'
+            f'font-weight:400;margin-left:6px">across {rec_count} '
+            f"recommendation{plural}</span></span>"
+            "</div>"
+        )
+    else:
+        recoverable_html = ""
+
+    if data["top_action_title"]:
+        conf = data["top_action_confidence"]
+        conf_chip = (
+            f' · <span style="color:var(--mute)">{int(round((conf or 0) * 100))}% confidence</span>'
+            if conf is not None
+            else ""
+        )
+        value_chip = (
+            f' · <span style="color:var(--ok);font-weight:500">{_esc(data["top_action_value"])}</span>'
+            if data["top_action_value"]
+            else ""
+        )
+        command_html = (
+            '<div class="cal-hero-action-command" style="font-family:var(--mono);'
+            "font-size:11px;color:var(--accent);margin-top:6px;"
+            'overflow-wrap:anywhere;word-break:break-word">'
+            f'<span style="color:var(--ghost)">$ </span>'
+            f"{_esc(data['top_action_command'])}</div>"
+            if data["top_action_command"]
+            else ""
+        )
+        top_action_html = (
+            '<div class="cal-hero-action" style="margin-top:10px;padding-top:10px;'
+            'border-top:1px solid var(--border)">'
+            '<span style="color:var(--mute);font-family:var(--mono);font-size:10px;'
+            'letter-spacing:.18em;text-transform:uppercase">Top fix</span>'
+            f'<div style="color:var(--ink);font-size:13px;font-weight:500;margin-top:4px">'
+            f"{_esc(data['top_action_title'])}{value_chip}{conf_chip}"
+            "</div>"
+            f"{command_html}"
+            "</div>"
+        )
+    else:
+        top_action_html = ""
+
+    return (
+        '<div class="cal-hero-verdict" '
+        'style="background:var(--panel);border:1px solid var(--border);'
+        "border-left:3px solid var(--accent);border-radius:0 var(--r-md) var(--r-md) 0;"
+        'padding:16px 20px">'
+        '<div class="cal-hero-headline" style="display:flex;align-items:baseline;gap:14px;'
+        'flex-wrap:wrap">'
+        '<span style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
+        'color:var(--accent);text-transform:uppercase;font-weight:600">Verdict</span>'
+        f'<span class="cal-hero-period" style="color:var(--mute);font-size:12px">'
+        f"{_esc(data['period_label'])} · {_esc(data['period_range'])}</span>"
+        "</div>"
+        '<div class="cal-hero-line" style="display:flex;align-items:baseline;gap:0;'
+        'flex-wrap:wrap;margin-top:8px">'
+        '<span class="cal-hero-cost" style="color:var(--ink);font-size:var(--num-lg);'
+        f'font-weight:600;letter-spacing:-0.015em">{_esc(data["cost"])}</span>'
+        f"{delta_html}"
+        "</div>"
+        f"{recoverable_html}"
+        f"{top_action_html}"
+        "</div>"
+    )
+
+
 def _verdict_strip(d: Dashboard, rhythm: str) -> str:
     eb = d.executive_brief
     if eb is None or not eb.findings:
@@ -1424,7 +2003,7 @@ def _verdict_strip(d: Dashboard, rhythm: str) -> str:
         # (every word wrapping). Stacking the pills below makes the row
         # robust against real-world finding strings.
         chips = "".join(
-            f'<a href="#{_esc(f.anchor)}" class="cal-verdict-chip" style="text-decoration:none">'
+            f'<a href="#{_esc(_anchor_id(f.anchor))}" class="cal-verdict-chip" style="text-decoration:none">'
             f"{_pill(_esc(f.title) + ' · ' + _esc(f.impact), tone=_pill_tone(f))}</a>"
             for f in findings
         )
@@ -1454,7 +2033,7 @@ def _verdict_strip(d: Dashboard, rhythm: str) -> str:
             + "</span>"
         )
         chips_html.append(
-            f'<a href="#{_esc(f.anchor)}" class="cal-verdict-chip" style="text-decoration:none">'
+            f'<a href="#{_esc(_anchor_id(f.anchor))}" class="cal-verdict-chip" style="text-decoration:none">'
             f"{_pill(inner, tone=_pill_tone(f))}</a>"
         )
     return (
@@ -1478,10 +2057,21 @@ def _caliper_footer(d: Dashboard) -> str:
     return (
         '<footer style="border-top:1px solid var(--border);padding-top:16px;margin-top:32px;'
         'display:grid;grid-template-columns:1fr auto;gap:16px;color:var(--mute);font-size:11px;line-height:1.6">'
-        '<div style="max-width:640px">Caliper is '
+        '<div style="max-width:640px;display:flex;flex-direction:column;gap:6px">'
+        # The moat, said plainly. The voice rule (design-brief/03) is
+        # "headers are nouns" — three short clauses, no marketing verbs.
+        '<div style="color:var(--ink-2);font-size:12px;font-weight:500">'
+        "Caliper reads logs already on your disk. "
+        '<span style="color:var(--ok)">No proxy.</span> '
+        '<span style="color:var(--ok)">No upload.</span> '
+        '<span style="color:var(--ok)">No login.</span>'
+        "</div>"
+        '<div style="color:var(--mute)">'
+        "Caliper is "
         '<span style="color:var(--ok)">offline-first</span>. '
         "This dashboard contains no external resources, scripts, or fetch calls. "
-        "All data was parsed from local AI coding logs.</div>"
+        "All data was parsed from local AI coding logs."
+        "</div></div>"
         '<div style="text-align:right;font-family:var(--mono)">'
         f"<div>caliper v{_esc(d.caliper.version)} · schema {_esc(d.caliper.schema_version)}</div>"
         f"<div>{_esc(d.generated_at)}</div>"
@@ -1502,14 +2092,510 @@ def _section_wrap(section_id: str, *, rhythm: str, body: str, meta: str | None =
 
 
 # ============================================================================
+# Operator-first section primitives
+# ============================================================================
+
+
+def _value_card(
+    *,
+    label: str,
+    value: str,
+    detail: str,
+    tone: str = "neutral",
+    foot: str = "",
+    href: str | None = None,
+    pm: _PrivacyMap | None = None,
+) -> str:
+    accent = _tone_color(tone, "var(--accent)")
+    detail_html = _private_text(detail, pm) if pm else _esc(detail)
+    foot_html = (
+        f'<div style="font-size:11px;color:var(--ghost);margin-top:8px">{_esc(foot)}</div>'
+        if foot
+        else ""
+    )
+    open_tag = (
+        f'<a href="#{_esc(_anchor_id(href))}" style="text-decoration:none;color:inherit">'
+        if href
+        else ""
+    )
+    close_tag = "</a>" if href else ""
+    return (
+        f"{open_tag}"
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        f"border-left:3px solid {accent};border-radius:var(--r-md);padding:14px 15px;"
+        'min-width:0;display:flex;flex-direction:column;gap:6px">'
+        '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">'
+        f'<span style="font-size:11px;letter-spacing:.10em;text-transform:uppercase;'
+        f'color:var(--mute);font-weight:600">{_esc(label)}</span>'
+        f"{_pill(_esc(tone), tone='bad' if tone == 'critical' else tone)}"
+        "</div>"
+        f'<div style="font-size:var(--num-md);line-height:1.1;font-weight:650;color:var(--ink);'
+        f'overflow-wrap:anywhere">{_esc(value)}</div>'
+        f'<div style="font-size:12px;color:var(--mute);line-height:1.45">{detail_html}</div>'
+        f"{foot_html}</div>{close_tag}"
+    )
+
+
+def _compact_row(
+    *,
+    label: str,
+    value: str,
+    detail: str = "",
+    tone: str = "neutral",
+    href: str | None = None,
+    pm: _PrivacyMap | None = None,
+) -> str:
+    accent = _tone_color(tone, "var(--mute)")
+    link_open = (
+        f'<a href="#{_esc(_anchor_id(href))}" style="text-decoration:none;color:inherit">'
+        if href
+        else ""
+    )
+    link_close = "</a>" if href else ""
+    detail_html = (
+        f'<div style="font-size:12px;color:var(--mute);margin-top:3px;line-height:1.45">'
+        f"{_private_text(detail, pm) if pm else _esc(detail)}</div>"
+        if detail
+        else ""
+    )
+    return (
+        f"{link_open}"
+        '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;'
+        'align-items:start;padding:11px 13px;border-top:1px solid var(--border)">'
+        '<div style="min-width:0">'
+        f'<div style="font-size:13px;color:var(--ink);font-weight:550;overflow-wrap:anywhere">{_private_text(label, pm) if pm else _esc(label)}</div>'
+        f"{detail_html}</div>"
+        f'<div style="font-family:var(--mono);font-size:12px;color:{accent};font-weight:650;'
+        f'white-space:nowrap">{_esc(value)}</div>'
+        f"</div>{link_close}"
+    )
+
+
+def _small_table(
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    *,
+    empty: str = "No rows.",
+) -> str:
+    if not rows:
+        return _empty_placeholder(empty)
+    head = (
+        '<thead><tr style="background:var(--panel-2)">'
+        + "".join(_th(header, align="right" if i else "left") for i, header in enumerate(headers))
+        + "</tr></thead>"
+    )
+    body = []
+    for row in rows:
+        body.append(
+            '<tr style="border-top:1px solid var(--border)">'
+            + "".join(_td(cell, align="right" if i else "left") for i, cell in enumerate(row))
+            + "</tr>"
+        )
+    return (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">'
+        '<table class="cal-table" style="width:100%;border-collapse:collapse;font-size:13px">'
+        + head
+        + "<tbody>"
+        + "".join(body)
+        + "</tbody></table></div>"
+    )
+
+
+def _section_action_center(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    cards = list(d.command_center)[:7]
+    if not cards and d.impact_cards:
+        cards = [
+            type(
+                "Card",
+                (),
+                {
+                    "label": card.label,
+                    "value": card.value,
+                    "detail": card.detail,
+                    "tone": card.tone,
+                    "metric": "impact",
+                },
+            )()
+            for card in d.impact_cards[:5]
+        ]
+    card_html = "".join(
+        _value_card(
+            label=card.label,
+            value=card.value,
+            detail=card.detail,
+            tone=card.tone,
+            foot=getattr(card, "metric", ""),
+            href="evidence" if card.label.lower().startswith("evidence") else None,
+            pm=pm,
+        )
+        for card in cards
+    )
+    if card_html:
+        card_html = (
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));'
+            f'gap:10px">{card_html}</div>'
+        )
+    queue_rows = "".join(
+        _compact_row(
+            label=f"{item.rank}. {item.title}",
+            value=item.evidence,
+            detail=f"{item.detail} Action: {item.action}",
+            tone=item.tone,
+            href=item.anchor,
+            pm=pm,
+        )
+        for item in d.decision_queue[:7]
+    )
+    comparisons = "".join(
+        _compact_row(
+            label=item.label,
+            value=item.value,
+            detail=item.detail,
+            tone=item.tone,
+            href=item.anchor,
+            pm=pm,
+        )
+        for item in d.comparisons[:5]
+    )
+    queue_panel = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">'
+        '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
+        'color:var(--ink-2);font-weight:600">Decision queue</div>'
+        f"{queue_rows or _empty_placeholder('No decision queue item was generated.')}</div>"
+    )
+    signal_panel = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">'
+        '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
+        'color:var(--ink-2);font-weight:600">Signals checked</div>'
+        f"{comparisons or _empty_placeholder('No comparison signals were generated.')}</div>"
+    )
+    body = (
+        f"{card_html}"
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));'
+        'gap:12px;margin-top:12px">'
+        f"{queue_panel}{signal_panel}</div>"
+    )
+    meta = f"{len(d.decision_queue)} decisions · {len(d.comparisons)} signals"
+    return _section_wrap("action-center", rhythm=rhythm, body=body, meta=meta)
+
+
+def _section_usage_windows(d: Dashboard, *, rhythm: str) -> str:
+    if not d.usage_windows:
+        return ""
+    cards = []
+    for window in d.usage_windows:
+        daily = window.cost_usd / window.days if window.days else 0.0
+        cards.append(
+            '<div style="background:var(--panel);border:1px solid var(--border);'
+            'border-radius:var(--r-md);padding:14px;min-width:0">'
+            '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:7px">'
+            f'<span style="font-size:12px;color:var(--ink);font-weight:600">{_esc(window.label)}</span>'
+            f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">{_esc(window.range)}</span>'
+            "</div>"
+            f'<div style="font-size:var(--num-lg);font-weight:650;color:var(--ink);line-height:1.05">{fmt_money(window.cost_usd)}</div>'
+            f'<div style="font-size:12px;color:var(--mute);margin-top:5px">{fmt_money(daily)}/day · '
+            f"{fmt_int(window.events)} events · {fmt_pct(window.cache_hit_rate)} cache</div>"
+            f'<div style="margin-top:10px">{_sparkline(window.daily_cost_sparkline, width=160, height=28)}</div>'
+            "</div>"
+        )
+    body = (
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">'
+        + "".join(cards)
+        + "</div>"
+    )
+    return _section_wrap("usage-windows", rhythm=rhythm, body=body)
+
+
+def _section_usage_mix(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    if not d.usage_mix:
+        return ""
+    by_dimension: dict[str, list[Any]] = {}
+    for row in d.usage_mix:
+        by_dimension.setdefault(row.dimension, []).append(row)
+    panels: list[str] = []
+    for dimension in ("vendor", "model/tier", "tier", "source"):
+        rows = sorted(by_dimension.get(dimension, []), key=lambda r: -r.cost_usd)[:5]
+        if not rows:
+            continue
+        max_cost = max((row.cost_usd for row in rows), default=1.0) or 1.0
+        row_html = []
+        for row in rows:
+            row_html.append(
+                '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;'
+                'align-items:center;padding:10px 12px;border-top:1px solid var(--border)">'
+                '<div style="min-width:0">'
+                f'<div style="font-size:13px;color:var(--ink);font-weight:550;overflow-wrap:anywhere">{_private_text(row.label, pm)}</div>'
+                f'<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-top:7px">'
+                f"{_meter(row.cost_usd, max_cost)}"
+                f'<span style="font-size:11px;color:var(--mute);font-family:var(--mono)">{fmt_pct(row.share, 0)}</span>'
+                "</div></div>"
+                '<div style="text-align:right">'
+                f'<div style="font-family:var(--mono);font-size:13px;color:var(--ink)">{fmt_money(row.cost_usd)}</div>'
+                f'<div style="font-size:11px;color:var(--mute);margin-top:3px">{fmt_tokens(row.total_tokens)} · {fmt_int(row.events)} events</div>'
+                f"{_sparkline(row.daily_cost_sparkline, width=72, height=18)}"
+                "</div></div>"
+            )
+        panels.append(
+            '<div style="background:var(--panel);border:1px solid var(--border);'
+            'border-radius:var(--r-md);overflow:hidden">'
+            f'<div style="padding:10px 12px;background:var(--panel-2);font-size:11px;'
+            f'letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-weight:650">'
+            f"{_esc(dimension)}</div>" + "".join(row_html) + "</div>"
+        )
+    body = (
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">'
+        + "".join(panels)
+        + "</div>"
+    )
+    return _section_wrap("usage-mix", rhythm=rhythm, body=body, meta=f"{len(d.usage_mix)} rows")
+
+
+def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    finding_rows = []
+    for row in d.inefficiencies[:6]:
+        value = fmt_money(row.impact_usd)
+        detail = (
+            f"{row.detail} Action: {row.action} Confidence: {row.confidence}; "
+            f"sample {row.sample_size}; baseline {row.baseline}."
+        )
+        finding_rows.append(
+            _compact_row(
+                label=row.title,
+                value=value,
+                detail=detail,
+                tone="warn" if row.severity in {"warn", "fail", "critical"} else "neutral",
+                pm=pm,
+            )
+        )
+    findings = (
+        '<div style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow:hidden">'
+        '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
+        'color:var(--ink-2);font-weight:600">Evidence-labelled findings</div>'
+        f"{''.join(finding_rows) if finding_rows else _empty_placeholder('No inefficiency finding crossed thresholds.')}</div>"
+    )
+    cache_rows = []
+    for row in d.cache_leverage[:6]:
+        cache_rows.append(
+            [
+                _private_text(row.session_label, pm),
+                fmt_money(row.savings_usd),
+                fmt_pct(row.hit_rate),
+                fmt_tokens(row.cached_input_tokens),
+            ]
+        )
+    cache = _small_table(
+        ["Cache leverage", "Savings", "Hit rate", "Cached tokens"],
+        cache_rows,
+        empty="No cache leverage rows.",
+    )
+    body = (
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">'
+        f"{findings}{cache}</div>"
+    )
+    meta = f"{len(d.inefficiencies)} findings · {len(d.cache_leverage)} cache rows"
+    return _section_wrap("inefficiencies", rhythm=rhythm, body=body, meta=meta)
+
+
+def _hour_bars(values: Sequence[float]) -> str:
+    if not values:
+        return ""
+    max_value = max(values) or 1.0
+    bars = []
+    for hour, value in enumerate(values):
+        color = "var(--accent)" if value == max_value else "var(--accent-tint-2)"
+        bars.append(
+            f'<span title="{hour:02d}:00 · {fmt_money(value)}" '
+            f'style="display:block;height:{max(3, int((value / max_value) * 42))}px;'
+            f'background:{color};border-radius:2px 2px 0 0"></span>'
+        )
+    return (
+        '<div style="display:grid;grid-template-columns:repeat(24,1fr);gap:2px;'
+        'align-items:end;height:48px">' + "".join(bars) + "</div>"
+    )
+
+
+def _section_outlook(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    panels: list[str] = []
+    if d.outlook:
+        out = d.outlook
+        panels.append(
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">'
+            + _value_card(
+                label="30d outlook",
+                value=fmt_money(out.horizon_30d.linear_total),
+                detail=(
+                    f"Band {fmt_money(out.horizon_30d.linear_low)} to "
+                    f"{fmt_money(out.horizon_30d.linear_high)}; EWMA "
+                    f"{fmt_money(out.horizon_30d.ewma_total)}."
+                ),
+                tone="warn"
+                if out.horizon_30d.ewma_total > out.horizon_30d.linear_total
+                else "neutral",
+            )
+            + _value_card(
+                label="90d outlook",
+                value=fmt_money(out.horizon_90d.linear_total),
+                detail=(
+                    f"Band {fmt_money(out.horizon_90d.linear_low)} to "
+                    f"{fmt_money(out.horizon_90d.linear_high)} from {out.days_analyzed} days."
+                ),
+                tone="neutral",
+            )
+            + "</div>"
+        )
+    if d.model_forecasts:
+        rows = []
+        for row in d.model_forecasts[:6]:
+            rows.append(
+                [
+                    _esc(row.model),
+                    fmt_money(row.projected_30d_cost_usd),
+                    _esc(row.trend_label),
+                    _sparkline(row.daily_cost_sparkline, width=72, height=18),
+                ]
+            )
+        panels.append(_small_table(["Model", "30d", "Trend", "Recent"], rows))
+    if d.forecast_drivers:
+        rows = []
+        for row in d.forecast_drivers[:8]:
+            rows.append(
+                [
+                    _private_text(f"{row.dimension}: {row.label}", pm),
+                    fmt_money(row.projected_30d_cost_usd),
+                    fmt_pct(row.share, 0),
+                    _esc(row.evidence_status),
+                ]
+            )
+        panels.append(_small_table(["Driver", "30d", "Share", "Evidence"], rows))
+    if d.seasonality:
+        s = d.seasonality
+        panels.append(
+            '<div style="background:var(--panel);border:1px solid var(--border);'
+            'border-radius:var(--r-md);padding:14px">'
+            '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px">'
+            '<span style="font-size:12px;color:var(--ink);font-weight:600">Cost-weighted rhythm</span>'
+            f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">peak {s.peak_hour:02d}:00 · off-peak {fmt_pct(s.off_peak_share, 0)}</span>'
+            "</div>"
+            f"{_hour_bars(s.by_hour_cost_usd)}"
+            f'<div style="font-size:11px;color:var(--mute);margin-top:9px">{_esc(s.timezone)} · {fmt_money(s.total_cost_usd)} distributed by local hour</div>'
+            "</div>"
+        )
+    body = '<div style="display:grid;gap:12px">' + "".join(panels) + "</div>"
+    meta = f"{len(d.model_forecasts)} model forecasts · {len(d.forecast_drivers)} drivers"
+    return _section_wrap("outlook", rhythm=rhythm, body=body, meta=meta)
+
+
+def _histogram(values: Sequence[int], labels: Sequence[str]) -> str:
+    if not values:
+        return ""
+    max_value = max(values) or 1
+    cells = []
+    for label, value in zip(labels, values, strict=False):
+        cells.append(
+            '<div style="display:grid;gap:5px;align-items:end">'
+            f'<span style="height:{max(4, int((value / max_value) * 56))}px;background:var(--accent-tint-2);border-radius:3px 3px 0 0"></span>'
+            f'<span style="font-size:10px;color:var(--mute);font-family:var(--mono);text-align:center">{_esc(label)}</span>'
+            f'<span style="font-size:11px;color:var(--ink-2);font-family:var(--mono);text-align:center">{fmt_int(value)}</span>'
+            "</div>"
+        )
+    return (
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(42px,1fr));'
+        f'gap:8px;align-items:end">{"".join(cells)}</div>'
+    )
+
+
+def _section_attribution(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    panels: list[str] = []
+    if d.agents:
+        rows = []
+        for idx, row in enumerate(d.agents[:6], start=1):
+            label = row.agent_id if pm.mode == "off" else f"Agent {idx}"
+            rows.append(
+                [
+                    _esc(label),
+                    fmt_money(row.cost_usd),
+                    fmt_tokens(row.total_tokens),
+                    _esc(row.evidence_status),
+                ]
+            )
+        panels.append(_small_table(["Agent", "Cost", "Tokens", "Evidence"], rows))
+    if d.skills:
+        rows = []
+        for idx, row in enumerate(d.skills[:6], start=1):
+            label = row.name if pm.mode == "off" else f"Skill {idx}"
+            rows.append(
+                [
+                    _esc(label),
+                    fmt_money(row.estimated_cost_usd),
+                    fmt_int(row.invocations),
+                    _esc(row.evidence_status),
+                ]
+            )
+        panels.append(_small_table(["Skill", "Cost", "Calls", "Evidence"], rows))
+    if d.tier_provenance:
+        t = d.tier_provenance
+        rows = [
+            [
+                _esc(label),
+                fmt_int(count),
+                fmt_pct(count / t.total_events if t.total_events else 0, 0),
+            ]
+            for label, count in t.sources
+        ]
+        panels.append(_small_table(["Tier source", "Events", "Share"], rows))
+    if d.long_context_histogram:
+        h = d.long_context_histogram
+        labels = [fmt_tokens(edge) for edge in h.bins]
+        panels.append(
+            '<div style="background:var(--panel);border:1px solid var(--border);'
+            'border-radius:var(--r-md);padding:14px">'
+            '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px">'
+            '<span style="font-size:12px;color:var(--ink);font-weight:600">Long-context boundary</span>'
+            f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">threshold {fmt_tokens(h.threshold_tokens)}</span>'
+            "</div>"
+            f"{_histogram(h.counts, labels)}"
+            f'<div style="font-size:11px;color:var(--mute);margin-top:9px">{fmt_pct(h.share_above_threshold, 0)} of events and {fmt_pct(h.cost_share_above_threshold, 0)} of cost crossed the threshold.</div>'
+            "</div>"
+        )
+    if d.cohort_deltas:
+        rows = [
+            [
+                _esc(row.label),
+                _esc(row.current_value),
+                _esc(row.previous_value),
+                _esc(_fmt_delta(row.delta_pct) or "n/a"),
+            ]
+            for row in d.cohort_deltas
+        ]
+        panels.append(_small_table(["Cohort", "Current", "Previous", "Delta"], rows))
+    body = (
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">'
+        + "".join(panels)
+        + "</div>"
+    )
+    meta = f"{len(d.agents)} agents · {len(d.skills)} skills"
+    return _section_wrap("attribution", rhythm=rhythm, body=body, meta=meta)
+
+
+# ============================================================================
 # Table helpers (used by render_models / render_projects / _section_sessions)
 # ============================================================================
 
 
-def _th(content: str, *, align: str = "left", aria_sort: str | None = None) -> str:
+def _th(
+    content: str, *, align: str = "left", aria_sort: str | None = None, numeric: bool = False
+) -> str:
     sort_attr = f' aria-sort="{aria_sort}"' if aria_sort else ""
+    # Numeric headers carry data-num=true so the CSS rule that enforces
+    # white-space:nowrap + tabular numerals applies. The class also keeps
+    # cells from breaking "65%" across two visual lines.
+    num_attr = ' data-num="true"' if numeric else ""
     return (
-        f"<th{sort_attr} "
+        f"<th{sort_attr}{num_attr} "
         f'style="text-align:{align};padding:10px 14px;font-size:11px;'
         f"font-weight:500;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;"
         f'border-bottom:1px solid var(--border)">{content}</th>'
@@ -1522,11 +2608,21 @@ def _td(
     align: str = "left",
     mono: bool = False,
     muted: bool = False,
+    numeric: bool | None = None,
 ) -> str:
     font = "var(--mono)" if mono else "inherit"
     color = "var(--mute)" if muted else "var(--ink-2)"
+    # Right-aligned cells in a Caliper table are numeric by convention
+    # (cost, share, events, tokens, days, etc.). Treat them as data-num
+    # by default so the CSS rule that enforces white-space:nowrap +
+    # tabular numerals applies — no orphan "%"s, no hyphen breaks in
+    # mono identifiers, no row-height jitter. Callers can override by
+    # passing numeric=False (e.g. for a right-aligned label that
+    # genuinely needs to wrap).
+    is_num = numeric if numeric is not None else (align == "right")
+    num_attr = ' data-num="true"' if is_num else ""
     return (
-        f'<td style="text-align:{align};padding:10px 14px;vertical-align:middle;'
+        f'<td{num_attr} style="text-align:{align};padding:10px 14px;vertical-align:middle;'
         f'font-family:{font};color:{color}">{content}</td>'
     )
 
@@ -1540,6 +2636,40 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
     t: Totals = d.totals
     is_empty = (t.cost_usd is None) or (t.events == 0)
 
+    # Pricing/source footer for the show-the-math disclosure. Without a
+    # concrete pricing-checked date we fall back to the schema-versioned
+    # rate card label so the user still sees a citation.
+    pricing_source = f"Rate card: caliper v{d.caliper.version} (schema {d.caliper.schema_version})"
+
+    # Sample-size strings — every formula needs lineage so a sceptic can
+    # see "across what?".
+    sample_n = f"across {fmt_int(t.events)} events · {fmt_int(t.sessions)} sessions"
+    cost_formula = (
+        "cost = Σ (input × rate_in)\n"
+        "         + (output × rate_out)\n"
+        "         + (cached_input × rate_cached_in)\n"
+        "per (model, tier), using Decimal arithmetic.\n"
+        f"{sample_n}."
+    )
+    cache_formula = (
+        "cache_savings = Σ cached_input × (rate_in − rate_cached_in)\n"
+        "per (model, tier). Cached-input rate is vendor-published;\n"
+        "counterfactual is the standard input rate for the same model.\n"
+        f"{sample_n}."
+    )
+    tokens_formula = (
+        "total_tokens = uncached_input + cached_input + output + reasoning.\n"
+        "Cached + output reported separately because they price differently.\n"
+        f"{sample_n}."
+    )
+    sessions_formula = (
+        "session = continuous AI coding conversation (one ID upstream).\n"
+        "Caliper dedupes by parser session id, so a session is counted once\n"
+        "even if it spans multiple JSONL files.\n"
+        f"{fmt_int(t.sessions)} unique session IDs across "
+        f"{fmt_int(t.turns)} turns; {t.tools_per_turn:.2f} tools/turn."
+    )
+
     def _card(
         *,
         label: str,
@@ -1550,6 +2680,7 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
         spark: Sequence[float],
         spark_color: str,
         rail: str,
+        formula: str = "",
     ) -> str:
         return _stat_card(
             label=label,
@@ -1561,6 +2692,8 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
             spark_color=spark_color,
             rail=rail,
             dense=dense,
+            formula="" if is_empty else formula,
+            formula_source="" if is_empty else pricing_source,
         )
 
     empty_sub = "No events for this window" if is_empty else ""
@@ -1575,6 +2708,7 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
                 spark=t.daily_cost_sparkline,
                 spark_color="var(--accent)",
                 rail="var(--card-rail-cost)",
+                formula=cost_formula,
             ),
             _card(
                 label="Cache savings",
@@ -1585,6 +2719,7 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
                 spark=t.daily_cache_sparkline,
                 spark_color="var(--ok)",
                 rail="var(--card-rail-cache)",
+                formula=cache_formula,
             ),
             _card(
                 label="Tokens",
@@ -1596,6 +2731,7 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
                 spark=t.daily_token_sparkline,
                 spark_color="var(--accent)",
                 rail="var(--card-rail-tokens)",
+                formula=tokens_formula,
             ),
             _card(
                 label="Sessions",
@@ -1606,12 +2742,15 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
                 spark=t.daily_session_sparkline,
                 spark_color="var(--accent-strong)",
                 rail="var(--card-rail-sessions)",
+                formula=sessions_formula,
             ),
         ]
     )
     body = (
         '<div class="cal-summary-row" '
-        'style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">' + cards + "</div>"
+        'style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:stretch">'
+        + cards
+        + "</div>"
     )
     return _section_wrap("overview", rhythm=rhythm, body=body)
 
@@ -1622,6 +2761,7 @@ def _section_cost(d: Dashboard, *, rhythm: str) -> str:
         return ""
     total = sum(float(p.cost_usd) for p in daily)
     avg = total / len(daily) if daily else 0.0
+    active_days = sum(1 for p in daily if float(p.cost_usd) > 0 or int(p.events) > 0)
     legend = _category_legend(
         [
             ("var(--explore)", "exploration"),
@@ -1630,9 +2770,12 @@ def _section_cost(d: Dashboard, *, rhythm: str) -> str:
             ("var(--mixed)", "mixed"),
         ]
     )
-    summary = f"{len(daily)} active days · {fmt_money(total)} total · avg {fmt_money(avg)}/day"
+    summary = (
+        f"{active_days} active days across {len(daily)} days · "
+        f"{fmt_money(total)} total · avg {fmt_money(avg)}/day"
+    )
     body = (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
+        '<div class="cal-cost-panel" style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);padding:16px">'
         '<div style="display:flex;justify-content:space-between;align-items:center;'
         'flex-wrap:wrap;gap:12px;margin-bottom:6px;font-size:12px;color:var(--mute)">'
@@ -1719,21 +2862,28 @@ def render_models(rows: Sequence[ModelRow], *, total_cost: float | None = None) 
     for r in sorted_rows:
         share = (r.cost_usd / total) if total else 0.0
         share_pct = int(round(share * 100))
+        # Share cell: percentage + meter ride together inside a nowrap
+        # block so the "%" never orphans onto a second line.
         share_cell = (
-            '<div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">'
+            '<span class="cal-cell-share" '
+            'style="display:inline-flex;align-items:center;gap:8px;justify-content:flex-end">'
             f'<span style="color:var(--mute);font-size:12px">{share_pct}%</span>'
-            f'<span style="width:64px;display:inline-block">{_meter(r.cost_usd, mx)}</span></div>'
+            f'<span style="width:64px;display:inline-block">{_meter(r.cost_usd, mx)}</span></span>'
         )
+        # Model · tier cell: each token stays whole; wrap only at the gap
+        # between model name and tier when the column is genuinely narrow.
         model_cell = (
+            '<span class="cal-cell-model">'
             f'<span style="font-family:var(--mono);color:var(--ink)">{_esc(r.model)}</span>'
-            f'<span style="color:var(--mute);margin-left:8px">· {_esc(r.tier)}</span>'
+            f'<span style="color:var(--mute)">· {_esc(r.tier)}</span>'
+            "</span>"
         )
         body_rows.append(
             '<tr style="border-top:1px solid var(--border)">'
             + _td(_pill(_esc(r.vendor), mono=True))
             + _td(model_cell)
             + _td(fmt_money(r.cost_usd), align="right", mono=True)
-            + _td(share_cell, align="right")
+            + _td(share_cell, align="right", numeric=True)
             + _td(fmt_int(r.events), align="right", mono=True)
             + _td(fmt_tokens(r.tokens), align="right", mono=True)
             + _td(fmt_pct(r.cache_hit_rate, 0), align="right", mono=True)
@@ -1823,15 +2973,19 @@ def render_projects(
             )
             + _td(fmt_money(r.cost_usd), align="right", mono=True)
             + _td(
-                '<div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">'
+                '<span class="cal-cell-share" '
+                'style="display:inline-flex;align-items:center;gap:8px;justify-content:flex-end">'
                 f'<span style="color:var(--mute);font-size:12px">{share_pct}%</span>'
-                f'<span style="width:56px;display:inline-block">{_meter(r.cost_usd, mx)}</span></div>',
+                f'<span style="width:56px;display:inline-block">{_meter(r.cost_usd, mx)}</span></span>',
                 align="right",
+                numeric=True,
             )
             + _td(fmt_int(r.events), align="right", mono=True)
             + _td(fmt_int(r.sessions), align="right", mono=True)
             + _td(fmt_int(r.active_days), align="right", mono=True)
-            + _td(f'<span style="color:{tone_color};font-size:12px">{_esc(r.trend_label)}</span>')
+            + _td(
+                f'<span style="color:{tone_color};font-size:12px;white-space:nowrap">{_esc(r.trend_label)}</span>'
+            )
             + _td(
                 f'<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">{top_tool_pills}</div>'
             )
@@ -1875,7 +3029,36 @@ def _section_projects(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     return _section_wrap("projects", rhythm=rhythm, body=body, meta=meta)
 
 
-def _insight_row(it: Insight, *, dense: bool) -> str:
+def _insight_sample_size_chip(it: Insight) -> str:
+    """Render the per-insight lineage line ("based on N events · M sessions · X tokens").
+
+    Reads from :attr:`Insight.evidence_metrics`. Only the ``events`` /
+    ``sessions`` / ``tokens`` keys are surfaced; anything else stays in
+    the dict for callers that need it but isn't shown on the page. Returns
+    an empty string when none of the three keys are present — an insight
+    that legitimately lacks lineage data renders clean rather than fake.
+    """
+    metrics = getattr(it, "evidence_metrics", None) or {}
+    parts: list[str] = []
+    events = metrics.get("events")
+    if isinstance(events, int | float) and events:
+        parts.append(f"{fmt_int(int(events))} events")
+    sessions = metrics.get("sessions")
+    if isinstance(sessions, int | float) and sessions:
+        parts.append(f"{fmt_int(int(sessions))} sessions")
+    tokens = metrics.get("tokens")
+    if isinstance(tokens, int | float) and tokens:
+        parts.append(f"{fmt_tokens(int(tokens))} tokens")
+    if not parts:
+        return ""
+    return (
+        '<div class="cal-insight-meta" style="color:var(--ghost);font-size:11px;'
+        'margin-top:5px;font-family:var(--mono);letter-spacing:.02em">'
+        f"based on {' · '.join(parts)}</div>"
+    )
+
+
+def _insight_row(it: Insight, *, dense: bool, pm: _PrivacyMap) -> str:
     sev = it.severity
     if sev == "critical":
         accent = "var(--bad)"
@@ -1890,10 +3073,11 @@ def _insight_row(it: Insight, *, dense: bool) -> str:
     impact_html = (
         f'<span style="font-size:11px;color:var(--ink-2);background:var(--panel-2);'
         f"border:1px solid var(--border);border-radius:3px;padding:3px 8px;"
-        f'white-space:nowrap">{_esc(it.impact)}</span>'
+        f'white-space:nowrap">{_private_text(it.impact, pm)}</span>'
         if it.impact
         else ""
     )
+    sample_chip = _insight_sample_size_chip(it)
     return (
         f'<div class="cal-insight-row" style="display:grid;grid-template-columns:auto 1fr auto;'
         f"gap:14px;align-items:baseline;padding:{pad};border-left:3px solid {accent};"
@@ -1901,14 +3085,15 @@ def _insight_row(it: Insight, *, dense: bool) -> str:
         f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:{tone};'
         f'text-transform:uppercase;font-weight:600;min-width:56px">{_esc(sev)}</span>'
         '<div style="min-width:0">'
-        f'<div style="color:var(--ink);font-size:13px;font-weight:500">{_esc(it.title)}</div>'
-        f'<div style="color:var(--mute);font-size:12px;margin-top:3px;line-height:1.5">{_esc(it.detail)}</div>'
+        f'<div style="color:var(--ink);font-size:13px;font-weight:500">{_private_text(it.title, pm)}</div>'
+        f'<div style="color:var(--mute);font-size:12px;margin-top:3px;line-height:1.5">{_private_text(it.detail, pm)}</div>'
+        f"{sample_chip}"
         "</div>"
         f"{impact_html}</div>"
     )
 
 
-def _section_insights(d: Dashboard, *, dense: bool, rhythm: str) -> str:
+def _section_insights(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap) -> str:
     insights = list(d.insights)
     if not insights:
         body = _empty_placeholder("No insights for this window.")
@@ -1918,7 +3103,7 @@ def _section_insights(d: Dashboard, *, dense: bool, rhythm: str) -> str:
     body = (
         '<div style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);overflow:hidden">'
-        + "".join(_insight_row(it, dense=dense) for it in insights)
+        + "".join(_insight_row(it, dense=dense, pm=pm) for it in insights)
         + "</div>"
     )
     return _section_wrap("insights", rhythm=rhythm, body=body)
@@ -1938,7 +3123,18 @@ def _fmt_sigma(z: float) -> str:
     return f"{z:.1f}σ"
 
 
-def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str) -> str:
+def _anomaly_action(kind: str) -> str:
+    normalized = kind.lower()
+    if "session" in normalized:
+        return "Inspect this session before repeating the workflow."
+    if "project" in normalized:
+        return "Check what changed in this project on that day."
+    if "model" in normalized:
+        return "Check model, tier, and prompt shape for that day."
+    return "Review this day before using it as a run-rate baseline."
+
+
+def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap) -> str:
     if not d.anomalies:
         return ""
     pad = "10px 14px" if dense else "12px 16px"
@@ -1947,35 +3143,39 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str) -> str:
         tone_color = "var(--bad)" if a.tone == "critical" else "var(--warn)"
         evidence_tone = "good" if a.evidence_status == "exact" else "warn"
         top = "none" if i == 0 else "1px solid var(--border)"
-        # Sigma chip width widens when the label says "extreme" so the
-        # text doesn't get visually cramped against the row's left rail.
+        baseline = fmt_money(a.baseline_usd)
+        observed = fmt_money(a.observed_usd)
+        impact = fmt_money(a.impact_usd)
         sigma_label = _fmt_sigma(a.z_score)
-        sigma_min_width = 84 if "extreme" in sigma_label else 56
+        action = _anomaly_action(a.kind)
         rows_html.append(
-            f'<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;'
-            f"align-items:baseline;padding:{pad};border-left:3px solid {tone_color};"
+            f'<div style="display:grid;grid-template-columns:92px 1fr auto;gap:14px;'
+            f"align-items:start;padding:{pad};border-left:3px solid {tone_color};"
             f'border-top:{top}">'
             f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;'
             f"color:{tone_color};text-transform:uppercase;font-weight:600;"
-            f'min-width:{sigma_min_width}px">'
-            f"{sigma_label}</span>"
+            'padding-top:2px">Spend spike</span>'
             '<div style="min-width:0">'
             f'<div style="color:var(--ink);font-size:13px;font-weight:500">'
-            f'{_esc(a.kind)} · <span style="font-family:var(--mono);color:var(--ink-2)">{_esc(a.label)}</span></div>'
+            f'{_esc(a.kind)} · <span style="font-family:var(--mono);color:var(--ink-2)">{_private_text(a.label, pm)}</span></div>'
             f'<div style="color:var(--mute);font-size:12px;margin-top:3px">'
-            f"observed {fmt_money(a.observed_usd)} vs baseline {fmt_money(a.baseline_usd)} · "
-            f"scale ${a.baseline_scale_usd:.1f} · {_esc(a.timestamp)}</div>"
+            f"Observed {observed} vs typical {baseline}; {impact} above typical on {_esc(a.timestamp)}.</div>"
+            f'<div style="color:var(--ink-2);font-size:12px;margin-top:5px">{_esc(action)}</div>'
             "</div>"
+            '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">'
+            f'<span style="font-size:13px;color:{tone_color};font-family:var(--mono);'
+            f'font-weight:600;white-space:nowrap">+{_esc(impact)}</span>'
             f"{_pill(_esc(a.evidence_status), tone=evidence_tone)}"
-            f'<span style="font-size:12px;color:{tone_color};font-family:var(--mono);'
-            f'font-weight:500;white-space:nowrap">+{_esc(fmt_money(a.impact_usd))}</span>'
+            f'<span style="font-size:11px;color:var(--mute);font-family:var(--mono);'
+            f'white-space:nowrap">detector {_esc(sigma_label)}</span>'
+            "</div>"
             "</div>"
         )
     body = (
         '<div style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);overflow:hidden">' + "".join(rows_html) + "</div>"
     )
-    meta = f"{len(d.anomalies)} outliers · z ≥ 4σ"
+    meta = f"{len(d.anomalies)} spend spikes over detector thresholds"
     return _section_wrap("anomalies", rhythm=rhythm, body=body, meta=meta)
 
 
@@ -2076,7 +3276,7 @@ def _section_forecast(d: Dashboard, *, rhythm: str) -> str:
     return _section_wrap("forecast", rhythm=rhythm, body=body)
 
 
-def _section_advisor(d: Dashboard, *, rhythm: str) -> str:
+def _section_advisor(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     rows: list[AdvisorRecommendation] = list(d.advisor_recommendations)
     if not rows:
         return ""
@@ -2098,10 +3298,10 @@ def _section_advisor(d: Dashboard, *, rhythm: str) -> str:
             'style="display:grid;grid-template-columns:1fr auto auto;gap:14px;'
             f'padding:12px 16px;border-top:{top};align-items:center">'
             '<div style="min-width:0">'
-            f'<div style="font-size:13px;color:var(--ink);font-weight:500">{_esc(r.title)}</div>'
-            f'<div style="font-size:12px;color:var(--mute);margin-top:3px">{_esc(r.detail)}</div>'
+            f'<div style="font-size:13px;color:var(--ink);font-weight:500">{_private_text(r.title, pm)}</div>'
+            f'<div style="font-size:12px;color:var(--mute);margin-top:3px">{_private_text(r.detail, pm)}</div>'
             f'<code style="display:inline-block;margin-top:6px;font-family:var(--mono);'
-            f'font-size:11px;color:var(--accent);background:transparent;padding:0">$ {_esc(r.action)}</code>'
+            f'font-size:11px;color:var(--accent);background:transparent;padding:0">$ {_private_text(r.action, pm)}</code>'
             "</div>"
             '<div style="text-align:right">'
             '<div style="font-size:11px;color:var(--mute);margin-bottom:2px">confidence</div>'
@@ -2205,6 +3405,7 @@ def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     if not rows:
         return ""
     mx = max((r.cost_usd for r in rows), default=1.0) or 1.0
+    total_cost = float(d.totals.cost_usd or 0.0)
     head = (
         '<thead><tr style="background:var(--panel-2)">'
         f"{_th('Session')}{_th('Started')}{_th('Project')}"
@@ -2216,13 +3417,24 @@ def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     body_rows: list[str] = []
     for s in rows:
         models_html = "".join(_pill(_esc(m), mono=True) for m in (s.models or []))
+        model_text = ", ".join(s.models) if s.models else "unknown model"
+        title_session = pm.sessions.get(s.label, "Session ?") if pm.mode != "off" else s.label
+        title_project = pm.projects.get(s.project, "Project ?") if pm.mode != "off" else s.project
+        share = (s.cost_usd / total_cost) if total_cost > 0 else 0.0
+        hover_label = (
+            f"{title_session} in {title_project}: {fmt_money(s.cost_usd)} "
+            f"({fmt_pct(share)} of selected-window cost), {fmt_tokens(s.total_tokens)}, "
+            f"{fmt_int(s.events)} events, {fmt_int(s.tool_calls)} tool calls, "
+            f"{model_text}. Reason: {s.reason or 'ranked by cost'}."
+        )
         cost_cell = (
             '<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">'
             f'<span style="width:44px">{_meter(s.cost_usd, mx)}</span>'
             f"<span>{fmt_money(s.cost_usd)}</span></div>"
         )
         body_rows.append(
-            '<tr style="border-top:1px solid var(--border)">'
+            f'<tr class="cal-session-row" title="{_esc(hover_label)}" '
+            f'aria-label="{_esc(hover_label)}" style="border-top:1px solid var(--border)">'
             + _td(
                 f'<span style="font-family:var(--mono);color:var(--ink)">{_private_session(s.label, pm)}</span>'
             )
@@ -2239,7 +3451,11 @@ def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     body = (
         '<div style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);overflow:hidden">'
-        '<table class="cal-table" style="width:100%;border-collapse:collapse;font-size:13px">'
+        '<table class="cal-table" style="width:100%;border-collapse:collapse;'
+        'font-size:13px;table-layout:fixed">'
+        '<colgroup><col style="width:16%"><col style="width:12%"><col style="width:14%">'
+        '<col style="width:11%"><col style="width:10%"><col style="width:8%">'
+        '<col style="width:8%"><col style="width:13%"><col style="width:8%"></colgroup>'
         + head
         + "<tbody>"
         + "".join(body_rows)
@@ -2285,19 +3501,25 @@ def _section_evidence(d: Dashboard, *, dense: bool, rhythm: str) -> str:
 # ============================================================================
 
 _SECTION_ORDER: list[str] = [
+    "action-center",
     "overview",
+    "usage-windows",
     "cost",
     "shape",
     "models",
     "projects",
+    "usage-mix",
     "insights",
     "anomalies",
     "budgets",
+    "inefficiencies",
     "forecast",
+    "outlook",
     "advisor",
     "rate-limits",
     "heatmap",
     "sessions",
+    "attribution",
     "evidence",
 ]
 
@@ -2305,8 +3527,12 @@ _SECTION_ORDER: list[str] = [
 def _render_section(
     section_id: str, d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap
 ) -> str:
+    if section_id == "action-center":
+        return _section_action_center(d, rhythm=rhythm, pm=pm)
     if section_id == "overview":
         return _section_overview(d, dense=dense, rhythm=rhythm)
+    if section_id == "usage-windows":
+        return _section_usage_windows(d, rhythm=rhythm)
     if section_id == "cost":
         return _section_cost(d, rhythm=rhythm)
     if section_id == "shape":
@@ -2315,22 +3541,30 @@ def _render_section(
         return _section_models(d, rhythm=rhythm)
     if section_id == "projects":
         return _section_projects(d, rhythm=rhythm, pm=pm)
+    if section_id == "usage-mix":
+        return _section_usage_mix(d, rhythm=rhythm, pm=pm)
     if section_id == "insights":
-        return _section_insights(d, dense=dense, rhythm=rhythm)
+        return _section_insights(d, dense=dense, rhythm=rhythm, pm=pm)
     if section_id == "anomalies":
-        return _section_anomalies(d, dense=dense, rhythm=rhythm)
+        return _section_anomalies(d, dense=dense, rhythm=rhythm, pm=pm)
     if section_id == "budgets":
         return _section_budgets(d, rhythm=rhythm)
+    if section_id == "inefficiencies":
+        return _section_inefficiencies(d, rhythm=rhythm, pm=pm)
     if section_id == "forecast":
         return _section_forecast(d, rhythm=rhythm)
+    if section_id == "outlook":
+        return _section_outlook(d, rhythm=rhythm, pm=pm)
     if section_id == "advisor":
-        return _section_advisor(d, rhythm=rhythm)
+        return _section_advisor(d, rhythm=rhythm, pm=pm)
     if section_id == "rate-limits":
         return _section_rate_limits(d, rhythm=rhythm)
     if section_id == "heatmap":
         return _section_heatmap(d, rhythm=rhythm)
     if section_id == "sessions":
         return _section_sessions(d, rhythm=rhythm, pm=pm)
+    if section_id == "attribution":
+        return _section_attribution(d, rhythm=rhythm, pm=pm)
     if section_id == "evidence":
         return _section_evidence(d, dense=dense, rhythm=rhythm)
     return ""
@@ -2346,7 +3580,7 @@ def _build_id(d: Dashboard) -> str:
 def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
     rhythm = "receipt"
     ev = d.quality_score
-    evidence_badge = _evidence_badge(ev) if ev and ev.score > 0 else ""
+    evidence_badge = _evidence_badge(ev) if ev else ""
     gen_line = (d.generated_at or "").replace("T", " ")[:16]
     vendor_line = f"{len(d.window.vendors_active)} of {d.window.vendor_count_total} vendors"
     masthead = (
@@ -2372,6 +3606,8 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         if d.banner is not None
         else ""
     )
+    hero_inner = _hero_verdict_strip(d, rhythm)
+    hero_html = f'<div style="margin-top:18px">{hero_inner}</div>' if hero_inner else ""
     verdict_html = (
         f'<div style="margin-top:18px">{_verdict_strip(d, rhythm)}</div>'
         if d.executive_brief and d.executive_brief.findings
@@ -2383,10 +3619,10 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         if _should_render(sid, d)
     )
     return (
-        '<div style="max-width:1180px;margin:0 auto;padding:32px 28px 64px;'
-        'font-family:var(--font);color:var(--ink)">'
+        '<div class="cal-dashboard-root cal-receipt-root">'
         f"{masthead}"
         f"{banner_html}"
+        f"{hero_html}"
         f"{verdict_html}"
         f'<div style="margin-top:24px;display:grid;gap:28px">{sections}</div>'
         f"{_caliper_footer(d)}"
@@ -2407,7 +3643,7 @@ def _terminal_masthead(d: Dashboard) -> str:
     * **Badges** — Evidence-quality chip + window range.
     """
     ev = d.quality_score
-    badge = _evidence_badge(ev) if ev and ev.score > 0 else ""
+    badge = _evidence_badge(ev) if ev else ""
     gen_short = (d.generated_at or "").replace("T", " ")[:16]
     return (
         '<div class="cal-terminal-mast">'
@@ -2531,6 +3767,8 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         if d.banner is not None
         else ""
     )
+    hero_inner = _hero_verdict_strip(d, rhythm)
+    hero_html = f'<div style="margin-bottom:22px">{hero_inner}</div>' if hero_inner else ""
     verdict_html = (
         f'<div style="margin-bottom:22px">{_verdict_strip(d, rhythm)}</div>'
         if d.executive_brief and d.executive_brief.findings
@@ -2542,13 +3780,14 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         if _should_render(sid, d)
     )
     return (
-        '<div style="background:var(--bg);color:var(--ink);font-family:var(--font)">'
+        '<div class="cal-dashboard-root cal-terminal-root">'
         f"{_terminal_masthead(d)}"
         f"{ticker}"
-        '<div style="display:grid;grid-template-columns:190px 1fr;gap:0;max-width:1320px;margin:0 auto">'
+        '<div class="cal-terminal-layout">'
         f"{_terminal_index(d)}"
-        '<main style="padding:24px 28px 64px;min-width:0">'
+        '<main class="cal-terminal-main">'
         f"{banner_html}"
+        f"{hero_html}"
         f"{verdict_html}"
         f'<div style="display:grid;gap:28px">{sections}</div>'
         f"{_caliper_footer(d)}"

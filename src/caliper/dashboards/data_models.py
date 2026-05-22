@@ -491,6 +491,11 @@ class Insight:
     title: str
     detail: str
     impact: str | None = None  # right-side chip; e.g. "est. $612"
+    # Lineage chip ("based on N events · M sessions · X tokens"). Keys that
+    # the renderer recognises today: ``events``, ``sessions``, ``tokens``.
+    # When empty (or none of those keys present) the renderer prints nothing,
+    # so an insight that legitimately has no sample-size lineage stays clean.
+    evidence_metrics: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

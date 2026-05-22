@@ -1995,6 +1995,85 @@ def _render_shape_table(report: SessionShapeReport) -> str:
     return buffer.getvalue()
 
 
+def _print_dashboard_verdict(
+    payload: Any,
+    *,
+    share_safe: bool,
+    theme: str | None,
+) -> None:
+    """Print a short 3-line verdict to stdout after ``caliper dashboard``.
+
+    Mirrors the in-page hero verdict so a programmer who runs the CLI
+    sees the headline number (and the top fix) without opening the file.
+    Skipped by the caller when ``--quiet`` or HTML is piped to stdout.
+    """
+    totals = getattr(payload, "totals", None)
+    if totals is None or getattr(totals, "events", 0) == 0:
+        return
+
+    cost = float(getattr(totals, "cost_usd", 0.0) or 0.0)
+    cost_str = f"${cost:,.0f}" if cost >= 1000 else f"${cost:.2f}"
+
+    window = getattr(payload, "window", None)
+    window_label = getattr(window, "label", "")
+
+    delta = getattr(totals, "delta_cost_pct", None)
+    if delta is not None:
+        sign = "+" if delta >= 0 else ""
+        delta_str = f"trend {sign}{delta * 100:.1f}%"
+    else:
+        delta_str = "trend —"
+
+    # Recoverable savings = sum of top-3 advisor recommendations by savings.
+    recs = sorted(
+        [
+            r
+            for r in (getattr(payload, "advisor_recommendations", None) or [])
+            if float(getattr(r, "savings_usd", 0.0) or 0.0) > 0
+        ],
+        key=lambda r: (
+            -float(getattr(r, "savings_usd", 0.0) or 0.0),
+            -float(getattr(r, "confidence", 0.0) or 0.0),
+        ),
+    )
+    top = recs[0] if recs else None
+    top_recoverable = sum(float(getattr(r, "savings_usd", 0.0) or 0.0) for r in recs[:3])
+
+    header_parts = (
+        [f"Caliper · {window_label}", cost_str, delta_str]
+        if window_label
+        else [
+            "Caliper",
+            cost_str,
+            delta_str,
+        ]
+    )
+    if top is not None:
+        title = (getattr(top, "title", "") or "").strip()
+        value = (getattr(top, "value", "") or "").strip()
+        if title and value:
+            header_parts.append(f"top fix: {title} ({value})")
+        elif title:
+            header_parts.append(f"top fix: {title}")
+    typer.echo(" · ".join(header_parts))
+
+    if top_recoverable > 0 and len(recs) >= 1:
+        rec_count = min(3, len(recs))
+        plural = "" if rec_count == 1 else "s"
+        if top_recoverable >= 1000:
+            rec_str = f"${top_recoverable:,.0f}"
+        else:
+            rec_str = f"${top_recoverable:.2f}"
+        typer.echo(
+            f"Fixable: {rec_str} across {rec_count} recommendation{plural}. "
+            f"Inspect with `caliper advise --strict`."
+        )
+
+    safe_text = "share-safe" if share_safe else "local-only"
+    theme_label = (theme or "dark").lower()
+    typer.echo(f"Theme: {theme_label} · {safe_text} · re-render: caliper dashboard --open")
+
+
 @app.command()
 def dashboard(
     output: Annotated[
@@ -2338,6 +2417,10 @@ def dashboard(
     already_existed = target.exists()
     target.write_text(text, encoding="utf-8")
     typer.echo(f"Wrote {target}" + (" (overwritten)" if already_existed else ""))
+    # Stdout verdict — three short lines a programmer can scan without
+    # opening the file. Skipped when piping HTML or running quiet.
+    if not quiet and not pipe_to_stdout:
+        _print_dashboard_verdict(payload, share_safe=effective_share_safe, theme=theme)
     # Decide whether to auto-open the file. Explicit flags win; otherwise
     # the user's [dashboard].open_after preference applies only when we're
     # writing to the *derived* path (because they didn't pick their own).

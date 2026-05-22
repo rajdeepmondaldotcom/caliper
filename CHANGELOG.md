@@ -2,6 +2,69 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.44 - 2026-05-22
+
+### Added
+
+- **Hero verdict strip** above the KPI row in the HTML dashboard. The line a
+  screenshot reader can quote: period · cost · trend · `FIXABLE $X across N
+  recommendations` · `Top fix: <title> ($value) · NN% confidence` · the
+  copy-pasteable CLI command. Derived from existing `Totals`,
+  `AdvisorRecommendations`, and `WindowMeta` — no new data shape.
+- **Show-the-math `<details>`** on each KPI card (Cost, Cache savings, Tokens,
+  Sessions). Each disclosure carries the formula, the rate-card source date,
+  and the sample size. Pure HTML — the "max 1 `<script>` tag" privacy
+  invariant still holds.
+- **Sample-size lineage chip** under every insight that ships
+  `evidence_metrics`: `based on N events · M sessions · X tokens`. The
+  `Insight` dataclass gained `evidence_metrics: dict`. Insights without
+  lineage data render no chip (no fake citations).
+- **CLI stdout verdict.** `caliper dashboard` now prints three lines after
+  writing the HTML: `Caliper · <window> · $<cost> · trend ±X.Y% · top fix: ...`
+  / `Fixable: $… across N recommendations.` / `Theme: … · re-render: …`.
+  Suppressed by `--quiet`; never pollutes a `--stdout` HTML stream.
+- **Footer moat line.** `Caliper reads logs already on your disk. No proxy.
+  No upload. No login.` Above the version stamp.
+- **Privacy-mode screenshots** (`docs/screenshots/*.png`) — hero, models,
+  projects, insights, sessions, usage-mix, advisor, anomalies,
+  inefficiencies, attribution, full-page. Generated from the share-safe
+  variant (`data-privacy="always"`); no real project or session names.
+
+### Fixed
+
+- **No layout shift on any interactive state.** `_td()` now flags every
+  right-aligned cell with `data-num="true"`, which the CSS rule enforces
+  as `white-space: nowrap; font-variant-numeric: tabular-nums lining-nums`.
+  No more `65` / `%` splitting across two lines.
+- **No hyphen-breaks in model identifiers.** `.cal-table` switched from
+  `table-layout: fixed` to `auto`; `overflow-wrap: anywhere` replaced with
+  `overflow-wrap: break-word; word-break: normal`. `claude-sonnet-4-6` stays
+  one token, not `claude-/sonnet-4-6`. New `.cal-cell-model` / `.cal-cell-share`
+  classes keep model+tier and share+meter rendering as nowrap units.
+- **Hover-jump guard hardened.** `test_dashboard_hover_css_does_not_change_layout_geometry`
+  upgraded from a 2-line `translateY/scale` check to a full CSS scanner: any
+  `:hover|:focus|:focus-visible|:active|:target` rule that mutates `padding`,
+  `margin`, `border-width`, `font-size`, `line-height`, `width`, `height`,
+  or `transform` now fails the build. Pseudo-element overlays
+  (`::before`/`::after`) are exempted.
+- **Print theme shows more, not less.** Stopped hiding §07 Anomalies,
+  §08 Budgets, §10 Advisor, §11 Rate-limits, §12 Heatmap, §13 Sessions in
+  `@media print`. Print scales tokens down (`--num-xl: 22px`, row padding
+  6/10px, heatmap cells 9px, table padding 6/10px) so a board pack stays
+  complete instead of dropping anomalies and the advisor.
+
+### Polished
+
+- **Terminal-mode section heads use real `<h2>`** (not styled `<span>`), so
+  screen readers and outline tools index the dashboard correctly.
+- **Show-the-math `<summary>`** uses `cursor: pointer` (not `cursor: help`)
+  and carries `aria-label="Show the formula for this KPI"`.
+- **README** rewritten to 264 lines (from 535). Hero screenshot anchors the
+  top; "Why it exists" + a direct comparison table against hosted proxies
+  (Helicone, Langfuse) replace the verbose audience lists; the privacy
+  invariant ships with a literal `grep` command a reader can run on their
+  own file; alternate install paths collapse into a `<details>` block.
+
 ## 0.0.43 - 2026-05-21
 
 ### Fixed

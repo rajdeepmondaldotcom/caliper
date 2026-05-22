@@ -964,6 +964,7 @@ def _build_insights(
             title=item.title,
             detail=item.detail,
             impact=item.impact_label or None,
+            evidence_metrics=dict(getattr(item, "evidence_metrics", {}) or {}),
         )
         for item in raw
     ]

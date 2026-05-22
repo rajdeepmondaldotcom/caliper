@@ -148,6 +148,64 @@ def test_dashboard_stdout_flag_keeps_raw_html_explicit(monkeypatch) -> None:
     assert not opened
 
 
+def test_dashboard_stdout_verdict_summarises_cost_trend_and_top_fix(monkeypatch, tmp_path) -> None:
+    """After writing the HTML file, ``caliper dashboard`` prints a short
+    stdout verdict so a programmer who runs the CLI sees the headline
+    number (and the top fix) without opening the file."""
+    monkeypatch.setattr("caliper.cli._dashboard_stdout_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        _webbrowser,
+        "open",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not open")),
+    )
+    out = tmp_path / "report.html"
+    result = runner.invoke(app, ["dashboard", "--demo", "--output", str(out)])
+
+    assert result.exit_code == 0, result.output
+    # File line still goes through, unchanged.
+    assert "Wrote" in result.output
+    # Verdict line: "Caliper · <window> · $<cost> · trend <±X.Y>%"
+    assert "Caliper · " in result.output
+    assert " · trend " in result.output
+    # Re-render hint line includes the theme + share-safe state.
+    assert "Theme:" in result.output
+    assert "re-render: caliper dashboard --open" in result.output
+
+
+def test_dashboard_quiet_suppresses_stdout_verdict(monkeypatch, tmp_path) -> None:
+    """``--quiet`` silences both the existing 'Wrote ...' line AND the new
+    verdict, keeping the CLI scriptable."""
+    monkeypatch.setattr("caliper.cli._dashboard_stdout_is_interactive", lambda: True)
+    monkeypatch.setattr(
+        _webbrowser,
+        "open",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not open")),
+    )
+    out = tmp_path / "report.html"
+    result = runner.invoke(app, ["dashboard", "--demo", "--output", str(out), "--quiet"])
+
+    assert result.exit_code == 0, result.output
+    # Verdict line must NOT appear under --quiet.
+    assert "Caliper · " not in result.output
+    assert "Theme:" not in result.output
+    # File was still written.
+    assert out.exists()
+
+
+def test_dashboard_stdout_pipe_skips_verdict_to_keep_html_clean(monkeypatch) -> None:
+    """When the user pipes HTML to stdout (``--stdout`` or default
+    non-interactive), the verdict must NOT pollute the stream — it's
+    HTML-only territory."""
+    monkeypatch.setattr("caliper.cli._dashboard_stdout_is_interactive", lambda: True)
+    result = runner.invoke(app, ["dashboard", "--demo", "--stdout"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("<!doctype html>")
+    # Verdict prefix must not appear anywhere in the HTML stream.
+    assert "Caliper · " not in result.output
+    assert "re-render: caliper dashboard" not in result.output
+
+
 def test_dashboard_output_does_not_open_without_open_flag(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("caliper.cli._dashboard_stdout_is_interactive", lambda: True)
     monkeypatch.setattr(

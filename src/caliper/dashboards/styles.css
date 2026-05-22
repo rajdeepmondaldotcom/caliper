@@ -191,9 +191,112 @@ a:hover { color: var(--accent-strong); text-decoration: underline; text-underlin
 code { font-family: var(--mono); font-size: 0.92em; }
 table { font-variant-numeric: tabular-nums lining-nums; }
 
+/* Layout primitives emitted by the Python renderer. These classes let the
+   static report respond to real browser viewports, not only the prototype's
+   data-viewport frame. */
+.cal-dashboard-root { min-width: 0; }
+.cal-receipt-root {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 28px 64px;
+  font-family: var(--font);
+  color: var(--ink);
+}
+.cal-terminal-root {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+}
+.cal-terminal-layout {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 0;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+.cal-terminal-main {
+  min-width: 0;
+  padding: 24px 28px 64px;
+}
+.cal-summary-row {
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+}
+.cal-stat-card {
+  min-width: 0;
+  min-height: 142px;
+  display: flex;
+  flex-direction: column;
+}
+.cal-stat-card-value { overflow-wrap: anywhere; }
+.cal-card-sparkline {
+  min-width: 0;
+  margin-top: auto;
+  padding-top: 8px;
+}
+.cal-cost-panel {
+  min-width: 0;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+/* Hero verdict — the single line a screenshot reader can quote. Reads the
+   selected window cost, the trend chip, and the highest-leverage advisor
+   savings. Hairline border with an accent left rail; no novel tokens so
+   light/print themes inherit cleanly. */
+.cal-hero-verdict {
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+.cal-hero-verdict:hover { background: var(--panel-hover); }
+.cal-hero-cost { font-variant-numeric: tabular-nums lining-nums; }
+.cal-hero-action-command::selection { background: var(--accent-tint-2); }
+
+/* Show-the-math disclosure on KPI cards. Hides the default summary marker
+   so the eye reads our "?" affordance; otherwise styling stays inline. */
+.cal-card-formula > summary { list-style: none; }
+.cal-card-formula > summary::-webkit-details-marker { display: none; }
+.cal-card-formula > summary::marker { display: none; }
+.cal-card-formula > summary:hover { color: var(--ink-2) !important; }
+.cal-card-formula[open] > summary { color: var(--ink-2) !important; }
+
+/* Per-insight lineage chip ("based on N events · M sessions · X tokens").
+   Only rendered when Insight.evidence_metrics carries those keys. */
+.cal-insight-meta { font-variant-numeric: tabular-nums lining-nums; }
+
 /* Hover on table rows */
 .cal-table tbody tr { transition: background-color 80ms ease-out; }
 .cal-table tbody tr:hover { background: var(--panel-hover); }
+.cal-table {
+  min-width: 0;
+  /* Auto layout so columns size to their content. Fixed layout was
+     squeezing the model · tier column and forcing hyphen-breaks like
+     "claude-/sonnet-4-6 ·/standard". */
+  table-layout: auto;
+}
+.cal-table th,
+.cal-table td {
+  vertical-align: middle;
+}
+.cal-table td {
+  /* Breaks at word boundaries only — never inside identifiers like
+     "claude-sonnet-4-6" or numerics like "65%". */
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.cal-table td > div {
+  min-width: 0;
+}
+/* Numeric / mono cells never wrap and align on their decimal column. */
+.cal-table td[data-num="true"],
+.cal-table th[data-num="true"] {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+/* Model · tier cells: tokens stay whole; wrap only at the separator. */
+.cal-cell-model { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.cal-cell-model > span { white-space: nowrap; }
+/* Share cells: percentage and meter ride together; no orphan "%" lines. */
+.cal-cell-share { white-space: nowrap; }
 
 /* Section spacing */
 section[id] { scroll-margin-top: 24px; }
@@ -219,7 +322,96 @@ section[id]:target > [class*="cal-section-head"] {
 [data-viewport="mobile"] main { padding: 16px 14px 48px !important; }
 [data-viewport="mobile"] [data-screen-label] { min-width: 0; }
 [data-viewport="mobile"] .cal-stat-card { padding: 12px !important; }
-[data-viewport="mobile"] .cal-stat-card > div:nth-child(2) { font-size: 22px !important; }
+[data-viewport="mobile"] .cal-stat-card-value { font-size: 22px !important; }
+[data-viewport="mobile"] .cal-receipt-root { padding: 16px 14px 48px !important; }
+[data-viewport="mobile"] .cal-terminal-layout { grid-template-columns: 1fr !important; }
+[data-viewport="mobile"] .cal-terminal-main { padding: 20px 16px 64px !important; }
+
+@media (max-width: 720px) {
+  body { overflow-x: hidden; }
+  .cal-receipt-root { padding: 16px 14px 48px !important; }
+  .cal-terminal-layout { grid-template-columns: 1fr !important; }
+  .cal-terminal-main { padding: 20px 16px 64px !important; }
+  .cal-summary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+  .cal-shape-grid,
+  .cal-forecast-grid { grid-template-columns: 1fr !important; }
+  .cal-table {
+    font-size: 12px !important;
+    width: 100%;
+  }
+  .cal-table th,
+  .cal-table td {
+    padding: 8px 9px !important;
+  }
+  table th:nth-child(n+5),
+  table td:nth-child(n+5) { display: none; }
+  aside { display: none !important; }
+  header {
+    grid-template-columns: 1fr !important;
+    gap: 18px !important;
+  }
+  header > div:last-child {
+    text-align: left !important;
+    align-items: flex-start !important;
+  }
+  header > div:last-child > div {
+    flex-wrap: wrap !important;
+    justify-content: flex-start !important;
+    max-width: 100%;
+  }
+  .cal-evidence-badge,
+  .cal-window-badge {
+    max-width: 100%;
+  }
+  .cal-window-badge {
+    flex-wrap: wrap;
+    white-space: normal !important;
+    row-gap: 2px;
+  }
+  .cal-section-head.receipt {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .cal-section-head.receipt > * { min-width: 0; }
+  .cal-section-head.receipt > span:last-child {
+    width: 100%;
+    text-align: left !important;
+    white-space: normal !important;
+  }
+  [class*="cal-verdict"] { font-size: 13px; }
+  main { padding: 16px 14px 48px !important; }
+  [data-screen-label] { min-width: 0; }
+  .cal-stat-card {
+    padding: 12px !important;
+    min-height: 136px;
+  }
+  .cal-stat-card-value { font-size: 22px !important; }
+  .cal-terminal-mast {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    padding: 14px 16px !important;
+  }
+  .cal-terminal-mast .cal-terminal-brand,
+  .cal-terminal-mast .cal-terminal-badges {
+    border: 0 !important;
+    padding: 0 !important;
+    justify-content: flex-start !important;
+  }
+  .cal-terminal-mast .cal-terminal-stats {
+    justify-content: flex-start !important;
+  }
+  .cal-tweaks-panel {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    flex-wrap: wrap;
+    border-radius: var(--r-md);
+    justify-content: center;
+  }
+}
 
 /* Mobile viewport: render at 390px wide in a phone-shaped frame */
 .viewport-mobile-frame {
@@ -264,12 +456,40 @@ section[id]:target > [class*="cal-section-head"] {
     --mixed: #4a4a4a !important;
   }
   .tweaks-host, .preview-chrome, [class*="twk-"] { display: none !important; }
-  /* Hide stretch sections to make a 1-page receipt-style PDF */
-  section#heatmap, section#anomalies, section#sessions, section#advisor,
-  section#rate-limits, section#budgets { display: none !important; }
+  /* Print densification — every section stays visible so a board pack
+     never quietly drops anomalies, advisor, or budget burn. We scale the
+     tokens instead of hiding rows. Each section still gets break-inside:
+     avoid so a card doesn't split across pages, but the page itself can
+     grow to as many sheets as the content honestly needs. */
+  :root, .theme-dark, .theme-light {
+    --num-xl: 22px !important;
+    --num-lg: 19px !important;
+    --num-md: 16px !important;
+    --num-sm: 13px !important;
+    --row-pad-y: 6px !important;
+    --row-pad-x: 10px !important;
+  }
+  .cal-stat-card {
+    min-height: 0 !important;
+    padding: 10px !important;
+  }
+  .cal-stat-card-value { font-size: 22px !important; }
+  .cal-table th, .cal-table td { padding: 6px 10px !important; }
+  .cal-section-head.receipt h2,
+  .cal-section-head.term span { font-size: 11px !important; }
+  /* Heatmap and per-day strips: keep them but scale the cells so the
+     yearly grid prints as a compact ribbon, not a half-page mural. */
+  .cal-heatmap-cell { width: 9px !important; height: 9px !important; }
+  /* Sparklines: small but kept so the trend story prints. */
+  .cal-card-sparkline svg { max-height: 18px !important; }
+  /* Hide the show-the-math disclosure when printing — the formulas are
+     intentionally interactive ink. The body stays legible without them. */
+  .cal-card-formula { display: none !important; }
+  /* Interactive toggle panel never belongs in PDF. */
+  .cal-tweaks-panel { display: none !important; }
   section { break-inside: avoid; }
   .cal-stat-card, .cal-banner, .cal-table, [data-screen-label] { break-inside: avoid; }
-  body { font-size: 12pt !important; line-height: 1.5 !important; }
+  body { font-size: 10.5pt !important; line-height: 1.45 !important; }
 }
 
 /* Lift focus rings */
@@ -292,24 +512,31 @@ p, h1, h2, h3 { text-wrap: pretty; }
    Hover polish — only on devices with real pointers, never during print.
    Disabled cleanly by the print theme + @media print blocks above. */
 @media (hover: hover) and (pointer: fine) {
-  /* Stat cards: subtle lift + brighter border, so hover feels alive. */
+  /* Stat cards: stable hover state that never changes layout geometry. */
   .cal-stat-card {
-    transition: transform 140ms ease-out, border-color 140ms ease-out,
-                box-shadow 140ms ease-out;
+    transition: border-color 120ms ease-out, box-shadow 120ms ease-out,
+                background-color 120ms ease-out;
   }
   .cal-stat-card:hover {
-    transform: translateY(-2px);
     border-color: var(--border-strong);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    background: var(--panel-hover);
+    box-shadow: inset 0 0 0 1px var(--hairline);
   }
-  /* Bar chart rects: brighten the filled bar on hover so the tooltip
-     (native SVG <title>) is preceded by a visible affordance. */
+  /* Bar chart rects: brighten the filled bar and reveal the built-in
+     SVG label without shifting anything around it. */
   .cal-bar-rect { transition: fill-opacity 120ms ease-out; }
-  .cal-bar-rect:hover { fill-opacity: 0.78; }
-  /* Verdict-strip pill links: existing <a> gets underline; lift the pill
-     background a touch so the whole chip reads as interactive. */
-  .cal-verdict-chip { display: inline-block; transition: transform 100ms ease-out; }
-  .cal-verdict-chip:hover { transform: translateY(-1px); }
+  .cal-bar-group:hover .cal-bar-rect,
+  .cal-bar-group:focus .cal-bar-rect { fill-opacity: 0.82; }
+  .cal-bar-hover-label {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 80ms ease-out;
+  }
+  .cal-bar-group:hover .cal-bar-hover-label,
+  .cal-bar-group:focus .cal-bar-hover-label { opacity: 1; }
+  /* Verdict-strip pill links: existing <a> gets underline; the chip gets
+     a stable contrast state. */
+  .cal-verdict-chip { display: inline-block; }
   .cal-verdict-chip:hover > span {
     background: var(--panel-hover) !important;
     border-color: var(--accent-tint-2) !important;
@@ -317,11 +544,10 @@ p, h1, h2, h3 { text-wrap: pretty; }
   /* Heatmap cells: highlight the hovered cell so the user can scan
      the matrix without losing their place. */
   .cal-heatmap-cell {
-    transition: box-shadow 100ms ease-out, transform 100ms ease-out;
+    transition: box-shadow 100ms ease-out, border-color 100ms ease-out;
   }
   .cal-heatmap-cell:hover {
-    box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 3px var(--accent-tint);
-    transform: scale(1.15);
+    box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent-tint);
     z-index: 1;
     position: relative;
   }
@@ -335,6 +561,8 @@ p, h1, h2, h3 { text-wrap: pretty; }
     width: 2px;
     background: var(--accent);
   }
+  .cal-session-row { cursor: help; }
+  .cal-session-row:hover td { background: var(--panel-hover); }
   /* Pills/badges sitting outside the verdict strip — soft highlight. */
   a:hover > span[class=""], a:hover > span:not([class]) {
     background: var(--panel-hover);
@@ -356,6 +584,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
   gap: 20px;
   align-items: center;
   font-family: var(--mono);
+  min-width: 0;
 }
 .cal-terminal-mast .cal-terminal-brand {
   display: flex;
@@ -363,6 +592,8 @@ p, h1, h2, h3 { text-wrap: pretty; }
   gap: 14px;
   padding-right: 20px;
   border-right: 1px solid var(--border);
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .cal-terminal-mast .cal-terminal-stats {
   display: flex;
@@ -373,6 +604,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
   color: var(--mute);
   flex-wrap: wrap;
   row-gap: 4px;
+  min-width: 0;
 }
 .cal-terminal-mast .cal-terminal-badges {
   display: flex;
@@ -381,6 +613,8 @@ p, h1, h2, h3 { text-wrap: pretty; }
   justify-content: flex-end;
   padding-left: 20px;
   border-left: 1px solid var(--border);
+  min-width: 0;
+  flex-wrap: wrap;
 }
 [data-viewport="mobile"] .cal-terminal-mast {
   grid-template-columns: 1fr;
@@ -395,8 +629,8 @@ p, h1, h2, h3 { text-wrap: pretty; }
 
 /* Disable any hover transforms during actual print so the PDF is static. */
 @media print {
-  .cal-stat-card:hover { transform: none !important; box-shadow: none !important; }
-  .cal-heatmap-cell:hover { transform: none !important; box-shadow: none !important; }
+  .cal-stat-card:hover { box-shadow: none !important; }
+  .cal-heatmap-cell:hover { box-shadow: none !important; }
 }
 
 /* Interactive playground — rhythm swap, tweaks panel, save button.
@@ -481,10 +715,10 @@ p, h1, h2, h3 { text-wrap: pretty; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: background 120ms ease-out, transform 80ms ease-out;
+  transition: background 120ms ease-out, color 120ms ease-out;
 }
 .cal-tweaks-panel .cal-tweaks-save:hover { background: var(--accent); color: var(--bg); }
-.cal-tweaks-panel .cal-tweaks-save:active { transform: scale(0.97); }
+.cal-tweaks-panel .cal-tweaks-save:active { background: var(--accent-strong); color: var(--bg); }
 .cal-tweaks-panel .cal-tweaks-arrow {
   display: inline-block;
   width: 10px;

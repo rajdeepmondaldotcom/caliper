@@ -195,7 +195,7 @@ def find_long_context_misfire(
             },
             commands=(
                 "caliper audit",
-                "caliper whatif --hypothetical-model claude-sonnet-4.6",
+                "caliper advise --strict",
             ),
             event_ids=tuple(_dedupe_id(event) for event in flagged),
             evidence_status="estimated",
