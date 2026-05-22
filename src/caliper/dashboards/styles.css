@@ -263,9 +263,8 @@ table { font-variant-numeric: tabular-nums lining-nums; }
    Only rendered when Insight.evidence_metrics carries those keys. */
 .cal-insight-meta { font-variant-numeric: tabular-nums lining-nums; }
 
-/* Hover on table rows */
-.cal-table tbody tr { transition: background-color 80ms ease-out; }
-.cal-table tbody tr:hover { background: var(--panel-hover); }
+/* Tables are intentionally static: no row hover tint, rail, or native
+   tooltip. Scanning dense spend data should not cause visual movement. */
 .cal-table {
   min-width: 0;
   /* Auto layout so columns size to their content. Fixed layout was
@@ -551,25 +550,10 @@ p, h1, h2, h3 { text-wrap: pretty; }
     z-index: 1;
     position: relative;
   }
-  /* Tables: keep the existing row hover, add a sharper one-pixel accent
-     line at the row's left edge so the user sees where they are. */
-  .cal-table tbody tr { position: relative; }
-  .cal-table tbody tr:hover::before {
-    content: "";
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 2px;
-    background: var(--accent);
-  }
-  .cal-session-row { cursor: help; }
-  .cal-session-row:hover td { background: var(--panel-hover); }
   /* Pills/badges sitting outside the verdict strip — soft highlight. */
   a:hover > span[class=""], a:hover > span:not([class]) {
     background: var(--panel-hover);
   }
-  /* Advisor recommendation rows — soft highlight on hover. */
-  .cal-advisor-row { transition: background 120ms ease-out; }
-  .cal-advisor-row:hover { background: var(--panel-hover); }
 }
 
 /* Terminal masthead — three zones with hairline dividers, monospace,

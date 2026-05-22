@@ -17,6 +17,7 @@ from caliper.dashboards.data_models import ModelRow, ProjectRow, ToolCount
 from caliper.dashboards.html import (
     INLINE_STYLES,
     SECTION_NUMBERS,
+    _agent_display_label,
     fmt_money,
     fmt_tokens,
     render_models,
@@ -353,6 +354,14 @@ def test_dashboard_hover_css_does_not_change_layout_geometry() -> None:
     assert "scale(" not in INLINE_STYLES
 
 
+def test_dashboard_table_rows_are_static_on_hover() -> None:
+    assert ".cal-table tbody tr:hover" not in INLINE_STYLES
+    assert ".cal-table tbody tr:hover::before" not in INLINE_STYLES
+    assert ".cal-session-row:hover" not in INLINE_STYLES
+    assert ".cal-advisor-row:hover" not in INLINE_STYLES
+    assert ".cal-session-row { cursor: help" not in INLINE_STYLES
+
+
 def test_cost_chart_includes_average_line_and_hover_labels(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path)
 
@@ -379,13 +388,21 @@ def test_dashboard_css_has_real_mobile_breakpoint() -> None:
     assert ".cal-window-badge" in INLINE_STYLES
 
 
-def test_top_sessions_rows_have_meaningful_hover_copy(monkeypatch, tmp_path) -> None:
+def test_top_sessions_rows_have_meaningful_accessible_copy(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path)
 
     assert 'class="cal-session-row"' in html
+    assert 'class="cal-session-row" title=' not in html
+    assert 'class="cal-session-row" aria-label=' in html
     assert "selected-window cost" in html
     assert "tool calls" in html
     assert "Reason:" in html
+
+
+def test_agent_labels_hide_machine_ids() -> None:
+    assert _agent_display_label("019e2058-9424-7360-ad06-e011ecff6b8c", 1) == "Agent 1"
+    assert _agent_display_label('{"subagent": {"thread_spawn": true}}', 2) == "Agent 2"
+    assert _agent_display_label("planner-agent", 3) == "planner-agent"
 
 
 def test_anomaly_rows_use_constructive_copy_without_scale_noise() -> None:

@@ -337,9 +337,8 @@ table { font-variant-numeric: tabular-nums lining-nums; }
    Only rendered when Insight.evidence_metrics carries those keys. */
 .cal-insight-meta { font-variant-numeric: tabular-nums lining-nums; }
 
-/* Hover on table rows */
-.cal-table tbody tr { transition: background-color 80ms ease-out; }
-.cal-table tbody tr:hover { background: var(--panel-hover); }
+/* Tables are intentionally static: no row hover tint, rail, or native
+   tooltip. Scanning dense spend data should not cause visual movement. */
 .cal-table {
   min-width: 0;
   /* Auto layout so columns size to their content. Fixed layout was
@@ -625,25 +624,10 @@ p, h1, h2, h3 { text-wrap: pretty; }
     z-index: 1;
     position: relative;
   }
-  /* Tables: keep the existing row hover, add a sharper one-pixel accent
-     line at the row's left edge so the user sees where they are. */
-  .cal-table tbody tr { position: relative; }
-  .cal-table tbody tr:hover::before {
-    content: "";
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 2px;
-    background: var(--accent);
-  }
-  .cal-session-row { cursor: help; }
-  .cal-session-row:hover td { background: var(--panel-hover); }
   /* Pills/badges sitting outside the verdict strip — soft highlight. */
   a:hover > span[class=""], a:hover > span:not([class]) {
     background: var(--panel-hover);
   }
-  /* Advisor recommendation rows — soft highlight on hover. */
-  .cal-advisor-row { transition: background 120ms ease-out; }
-  .cal-advisor-row:hover { background: var(--panel-hover); }
 }
 
 /* Terminal masthead — three zones with hairline dividers, monospace,
@@ -1213,6 +1197,24 @@ def _private_text(text: str | None, pm: _PrivacyMap) -> str:
         out.append(_private(match, replacements[match], pm))
         pos += len(match)
     return "".join(out)
+
+
+def _agent_display_label(agent_id: str, index: int) -> str:
+    raw = str(agent_id or "").strip()
+    if not raw:
+        return f"Agent {index}"
+    lowered = raw.lower()
+    compact = lowered.replace("-", "").replace("_", "")
+    looks_hex_id = len(compact) >= 24 and all(ch in "0123456789abcdef" for ch in compact)
+    looks_thread_payload = (
+        raw.startswith("{")
+        or "parent_thread_id" in lowered
+        or "thread_spawn" in lowered
+        or "subagent" in lowered
+    )
+    if looks_hex_id or looks_thread_payload or len(raw) > 64:
+        return f"Agent {index}"
+    return raw
 
 
 _ANCHOR_ALIASES = {
@@ -2610,7 +2612,7 @@ def _section_attribution(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     if d.agents:
         rows = []
         for idx, row in enumerate(d.agents[:6], start=1):
-            label = row.agent_id if pm.mode == "off" else f"Agent {idx}"
+            label = _agent_display_label(row.agent_id, idx) if pm.mode == "off" else f"Agent {idx}"
             rows.append(
                 [
                     _esc(label),
@@ -3595,8 +3597,8 @@ def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             f"<span>{fmt_money(s.cost_usd)}</span></div>"
         )
         body_rows.append(
-            f'<tr class="cal-session-row" title="{_esc(hover_label)}" '
-            f'aria-label="{_esc(hover_label)}" style="border-top:1px solid var(--border)">'
+            f'<tr class="cal-session-row" aria-label="{_esc(hover_label)}" '
+            'style="border-top:1px solid var(--border)">'
             + _td(
                 f'<span style="font-family:var(--mono);color:var(--ink)">{_private_session(s.label, pm)}</span>'
             )

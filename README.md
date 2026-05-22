@@ -21,7 +21,9 @@ caliper dashboard
 
 </div>
 
-![Caliper dashboard — verdict, KPIs, action center (privacy mode)](docs/screenshots/hero.png)
+![Caliper dashboard — verdict, KPIs, and operator brief in Safe Share mode](docs/screenshots/hero.png)
+
+<p align="center"><sub>Safe Share mode screenshot: paths, projects, and session labels are redacted while costs, evidence status, and recommendations stay visible.</sub></p>
 
 ---
 
@@ -59,8 +61,26 @@ Theme: dark · local-only · re-render: caliper dashboard --open
 ```
 
 Every KPI on the page has a **"show the math"** disclosure — the formula, the
-rate card date, and the sample size. Every insight carries a `based on N events
-· M sessions · X tokens` lineage chip. No claim without a citation.
+rate card date, and the sample size. Evidence, anomalies, savings, and session
+rows show the source quality behind the number instead of forcing you to trust
+an unexplained total.
+
+## Dashboard tour
+
+These screenshots are generated from `caliper dashboard --safe-share`, so they
+show the real report layout without exposing local paths or session identities.
+
+| Operator brief | Spend drivers |
+|---|---|
+| <img alt="Dashboard operator brief with verdict, priority actions, and selected-window cost" src="docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="docs/screenshots/usage-mix.png"> |
+
+| Anomalies | Savings opportunities |
+|---|---|
+| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="docs/screenshots/inefficiencies.png"> |
+
+| Session drilldown | Attribution and evidence |
+|---|---|
+| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="docs/screenshots/attribution.png"> |
 
 ## How it's different
 
@@ -81,7 +101,7 @@ actually cost — without sending prompts to a third party — use this.
 
 | Surface | Command | Purpose |
 |---|---|---|
-| Browser dashboard | `caliper dashboard` | Self-contained HTML report. |
+| Browser dashboard | `caliper dashboard` | Operator brief, spend drivers, savings, anomalies, sessions, evidence. |
 | PR receipt | `caliper pr 42` | Cost attributed to one pull request. |
 | Overview | `caliper overview` | Rolling 7 / 30 / 90 day spend. |
 | Project rollup | `caliper project` | Spend by repository or folder. |
@@ -144,11 +164,13 @@ evidence supports.
 - Cached input, cache creation, output, and reasoning tokens are tracked
   separately when vendors expose them.
 - Long-context multipliers are applied per model.
+- Codex Fast mode is priced with sourced model-family multipliers and kept
+  separate from standard-tier usage in dashboard spend drivers.
 - Unknown pricing is surfaced as a warning, not silently guessed.
 - Anomaly detection uses robust σ (MAD × 1.4826, IQR / 1.349) with a $1
   absolute floor — no more "354,210σ" on a sparse Tuesday.
 - Evidence is graded `exact`, `estimated`, `partial`, or `unsupported`. Each
-  insight ships a sample-size chip. Each KPI exposes its formula inline.
+  KPI exposes its formula inline.
 
 ```bash
 caliper evidence

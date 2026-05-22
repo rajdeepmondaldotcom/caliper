@@ -1474,7 +1474,11 @@ def _build_usage_mix(
 
     dimensions = [
         ("vendor", aggregate_vendors(result, options, rate_card=rate_card), vendor_key),
-        ("model/tier", aggregate_model_mode(result, options, rate_card=rate_card), model_tier_key),
+        (
+            "model/tier",
+            aggregate_events(result.events, model_tier_key, options, rate_card=rate_card),
+            model_tier_key,
+        ),
         (
             "tier",
             aggregate_events(result.events, tier_key, options, rate_card=rate_card),

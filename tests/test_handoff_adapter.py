@@ -5,6 +5,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+import pytest
+
 from caliper.config import build_options
 from caliper.dashboards.adapter import (
     _SHAPE_NAME_MAP,
@@ -20,11 +22,15 @@ from caliper.dashboards.adapter import (
 from caliper.dashboards.data_models import Banner
 from caliper.models import (
     VENDOR_CLAUDE_CODE,
+    VENDOR_OPENAI_CODEX,
     Aggregate,
     CostTotals,
     LoadResult,
     RateLimitSample,
+    ThreadMeta,
     TokenTotals,
+    Usage,
+    UsageEvent,
 )
 from caliper.parser import load_usage
 
@@ -182,6 +188,59 @@ def test_build_handoff_dashboard_decimal_to_float(monkeypatch, tmp_path) -> None
     assert d.rate_limit_pressure is not None
     assert d.quality_score is not None
     assert {row.dimension for row in d.usage_mix} >= {"vendor", "model/tier", "tier", "source"}
+
+
+def test_usage_mix_keeps_codex_fast_reasoning_tiers_costed(tmp_path) -> None:
+    def event(*, service_tier: str, reasoning_effort: str = "") -> UsageEvent:
+        return UsageEvent(
+            timestamp=dt.datetime(2026, 5, 12, 10, 0, tzinfo=dt.UTC),
+            path=tmp_path / "session.jsonl",
+            session_id=f"codex-{service_tier}-{reasoning_effort or 'default'}",
+            usage=Usage(
+                input_tokens=1000, cached_input_tokens=0, output_tokens=100, total_tokens=1100
+            ),
+            model="gpt-5.5",
+            service_tier=service_tier,
+            tier_source="logged",
+            thread=ThreadMeta(
+                cwd="/tmp/project-alpha",
+                model="gpt-5.5",
+                source="cli",
+                reasoning_effort=reasoning_effort,
+            ),
+            vendor=VENDOR_OPENAI_CODEX,
+        )
+
+    options = build_options(
+        since="2026-05-12",
+        until="2026-05-13",
+        timezone="UTC",
+        session_root=tmp_path / "missing-sessions",
+        state_db=tmp_path / "missing-state.sqlite",
+        codex_config=tmp_path / "missing-config.toml",
+        vendors=[VENDOR_OPENAI_CODEX],
+        no_parse_cache=True,
+    )
+    result = LoadResult(
+        events=[
+            event(service_tier="standard"),
+            event(service_tier="fast", reasoning_effort="x-high"),
+        ],
+        duplicates=0,
+        tier_sources={"logged": 2},
+        plan_types=set(),
+        rate_limit_samples=[],
+        warnings=[],
+    )
+
+    d = build_handoff_dashboard(result, options, with_deltas=False)
+    model_tiers = {row.label: row for row in d.usage_mix if row.dimension == "model/tier"}
+
+    assert "gpt-5.5 · standard" in model_tiers
+    assert "gpt-5.5 · fast · xhigh" in model_tiers
+    assert model_tiers["gpt-5.5 · fast · xhigh"].cost_usd == pytest.approx(
+        model_tiers["gpt-5.5 · standard"].cost_usd * 2.5
+    )
 
 
 def test_build_handoff_dashboard_zero_fills_daily(monkeypatch, tmp_path) -> None:

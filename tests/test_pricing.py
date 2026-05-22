@@ -8,6 +8,7 @@ from caliper.pricing import (
     normalize_model,
     normalize_service_tier,
     resolve_hypothetical_model_alias,
+    service_tier_cost_multiplier,
 )
 
 
@@ -33,6 +34,14 @@ def test_model_and_tier_normalization() -> None:
         )
         == "gpt-5.4-nano"
     )
+
+
+def test_codex_fast_mode_multiplier_aliases() -> None:
+    assert service_tier_cost_multiplier("gpt-5.5", "xhigh") == Decimal("2.5")
+    assert service_tier_cost_multiplier("gpt-5.4", "fast") == Decimal("2")
+    assert service_tier_cost_multiplier("gpt-5.4-mini", "max") == Decimal("2")
+    assert service_tier_cost_multiplier("gpt-5.4-preview-2026-05-22", "priority") == Decimal("2")
+    assert service_tier_cost_multiplier("claude-sonnet-4.6", "fast") == Decimal("1")
 
 
 def test_estimate_event_cost_applies_cached_input_and_long_context_usd() -> None:

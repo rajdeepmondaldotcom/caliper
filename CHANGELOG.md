@@ -2,6 +2,27 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.46 - 2026-05-22
+
+### Changed
+
+- **Static dashboard tables.** Dense table rows no longer tint, rail-highlight, change
+  cursor, or show native tooltip bubbles on hover; session row context stays available
+  through accessible row labels and visible columns.
+- **Reasoning-aware spend drivers.** Dashboard model/tier spend drivers now keep Codex
+  service tier plus reasoning effort together, so rows such as `gpt-5.5 · fast · xhigh`
+  are separated from standard usage and priced with the sourced Fast-mode multiplier.
+- **README Safe Share gallery.** The README now showcases the live dashboard surfaces
+  with high-resolution Safe Share screenshots for operator brief, spend drivers,
+  anomalies, savings, sessions, attribution, and evidence.
+
+### Fixed
+
+- **Machine-ID cleanup.** Attribution labels that look like UUIDs, thread-spawn JSON, or
+  internal subagent payloads are replaced with stable `Agent N` labels in the dashboard.
+- **Table clipping polish.** The dashboard no longer depends on row hover overlays or
+  browser title bubbles that can be clipped by table/card overflow containers.
+
 ## 0.0.45 - 2026-05-22
 
 ### Added
