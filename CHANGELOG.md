@@ -2,6 +2,93 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.48 - 2026-05-24
+
+### Added
+
+- **Billboard hero.** The dashboard now opens with a single above-the-fold
+  "BIGGEST FIX: $X/mo saveable" card — pulled from the highest-impact advisor
+  recommendation × confidence — with a copy-pasteable CLI command and a
+  full-width "Investigate" CTA. Falls back to "you're tidy" framing with the
+  window's total spend when no actionable fix exists. Empty windows still
+  render no billboard.
+- **Sources strip in the masthead.** Every known tool (Claude Code, OpenAI
+  Codex, Cursor, Aider) renders as a chip with `✓ detected` or `· not found`
+  status, so missing sources are visible at a glance instead of silently
+  dropped. Hovering shows the per-tool tooltip.
+- **Sticky right-rail TOC with scroll-spy.** Receipt rhythm at ≥1100px gains
+  a tier-grouped navigation rail (Decisions → Trajectory → Appendix → Trust)
+  with `IntersectionObserver`-driven `aria-current="location"` highlighting.
+- **Cmd+K / "/" command palette.** Fuzzy search across section titles,
+  models, projects, anomalies, and recommendations. Keyboard nav
+  (↑↓ Enter Esc) plus vim-style `g a` / `g i` / `g m` / `g s` jumps. A
+  visible "Search" button in the tweaks panel exposes the palette to touch
+  users.
+- **Skip-to-main-content link** as the first focusable element, plus ARIA
+  landmarks (`banner`, `navigation`, `main`) for assistive tech.
+- **`caliper doctor` per-tool detection.** Output opens with a `Sources
+  detected` table listing each of Claude Code, OpenAI Codex, Cursor, and
+  Aider with detected/not-found status and discovered file count. JSON
+  output includes a parallel `tools` array.
+- **Ranked model alternatives in advisor recommendations.** Each arbitrage
+  rule now surfaces a tuple of `ModelAlternative` entries (vendor + projected
+  cost + savings + event count), ranked by same-vendor first, then savings
+  descending. The dashboard cards show the top three.
+
+### Changed
+
+- **Section tier system replaces the flat order.** The twenty audit anchors
+  now bucket into Decisions → Trajectory → Appendix → Trust; diagnostic
+  sections (models, sessions, attribution, heatmap, …) collapse behind a
+  single `<details>` disclosure that auto-opens when an anchor inside it is
+  targeted via TOC, palette, or URL hash.
+- **Sequential section numbering** (1, 2, 3 …) in tier render order.
+  External anchor IDs (`#anomalies`, `#inefficiencies`, …) are unchanged, so
+  existing links still resolve — only the displayed prefix is now clean
+  integers without `§00`/`§17` gaps.
+- **Premium typography rhythm.** Section title 17px / weight 700 /
+  −0.005em letter-spacing. 40px vertical grid gap between sections (was
+  28px). Anomaly + insight card padding 16/20 (was 10/14) with 2px accent
+  rails (was 3px). The hairline section-header bottom border was removed —
+  whitespace alone does the separation.
+- **Canonical severity token.** A single `.sev` family (critical / warn /
+  info / ok) now backs every severity chip across insights and anomalies.
+  Colour is always paired with a glyph + label so colour-blind users still
+  parse the signal. Critical gets one 1.4s pulse on mount, gated by
+  `prefers-reduced-motion`.
+- **Whole-card click targets** via a new `cal-card-link` class on every
+  anchored recommendation, decision, and advisor card. Hover feedback is
+  colour-only — never padding, transform, or border-width — so the existing
+  hover-jump guard stays green.
+- **Smart-responsive at every viewport.** Three new bands: ≤1380px narrows
+  the TOC to 180px; 721–900px softens padding; ≤720px gets full mobile
+  treatment — palette dialog fills the viewport with 16px input (no iOS
+  zoom) and 48px tap rows, billboard CTA becomes a full-width 48px target,
+  anomaly metric chips snap to a 2×2 grid, source chips compact, tweaks
+  panel docks to the bottom edge with `backdrop-filter: blur(12px)`.
+
+### Removed
+
+- **Terminal-rhythm toggle from the visible UI.** The Receipt / Terminal
+  switch in the tweaks panel is gone; only Dark / Light / Safe Share remain.
+  The Terminal rhythm still renders via the `--rhythm terminal` CLI flag
+  for backwards compatibility — it just no longer surfaces as a runtime
+  toggle.
+
+### Fixed
+
+- **`:target` rail no longer collides with the section number.** The legacy
+  inset 3px accent rail on a section's `:target` highlight visually
+  overlapped the leftmost `§NN` column. The rule was removed — the TOC's
+  `aria-current="location"` already shows the reader where they are without
+  doubling up inside the section.
+- **Cache-leverage timestamps stay on one line.** Session labels like
+  `"3:42 pm, Sunday 10 May 2026"` no longer break to one-word-per-line
+  inside the narrow cache-leverage column.
+- **Sample data uses canonical vendor IDs.** The demo masthead used to show
+  `codex`, but the real parser emits `openai-codex`. Sample data now
+  matches.
+
 ## 0.0.47 - 2026-05-24
 
 ### Added
