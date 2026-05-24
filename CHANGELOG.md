@@ -2,6 +2,39 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.49 - 2026-05-24
+
+### Fixed
+
+- **Attribution tables no longer clip the Evidence / Delta columns.**
+  `_small_table` was forcing `min-width:100%` on the inner table while the
+  panel wrapper had `overflow:hidden`, so the Evidence cell ("estimated",
+  "partial", "unsupported") and the Cohort Delta header truncated to
+  `estima…` / `DELT…` when the table sat inside the three-up Attribution
+  grid. The table now reports `min-width: max-content` and the scroll
+  wrapper handles horizontal overflow cleanly. The Attribution grid also
+  bumped its `minmax` from 300 → 380px so columns get room to breathe
+  before wrapping.
+- **Release smoke check now allows the palette's JSON data block.** The
+  privacy gate in `.github/workflows/release.yml` asserted "exactly one
+  `<script>` close" — strict enough to catch a leaked executable script,
+  but the cmd+K palette ships its search index as a non-executable
+  `<script type="application/json">` block (data, not behaviour). The
+  check now enforces "exactly one *executable* script + every other
+  script must carry `type="application/json"`", which is the actual
+  privacy invariant. v0.0.48's wheel built and verified cleanly but the
+  smoke step rejected it, so 0.0.48 never reached PyPI; 0.0.49 carries
+  the same dashboard work plus this gate fix.
+
+### Changed
+
+- **Section numbers now match the title's typographic weight.** The
+  preceding "1." / "2." mono numeral was previously 11px and read as an
+  afterthought next to a 17px section title. The number now uses the
+  same 17px size, −0.005em letter-spacing, and 600 weight so the pair
+  reads as a deliberate "1. Operator brief" — and aligns vertically
+  across every section via a 30px-wide fixed column.
+
 ## 0.0.48 - 2026-05-24
 
 ### Added
