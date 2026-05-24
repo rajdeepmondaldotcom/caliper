@@ -430,6 +430,8 @@ def test_anomaly_rows_use_constructive_copy_without_scale_noise() -> None:
     assert "Cost impact" in html
     assert "Impact %" in html
     assert "+400%" in html
+    assert 'class="cal-anomaly-row"' in html
+    assert 'class="cal-metric-chip"' in html
 
 
 def test_dashboard_renders_operator_first_sections() -> None:

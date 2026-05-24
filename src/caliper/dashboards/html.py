@@ -76,21 +76,21 @@ INLINE_STYLES = """
 
 :root {
   /* dark by default */
-  --bg: #0a0d12;
-  --bg-2: #0d1117;
-  --panel: #12161e;
-  --panel-2: #161b24;
-  --panel-hover: #1a2029;
-  --border: #1f242e;
-  --border-strong: #2a313c;
-  --grid: rgba(255,255,255,0.045);
+  --bg: #090d13;
+  --bg-2: #0d131b;
+  --panel: #131922;
+  --panel-2: #19212b;
+  --panel-hover: #202a36;
+  --border: #2a3340;
+  --border-strong: #3a4654;
+  --grid: rgba(255,255,255,0.065);
   --bar-ghost: rgba(255,255,255,0.022);
-  --hairline: rgba(255,255,255,0.06);
+  --hairline: rgba(255,255,255,0.09);
 
-  --ink: #e8eaef;
-  --ink-2: #c4c9d3;
-  --mute: #858d9b;
-  --ghost: #6c7383;
+  --ink: #f2f5f8;
+  --ink-2: #d3d8e2;
+  --mute: #a1a9b7;
+  --ghost: #838d9d;
 
   --accent: #7cc4ff;
   --accent-strong: #54aef0;
@@ -251,7 +251,7 @@ html, body { background: var(--bg); margin: 0; padding: 0; }
 body {
   font-family: var(--font);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--ink);
   font-feature-settings: "kern" 1, "calt" 1, "liga" 1, "ss01" 1, "cv02" 1, "cv11" 1;
   -webkit-font-smoothing: antialiased;
@@ -270,9 +270,9 @@ table { font-variant-numeric: tabular-nums lining-nums; }
    data-viewport frame. */
 .cal-dashboard-root { min-width: 0; }
 .cal-receipt-root {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 32px 28px 64px;
+  padding: 36px 32px 72px;
   font-family: var(--font);
   color: var(--ink);
 }
@@ -283,14 +283,14 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 }
 .cal-terminal-layout {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-columns: 212px minmax(0, 1fr);
   gap: 0;
-  max-width: 1320px;
+  max-width: 1400px;
   margin: 0 auto;
 }
 .cal-terminal-main {
   min-width: 0;
-  padding: 24px 28px 64px;
+  padding: 32px 34px 72px;
 }
 .cal-summary-row {
   grid-auto-rows: 1fr;
@@ -349,7 +349,9 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 .cal-table th,
 .cal-table td {
   vertical-align: middle;
+  line-height: 1.42;
 }
+.cal-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.018); }
 .cal-table td {
   /* Breaks at word boundaries only — never inside identifiers like
      "claude-sonnet-4-6" or numerics like "65%". */
@@ -370,6 +372,44 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 .cal-cell-model > span { white-space: nowrap; }
 /* Share cells: percentage and meter ride together; no orphan "%" lines. */
 .cal-cell-share { white-space: nowrap; }
+
+.cal-anomaly-row,
+.cal-insight-row {
+  min-width: 0;
+}
+.cal-anomaly-main {
+  min-width: 0;
+}
+.cal-anomaly-side {
+  min-width: max-content;
+}
+.cal-metric-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cal-metric-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+.cal-metric-label {
+  font-size: 10px;
+  color: var(--mute);
+  font-weight: 600;
+}
+.cal-metric-value {
+  font-size: 11px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
+}
 
 /* Section spacing */
 section[id] { scroll-margin-top: 24px; }
@@ -418,6 +458,23 @@ section[id]:target > [class*="cal-section-head"] {
   .cal-table th,
   .cal-table td {
     padding: 8px 9px !important;
+  }
+  .cal-anomaly-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+  .cal-anomaly-side {
+    align-items: flex-start !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    min-width: 0;
+  }
+  .cal-insight-row {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+  .cal-metric-chip {
+    flex: 1 1 132px;
   }
   table th:nth-child(n+5),
   table td:nth-child(n+5) { display: none; }
@@ -720,7 +777,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
 .cal-tweaks-panel .cal-tweaks-label {
   font-family: var(--mono);
   font-size: 10px;
-  letter-spacing: .12em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--mute);
   margin-right: 2px;
@@ -811,6 +868,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
   .cal-real { display: none !important; }
   .cal-redacted { display: inline !important; }
 }
+
 """
 
 
@@ -1662,7 +1720,7 @@ def _stat_card(
         )
     parts.append(
         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">'
-        f'<span style="font-size:11px;letter-spacing:.10em;color:var(--mute);'
+        f'<span style="font-size:11px;letter-spacing:0;color:var(--mute);'
         f'text-transform:uppercase;font-weight:500">{_esc(label)}</span>'
     )
     if delta:
@@ -1672,7 +1730,7 @@ def _stat_card(
     parts.append("</div>")
     parts.append(
         f'<div class="cal-stat-card-value" style="font-size:var(--num-xl);line-height:1.05;font-weight:600;color:{value_color};'
-        f'margin-bottom:4px;letter-spacing:-0.01em">{_esc(value)}</div>'
+        f'margin-bottom:4px;letter-spacing:0">{_esc(value)}</div>'
     )
     if sub:
         margin = "10px" if sparkline else "0"
@@ -1700,7 +1758,7 @@ def _stat_card(
         parts.append(
             '<details class="cal-card-formula" style="margin-top:auto;padding-top:8px">'
             '<summary style="cursor:pointer;list-style:none;font-family:var(--mono);'
-            "font-size:10px;letter-spacing:.04em;color:var(--ghost);"
+            "font-size:10px;letter-spacing:0;color:var(--ghost);"
             "user-select:none;display:inline-flex;align-items:center;gap:4px;"
             'outline:none" aria-label="Show the formula for this KPI">'
             '<span aria-hidden="true" style="display:inline-block;width:11px;height:11px;'
@@ -1729,7 +1787,7 @@ def _banner_html(b: Banner) -> str:
         f"padding:12px 16px;border:1px solid var(--border);border-left:3px solid {accent};"
         f'background:{bg};border-radius:0 var(--r-sm) var(--r-sm) 0;font-size:13px">'
         f'<span aria-hidden="true" style="font-family:var(--mono);color:{accent};font-size:11px;'
-        f'padding-top:1px;letter-spacing:.10em">{label_text}</span>'
+        f'padding-top:1px;letter-spacing:0">{label_text}</span>'
         '<div style="flex:1;min-width:0">'
         f'<div style="color:var(--ink);font-weight:500">{_esc(b.label)}</div>'
         f'<div style="color:var(--mute);margin-top:2px">{b.text}</div>'
@@ -1764,7 +1822,7 @@ def _evidence_badge(qs: QualityScore) -> str:
         "border-radius:3px;background:var(--panel-2);border:1px solid var(--border);"
         'font-family:var(--mono);font-size:12px;white-space:nowrap">'
         f'<span style="width:6px;height:6px;border-radius:50%;background:{color};align-self:center"></span>'
-        '<span style="color:var(--mute);text-transform:uppercase;letter-spacing:.10em;font-size:10px">Evidence</span>'
+        '<span style="color:var(--mute);text-transform:uppercase;letter-spacing:0;font-size:10px">Evidence</span>'
         f'<span style="color:var(--ink);font-weight:600">{score}'
         '<span style="color:var(--mute);font-weight:400">/100</span></span>'
         f'<span style="color:{color};font-size:11px">{_esc(grade)}</span>'
@@ -1823,12 +1881,12 @@ def _section_head(section_id: str, *, rhythm: str, meta: str | None = None) -> s
             'margin-bottom:16px;gap:16px">'
             '<div style="display:flex;align-items:baseline;gap:12px;min-width:0">'
             f'<span aria-hidden="true" style="font-family:var(--mono);font-size:11px;color:var(--mute);'
-            f'letter-spacing:.04em">§{num}</span>'
+            f'letter-spacing:0">§{num}</span>'
             # Real <h2> in terminal mode too — screen readers shouldn't have
             # to guess that this monospace, accent-coloured span is the
             # section heading.
-            f'<h2 style="margin:0;font-family:var(--mono);font-size:12px;letter-spacing:.18em;'
-            f"color:var(--accent);text-transform:uppercase;font-weight:600;"
+            f'<h2 style="margin:0;font-family:var(--mono);font-size:13px;letter-spacing:0;'
+            f"color:var(--ink);font-weight:650;"
             f'white-space:nowrap">{_esc(title)}</h2>'
             "</div>"
             f"{meta_html}</div>"
@@ -1847,8 +1905,8 @@ def _section_head(section_id: str, *, rhythm: str, meta: str | None = None) -> s
         '<div style="display:flex;align-items:baseline;gap:12px;min-width:0">'
         f'<span style="font-family:var(--mono);font-size:11px;color:var(--ghost)">'
         f"§{num}</span>"
-        f'<h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.14em;'
-        f"color:var(--accent);text-transform:uppercase;"
+        f'<h2 style="margin:0;font-size:15px;font-weight:650;letter-spacing:0;'
+        f"color:var(--ink);"
         f'white-space:nowrap">{_esc(title)}</h2>'
         "</div>"
         f"{meta_html}</div>"
@@ -1962,7 +2020,7 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
     )
     delta_html = (
         f'<span class="cal-hero-delta" style="color:{delta_color};font-size:13px;'
-        f'font-weight:500;margin-left:14px;letter-spacing:-0.005em">{_esc(data["delta_text"])}</span>'
+        f'font-weight:500;margin-left:14px;letter-spacing:0">{_esc(data["delta_text"])}</span>'
         if data["delta_text"]
         else ""
     )
@@ -1974,7 +2032,7 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
             '<div class="cal-hero-savings" style="display:flex;align-items:baseline;gap:10px;'
             'flex-wrap:wrap;margin-top:8px">'
             f'<span style="color:var(--ok);font-family:var(--mono);font-size:11px;'
-            'letter-spacing:.18em;text-transform:uppercase;font-weight:600">FIXABLE</span>'
+            'letter-spacing:0;text-transform:uppercase;font-weight:600">FIXABLE</span>'
             f'<span style="color:var(--ink);font-size:14px;font-weight:600">'
             f'{_esc(data["recoverable_text"])}<span style="color:var(--mute);'
             f'font-weight:400;margin-left:6px">across {rec_count} '
@@ -2009,7 +2067,7 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
             '<div class="cal-hero-action" style="margin-top:10px;padding-top:10px;'
             'border-top:1px solid var(--border)">'
             '<span style="color:var(--mute);font-family:var(--mono);font-size:10px;'
-            'letter-spacing:.18em;text-transform:uppercase">Top fix</span>'
+            'letter-spacing:0;text-transform:uppercase">Top fix</span>'
             f'<div style="color:var(--ink);font-size:13px;font-weight:500;margin-top:4px">'
             f"{_esc(data['top_action_title'])}{value_chip}{conf_chip}"
             "</div>"
@@ -2026,7 +2084,7 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
         'padding:16px 20px">'
         '<div class="cal-hero-headline" style="display:flex;align-items:baseline;gap:14px;'
         'flex-wrap:wrap">'
-        '<span style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
+        '<span style="font-family:var(--mono);font-size:10px;letter-spacing:0;'
         'color:var(--accent);text-transform:uppercase;font-weight:600">Verdict</span>'
         f'<span class="cal-hero-period" style="color:var(--mute);font-size:12px">'
         f"{_esc(data['period_label'])} · {_esc(data['period_range'])}</span>"
@@ -2034,7 +2092,7 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
         '<div class="cal-hero-line" style="display:flex;align-items:baseline;gap:0;'
         'flex-wrap:wrap;margin-top:8px">'
         '<span class="cal-hero-cost" style="color:var(--ink);font-size:var(--num-lg);'
-        f'font-weight:600;letter-spacing:-0.015em">{_esc(data["cost"])}</span>'
+        f'font-weight:600;letter-spacing:0">{_esc(data["cost"])}</span>'
         f"{delta_html}"
         "</div>"
         f"{recoverable_html}"
@@ -2083,7 +2141,7 @@ def _verdict_strip(d: Dashboard, rhythm: str) -> str:
             'border-radius:0 var(--r-md) var(--r-md) 0;padding:12px 16px">'
             '<div style="display:flex;align-items:baseline;gap:12px;'
             'margin-bottom:8px;flex-wrap:wrap">'
-            f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
+            f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:0;'
             f"color:{tone_accent};text-transform:uppercase;font-weight:600;"
             'white-space:nowrap">Verdict</span>'
             f'<span style="font-size:14px;color:var(--ink);font-weight:600">{_esc(eb.verdict)}</span>'
@@ -2110,9 +2168,9 @@ def _verdict_strip(d: Dashboard, rhythm: str) -> str:
         "border-radius:var(--r-md);"
         f'border-left:3px solid {tone_accent};padding:14px 18px">'
         '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap">'
-        f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
+        f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:0;'
         f'color:{tone_accent};text-transform:uppercase;font-weight:600;white-space:nowrap">Verdict</span>'
-        f'<span style="font-size:17px;color:var(--ink);font-weight:600;letter-spacing:-0.005em">{_esc(eb.verdict)}</span>'
+        f'<span style="font-size:17px;color:var(--ink);font-weight:600;letter-spacing:0">{_esc(eb.verdict)}</span>'
         f'<span style="font-size:12px;color:var(--mute)">· {_esc(eb.subtitle)}</span>'
         "</div>"
         f'<div style="display:flex;gap:8px;flex-wrap:wrap">{"".join(chips_html)}</div>'
@@ -2194,7 +2252,7 @@ def _value_card(
         f"border-left:3px solid {accent};border-radius:var(--r-md);padding:14px 15px;"
         'min-width:0;display:flex;flex-direction:column;gap:6px">'
         '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">'
-        f'<span style="font-size:11px;letter-spacing:.10em;text-transform:uppercase;'
+        f'<span style="font-size:11px;letter-spacing:0;text-transform:uppercase;'
         f'color:var(--mute);font-weight:600">{_esc(label)}</span>'
         f"{_pill(_esc(tone), tone='bad' if tone == 'critical' else tone)}"
         "</div>"
@@ -2402,7 +2460,7 @@ def _section_usage_mix(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             '<div style="background:var(--panel);border:1px solid var(--border);'
             'border-radius:var(--r-md);overflow:hidden">'
             f'<div style="padding:10px 12px;background:var(--panel-2);font-size:11px;'
-            f'letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-weight:650">'
+            f'letter-spacing:0;text-transform:uppercase;color:var(--mute);font-weight:650">'
             f"{_esc(dimension_labels.get(dimension, dimension))}</div>"
             + "".join(row_html)
             + "</div>"
@@ -2696,7 +2754,7 @@ def _th(
     return (
         f"<th{sort_attr}{num_attr} "
         f'style="text-align:{align};padding:10px 14px;font-size:11px;'
-        f"font-weight:500;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;"
+        f"font-weight:500;color:var(--mute);text-transform:uppercase;letter-spacing:0;"
         f'border-bottom:1px solid var(--border)">{content}</th>'
     )
 
@@ -3149,7 +3207,7 @@ def _insight_sample_size_chip(it: Insight) -> str:
         return ""
     return (
         '<div class="cal-insight-meta" style="color:var(--ghost);font-size:11px;'
-        'margin-top:5px;font-family:var(--mono);letter-spacing:.02em">'
+        'margin-top:5px;font-family:var(--mono);letter-spacing:0">'
         f"based on {' · '.join(parts)}</div>"
     )
 
@@ -3178,7 +3236,7 @@ def _insight_row(it: Insight, *, dense: bool, pm: _PrivacyMap) -> str:
         f'<div class="cal-insight-row" style="display:grid;grid-template-columns:auto 1fr auto;'
         f"gap:14px;align-items:baseline;padding:{pad};border-left:3px solid {accent};"
         f'background:var(--panel);border-top:1px solid var(--border)">'
-        f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:{tone};'
+        f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:0;color:{tone};'
         f'text-transform:uppercase;font-weight:600;min-width:56px">{_esc(sev)}</span>'
         '<div style="min-width:0">'
         f'<div style="color:var(--ink);font-size:13px;font-weight:500">{_private_text(it.title, pm)}</div>'
@@ -3251,15 +3309,11 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             ("Impact %", impact_pct),
         ]
         metrics_html = (
-            '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px">'
+            '<div class="cal-metric-strip">'
             + "".join(
-                '<span style="display:inline-flex;gap:5px;align-items:baseline;'
-                'border:1px solid var(--border);border-radius:3px;'
-                'background:var(--panel-2);padding:3px 6px;white-space:nowrap">'
-                f'<span style="font-size:10px;color:var(--mute);text-transform:uppercase;'
-                f'letter-spacing:.06em">{_esc(label)}</span>'
-                f'<span style="font-size:11px;color:var(--ink);font-family:var(--mono)">'
-                f"{_esc(value)}</span></span>"
+                '<span class="cal-metric-chip">'
+                f'<span class="cal-metric-label">{_esc(label)}</span>'
+                f'<span class="cal-metric-value">{_esc(value)}</span></span>'
                 for label, value in anomaly_metrics
             )
             + "</div>"
@@ -3271,13 +3325,13 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
                 f"{a.comparison_scope}."
             )
         rows_html.append(
-            f'<div style="display:grid;grid-template-columns:92px 1fr auto;gap:14px;'
+            f'<div class="cal-anomaly-row" style="display:grid;grid-template-columns:92px 1fr auto;gap:14px;'
             f"align-items:start;padding:{pad};border-left:3px solid {tone_color};"
             f'border-top:{top}">'
-            f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:.12em;'
+            f'<span class="cal-anomaly-label" style="font-family:var(--mono);font-size:10px;letter-spacing:0;'
             f"color:{tone_color};text-transform:uppercase;font-weight:600;"
             'padding-top:2px">Spend spike</span>'
-            '<div style="min-width:0">'
+            '<div class="cal-anomaly-main">'
             f'<div style="color:var(--ink);font-size:13px;font-weight:500">'
             f'{_esc(a.kind)} · <span style="font-family:var(--mono);color:var(--ink-2)">{_private_text(a.label, pm)}</span></div>'
             f'<div style="color:var(--mute);font-size:12px;margin-top:3px">'
@@ -3286,7 +3340,7 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             f"{metrics_html}"
             f'<div style="color:var(--ink-2);font-size:12px;margin-top:5px">{_esc(action)}</div>'
             "</div>"
-            '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">'
+            '<div class="cal-anomaly-side" style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">'
             f'<span style="font-size:13px;color:{tone_color};font-family:var(--mono);'
             f'font-weight:600;white-space:nowrap">+{_esc(impact)}</span>'
             f"{_pill(_esc(a.evidence_status), tone=evidence_tone)}"
@@ -3362,7 +3416,7 @@ def _forecast_card(label: str, value: str, sub: str, band: str | None) -> str:
     return (
         '<div style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);padding:16px">'
-        f'<div style="font-size:11px;letter-spacing:.10em;color:var(--mute);'
+        f'<div style="font-size:11px;letter-spacing:0;color:var(--mute);'
         f'text-transform:uppercase;margin-bottom:6px">{_esc(label)}</div>'
         f'<div style="font-size:var(--num-lg);font-weight:600;color:var(--ink);margin-bottom:4px">{_esc(value)}</div>'
         f'<div style="font-size:12px;color:var(--mute)">{_esc(sub)}</div>'
@@ -3782,7 +3836,7 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         "<div>"
         '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">'
         f"{_caliper_mark(26)}"
-        '<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.015em;color:var(--ink)">'
+        '<h1 style="margin:0;font-size:22px;font-weight:600;letter-spacing:0;color:var(--ink)">'
         f'Caliper <span style="color:var(--mute);font-size:12px;font-family:var(--mono);font-weight:400;margin-left:6px">v{_esc(d.caliper.version)}</span>'
         "</h1></div>"
         '<div style="color:var(--mute);font-size:12px">'
@@ -3842,8 +3896,8 @@ def _terminal_masthead(d: Dashboard) -> str:
         '<div class="cal-terminal-mast">'
         '<div class="cal-terminal-brand">'
         f"{_caliper_mark(26)}"
-        '<span style="font-size:16px;font-weight:700;letter-spacing:.05em;color:var(--ink)">CALIPER</span>'
-        f'<span style="font-size:11px;color:var(--ghost);letter-spacing:.10em">v{_esc(d.caliper.version)} · schema {_esc(d.caliper.schema_version)}</span>'
+        '<span style="font-size:16px;font-weight:700;letter-spacing:0;color:var(--ink)">CALIPER</span>'
+        f'<span style="font-size:11px;color:var(--ghost);letter-spacing:0">v{_esc(d.caliper.version)} · schema {_esc(d.caliper.schema_version)}</span>'
         "</div>"
         '<div class="cal-terminal-stats">'
         '<span style="display:flex;align-items:center;gap:6px">'
@@ -3902,7 +3956,7 @@ def _terminal_ticker(d: Dashboard) -> str:
         )
         chips.append(
             '<span style="display:inline-flex;align-items:baseline;gap:8px;font-size:12px">'
-            f'<span style="color:var(--mute);letter-spacing:.10em">{label}</span>'
+            f'<span style="color:var(--mute);letter-spacing:0">{label}</span>'
             f'<span style="color:{c};font-weight:600">{_esc(value)}</span>'
             f"{delta_html}</span>"
         )
@@ -3937,7 +3991,7 @@ def _terminal_index(d: Dashboard) -> str:
         '<aside style="border-right:1px solid var(--border);'
         "padding:24px 8px 24px 20px;position:sticky;top:0;align-self:start;"
         'max-height:100vh;overflow-y:auto">'
-        '<div style="font-family:var(--mono);font-size:10px;letter-spacing:.18em;'
+        '<div style="font-family:var(--mono);font-size:10px;letter-spacing:0;'
         'color:var(--mute);text-transform:uppercase;margin-bottom:14px">Index</div>'
         '<ul style="list-style:none;padding:0;margin:0;display:grid;gap:2px">'
         + "".join(items)

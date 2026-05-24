@@ -2,21 +2,21 @@
 
 :root {
   /* dark by default */
-  --bg: #0a0d12;
-  --bg-2: #0d1117;
-  --panel: #12161e;
-  --panel-2: #161b24;
-  --panel-hover: #1a2029;
-  --border: #1f242e;
-  --border-strong: #2a313c;
-  --grid: rgba(255,255,255,0.045);
+  --bg: #090d13;
+  --bg-2: #0d131b;
+  --panel: #131922;
+  --panel-2: #19212b;
+  --panel-hover: #202a36;
+  --border: #2a3340;
+  --border-strong: #3a4654;
+  --grid: rgba(255,255,255,0.065);
   --bar-ghost: rgba(255,255,255,0.022);
-  --hairline: rgba(255,255,255,0.06);
+  --hairline: rgba(255,255,255,0.09);
 
-  --ink: #e8eaef;
-  --ink-2: #c4c9d3;
-  --mute: #858d9b;
-  --ghost: #6c7383;
+  --ink: #f2f5f8;
+  --ink-2: #d3d8e2;
+  --mute: #a1a9b7;
+  --ghost: #838d9d;
 
   --accent: #7cc4ff;
   --accent-strong: #54aef0;
@@ -177,7 +177,7 @@ html, body { background: var(--bg); margin: 0; padding: 0; }
 body {
   font-family: var(--font);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--ink);
   font-feature-settings: "kern" 1, "calt" 1, "liga" 1, "ss01" 1, "cv02" 1, "cv11" 1;
   -webkit-font-smoothing: antialiased;
@@ -196,9 +196,9 @@ table { font-variant-numeric: tabular-nums lining-nums; }
    data-viewport frame. */
 .cal-dashboard-root { min-width: 0; }
 .cal-receipt-root {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 32px 28px 64px;
+  padding: 36px 32px 72px;
   font-family: var(--font);
   color: var(--ink);
 }
@@ -209,14 +209,14 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 }
 .cal-terminal-layout {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-columns: 212px minmax(0, 1fr);
   gap: 0;
-  max-width: 1320px;
+  max-width: 1400px;
   margin: 0 auto;
 }
 .cal-terminal-main {
   min-width: 0;
-  padding: 24px 28px 64px;
+  padding: 32px 34px 72px;
 }
 .cal-summary-row {
   grid-auto-rows: 1fr;
@@ -275,7 +275,9 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 .cal-table th,
 .cal-table td {
   vertical-align: middle;
+  line-height: 1.42;
 }
+.cal-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.018); }
 .cal-table td {
   /* Breaks at word boundaries only — never inside identifiers like
      "claude-sonnet-4-6" or numerics like "65%". */
@@ -296,6 +298,44 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 .cal-cell-model > span { white-space: nowrap; }
 /* Share cells: percentage and meter ride together; no orphan "%" lines. */
 .cal-cell-share { white-space: nowrap; }
+
+.cal-anomaly-row,
+.cal-insight-row {
+  min-width: 0;
+}
+.cal-anomaly-main {
+  min-width: 0;
+}
+.cal-anomaly-side {
+  min-width: max-content;
+}
+.cal-metric-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cal-metric-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+.cal-metric-label {
+  font-size: 10px;
+  color: var(--mute);
+  font-weight: 600;
+}
+.cal-metric-value {
+  font-size: 11px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
+}
 
 /* Section spacing */
 section[id] { scroll-margin-top: 24px; }
@@ -344,6 +384,23 @@ section[id]:target > [class*="cal-section-head"] {
   .cal-table th,
   .cal-table td {
     padding: 8px 9px !important;
+  }
+  .cal-anomaly-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+  .cal-anomaly-side {
+    align-items: flex-start !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    min-width: 0;
+  }
+  .cal-insight-row {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+  .cal-metric-chip {
+    flex: 1 1 132px;
   }
   table th:nth-child(n+5),
   table td:nth-child(n+5) { display: none; }
@@ -646,7 +703,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
 .cal-tweaks-panel .cal-tweaks-label {
   font-family: var(--mono);
   font-size: 10px;
-  letter-spacing: .12em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--mute);
   margin-right: 2px;
