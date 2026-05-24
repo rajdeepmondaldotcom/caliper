@@ -2,6 +2,21 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.50 - 2026-05-24
+
+### Fixed
+
+- **Live release-smoke scripts now allow the palette's JSON data
+  script.** `scripts/release-smoke.sh` and `scripts/live-release-smoke.sh`
+  still carried the old "exactly one `</script>` close" assertion that
+  rejected the cmd+K palette's `<script type="application/json">`
+  search index. The build-step privacy gate was fixed in 0.0.49 but
+  the post-publish "verify the published release installs" job failed
+  on this remaining copy — 0.0.49 reached PyPI cleanly (and is
+  installable) but the workflow ended red. Both scripts now mirror
+  the workflow gate: count executable opens, require any other
+  `<script>` tag to carry `type="application/json"`.
+
 ## 0.0.49 - 2026-05-24
 
 ### Fixed
