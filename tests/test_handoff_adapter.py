@@ -382,8 +382,11 @@ def test_build_handoff_dashboard_adds_project_tracking_and_anomalies(monkeypatch
     assert project.daily_mean_cost_usd > 0
     assert project.projected_30d_cost_usd > 0
     assert len(project.daily_cost_sparkline) == (options.end.date() - options.start.date()).days
-    assert any(row.kind == "Project-day spike" for row in d.anomalies)
     assert any(row.kind == "Session spike" for row in d.anomalies)
+    assert not any(
+        row.kind == "Project-day spike" and row.impact_usd == d.anomalies[0].impact_usd
+        for row in d.anomalies
+    )
     session_spike = next(row for row in d.anomalies if row.kind == "Session spike")
     assert "huge" not in session_spike.label
     assert "2026" in session_spike.label

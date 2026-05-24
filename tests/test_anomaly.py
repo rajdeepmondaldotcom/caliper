@@ -81,6 +81,19 @@ def test_detect_session_anomalies_flags_spike():
     assert anomalies[0].impact_usd_exact > Decimal("0")
     assert anomalies[0].baseline_sample_count == 8
     assert "prior sessions" in anomalies[0].comparison_scope
+    assert anomalies[0].impact_percent is None
+    assert "near-zero typical" in anomalies[0].reason
+
+
+def test_detect_daily_anomalies_reports_impact_percent_for_stable_baseline():
+    rows = [_daily(f"2026-05-{i:02d}", 10.0) for i in range(1, 9)]
+    rows.append(_daily("2026-05-09", 50.0))
+
+    anomalies = detect_daily_anomalies(rows)
+
+    assert anomalies
+    assert anomalies[0].impact_percent == 400.0
+    assert "400% above expected" in anomalies[0].reason
 
 
 def test_detect_session_anomalies_ignores_broad_baseline_without_matching_cohort():
@@ -107,6 +120,28 @@ def test_detect_session_anomalies_ignores_broad_baseline_without_matching_cohort
 
     assert detect_session_anomalies(events, _card()) == []
     assert detect_actionable_anomalies(events, _card(), "UTC") == []
+
+
+def test_detect_actionable_anomalies_collapses_same_single_session_incident():
+    base = dt.datetime(2026, 5, 1, 10, 0, tzinfo=dt.UTC)
+    events = [
+        _event(session=f"s{i}", ts=base + dt.timedelta(days=i), input_tokens=100)
+        for i in range(8)
+    ]
+    events.append(
+        _event(
+            session="big",
+            ts=base + dt.timedelta(days=9),
+            input_tokens=10_000_000,
+            output_tokens=100_000,
+        )
+    )
+
+    anomalies = detect_actionable_anomalies(events, _card(), "UTC")
+
+    assert len(anomalies) == 1
+    assert anomalies[0].kind == "session_spike"
+    assert anomalies[0].label == "big"
 
 
 def test_detect_session_anomalies_with_constant_costs_returns_empty():

@@ -415,6 +415,7 @@ def test_anomaly_rows_use_constructive_copy_without_scale_noise() -> None:
                 dashboard.anomalies[0],
                 comparison_scope="prior sessions in same project/model/tier cohort",
                 baseline_sample_count=8,
+                impact_percent=400.0,
             ),
             *dashboard.anomalies[1:],
         ],
@@ -425,6 +426,7 @@ def test_anomaly_rows_use_constructive_copy_without_scale_noise() -> None:
     assert "Spend spike" in html
     assert "above typical" in html
     assert "Compared with 8 prior sessions in same project/model/tier cohort." in html
+    assert "impact +400%" in html
 
 
 def test_dashboard_renders_operator_first_sections() -> None:

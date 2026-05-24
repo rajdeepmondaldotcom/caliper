@@ -56,3 +56,18 @@ Implemented the final plan direction:
   without staging unrelated feature work.
 - No Terraform commands were run.
 - No push was performed.
+
+## Follow-Up Hardening
+
+After re-checking AWS, Google Cloud, and FinOps anomaly guidance, the detector was
+tightened again:
+
+- Added `impact_percent` as an additive public field, matching the expected-spend
+  vs actual-spend framing used by cloud cost anomaly tools.
+- Treat near-zero expected spend as percent-not-applicable instead of inventing a
+  misleading huge percentage.
+- Collapse duplicate same-incident rows across session, project-day, model-day,
+  and daily detectors when they describe the same observed/impact amount on the
+  same day. The most specific row wins, so a single-session spike renders once
+  as a session anomaly rather than three separate root-cause-shaped rows.
+- Updated dashboard copy to show impact percentage alongside detector severity.

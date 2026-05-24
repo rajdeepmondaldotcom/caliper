@@ -191,6 +191,7 @@ def test_predict_json_anomalies_include_actionability_metadata(tmp_path: Path):
     assert top["baseline_sample_count"] >= 4
     assert top["comparison_scope"]
     assert top["reason"]
+    assert "impact_percent" in top
 
 
 def test_recommend_markdown(tmp_path: Path):

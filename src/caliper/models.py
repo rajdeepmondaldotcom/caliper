@@ -747,6 +747,7 @@ class Anomaly:
     cohort_label: str = ""
     reason: str = ""
     dedupe_key: str = ""
+    impact_percent: float | None = None
 
 
 @dataclass(frozen=True)

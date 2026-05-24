@@ -1899,6 +1899,7 @@ def _build_anomaly_rows(
                 comparison_scope=item.comparison_scope,
                 baseline_sample_count=item.baseline_sample_count,
                 reason=item.reason,
+                impact_percent=item.impact_percent,
             )
         )
     return sorted(rows, key=lambda row: (-row.impact_usd, -row.z_score, row.kind, row.label))[:12]

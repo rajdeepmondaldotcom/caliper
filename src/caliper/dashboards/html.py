@@ -3243,6 +3243,11 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
         impact = fmt_money(a.impact_usd)
         sigma_label = _fmt_sigma(a.z_score)
         action = _anomaly_action(a.kind)
+        impact_pct_label = (
+            f'impact +{a.impact_percent:.0f}%'
+            if a.impact_percent is not None
+            else "impact % n/a"
+        )
         comparison = ""
         if a.baseline_sample_count and a.comparison_scope:
             comparison = (
@@ -3270,6 +3275,8 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             f"{_pill(_esc(a.evidence_status), tone=evidence_tone)}"
             f'<span style="font-size:11px;color:var(--mute);font-family:var(--mono);'
             f'white-space:nowrap">detector {_esc(sigma_label)}</span>'
+            f'<span style="font-size:11px;color:var(--mute);font-family:var(--mono);'
+            f'white-space:nowrap">{_esc(impact_pct_label)}</span>'
             "</div>"
             "</div>"
         )

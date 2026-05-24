@@ -481,6 +481,7 @@ class AnomalyRow:
     comparison_scope: str = ""
     baseline_sample_count: int = 0
     reason: str = ""
+    impact_percent: float | None = None
 
 
 # ---------------------------------------------------------------------------

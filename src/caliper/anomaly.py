@@ -149,9 +149,22 @@ def _most_common(counter: Counter[str], fallback: str) -> str:
     return value or fallback
 
 
-def _scope_reason(observed: float, center: float, sample_count: int) -> str:
-    fold = observed / max(center, ACTIVE_DAY_THRESHOLD)
-    return f"{fold:.1f}x typical across {sample_count} comparable observations"
+def _impact_percent(observed: float, center: float) -> float | None:
+    if center < ACTIVE_DAY_THRESHOLD:
+        return None
+    return round(((observed - center) / center) * 100.0, 1)
+
+
+def _scope_reason(
+    observed: float,
+    center: float,
+    sample_count: int,
+    impact_percent: float | None,
+) -> str:
+    if impact_percent is None:
+        return f"above near-zero typical spend across {sample_count} comparable observations"
+    pct = f"{impact_percent:.0f}" if impact_percent.is_integer() else f"{impact_percent:.1f}"
+    return f"{pct}% above expected across {sample_count} comparable observations"
 
 
 def _score_observations(
@@ -172,6 +185,7 @@ def _score_observations(
                 ok, z = _qualifies(row.observed, center, scale, sigma_threshold)
                 if ok:
                     impact = Decimal(str(max(0.0, row.observed - center)))
+                    impact_percent = _impact_percent(row.observed, center)
                     anomalies.append(
                         Anomaly(
                             kind=row.kind,
@@ -186,8 +200,14 @@ def _score_observations(
                             baseline_sample_count=len(prior_values),
                             cohort_key=row.cohort_key,
                             cohort_label=row.cohort_label,
-                            reason=_scope_reason(row.observed, center, len(prior_values)),
+                            reason=_scope_reason(
+                                row.observed,
+                                center,
+                                len(prior_values),
+                                impact_percent,
+                            ),
                             dedupe_key=row.dedupe_key,
+                            impact_percent=impact_percent,
                         )
                     )
             prior_values.append(row.observed)
@@ -338,6 +358,26 @@ def _project_day_observations(
     return out
 
 
+def _specificity_rank(item: Anomaly) -> int:
+    return {
+        "session_spike": 0,
+        "project_day_spike": 1,
+        "model_day_spike": 2,
+        "daily_spike": 3,
+    }.get(item.kind, 9)
+
+
+def _incident_key(item: Anomaly) -> str:
+    day = item.timestamp.date().isoformat()
+    observed_cents = int(round(item.observed * 100))
+    impact_cents = int(round(float(item.impact_usd_exact) * 100))
+    return f"{day}:{observed_cents}:{impact_cents}"
+
+
+def _prefer_incident_item(item: Anomaly) -> tuple[int, Decimal, float, str, str]:
+    return (_specificity_rank(item), *_sort_key(item))
+
+
 def _dedupe_anomalies(items: Iterable[Anomaly]) -> list[Anomaly]:
     by_key: dict[str, Anomaly] = {}
     for item in items:
@@ -345,7 +385,14 @@ def _dedupe_anomalies(items: Iterable[Anomaly]) -> list[Anomaly]:
         existing = by_key.get(key)
         if existing is None or _sort_key(item) < _sort_key(existing):
             by_key[key] = item
-    return sorted(by_key.values(), key=_sort_key)
+
+    by_incident: dict[str, Anomaly] = {}
+    for item in by_key.values():
+        key = _incident_key(item)
+        existing = by_incident.get(key)
+        if existing is None or _prefer_incident_item(item) < _prefer_incident_item(existing):
+            by_incident[key] = item
+    return sorted(by_incident.values(), key=_sort_key)
 
 
 def detect_actionable_anomalies(
