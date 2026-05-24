@@ -2,6 +2,36 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.51 - 2026-05-25
+
+### Fixed
+
+- **Dashboard no longer hangs at "Building · signals" on large catalogs.**
+  Regression introduced with the ranked-model-alternatives advisor (0.0.49):
+  `model_alternatives_for_event` re-priced every event against the entire
+  pricing catalog *and* rebuilt the candidate roster on every call
+  (126k+ times in a single `run_audit`). With the embedded 9-model card it
+  was merely slow; against a network-refreshed catalog of hundreds of models
+  it effectively never finished. Three fixes, all behaviour-preserving:
+  - The recommendable-model roster is now computed once per rate card and
+    memoised on the card (like the existing cost caches), and capped to the
+    cheapest `_MAX_CANDIDATE_MODELS` (32) by input rate — only the cheapest
+    models can ever beat a given source, so the chosen alternative is
+    unchanged.
+  - Per-event ranked alternatives are memoised per (model, tier, token
+    shape) on the card, collapsing the build's repeated repricing passes
+    (suggestion screening, recommendation ranking, model-overselection) into
+    one computation per shape.
+  - `_event_suggestions` defers the cheaper-alternative lookup behind each
+    rule's cheap precondition and uses an early-exit existence check, so
+    events that can't match a model-swap rule are never repriced.
+
+  Net effect on a synthetic 108k-event run with a 300-model catalog:
+  `run_audit` ~89s → ~1.5s, `recommend` ~38s → ~10s, and the full
+  `build_handoff_dashboard` completes in ~25s instead of hanging. A
+  regression test (`test_candidate_roster_is_capped_and_memoised_on_card`)
+  guards the roster cap and the per-card memoisation.
+
 ## 0.0.50 - 2026-05-24
 
 ### Fixed
