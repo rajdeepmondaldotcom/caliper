@@ -2313,6 +2313,7 @@ def dashboard(
         load_dashboard_config,
         write_dashboard_defaults,
     )
+    from caliper.dashboards.adapter import DASHBOARD_BUILD_STEPS
 
     if init_defaults:
         try:
@@ -2389,7 +2390,7 @@ def dashboard(
         quiet=quiet,
     ) as prog:
         if demo:
-            prog.stage_start("build")
+            prog.stage_start("build", total=DASHBOARD_BUILD_STEPS)
             payload = sample_dashboard(show_paths=show_paths)
             prog.stage_done(
                 "build",
@@ -2444,7 +2445,7 @@ def dashboard(
                     f"vendor{'s' if vendors_count != 1 else ''}"
                 ),
             )
-            prog.stage_start("build")
+            prog.stage_start("build", total=DASHBOARD_BUILD_STEPS)
             budget_config = load_config(config) if config else load_config()
             payload = build_handoff_dashboard(
                 result,
@@ -2453,6 +2454,7 @@ def dashboard(
                 rolling_result=rolling_result,
                 rolling_options=rolling_options,
                 budget_config=budget_config,
+                progress=prog,
             )
             t = payload.totals
             prog.stage_done(
@@ -2725,6 +2727,7 @@ def doctor(
 
     files = list(options.session_root.glob("**/*.jsonl")) if options.session_root.exists() else []
     vendor_file_count = _discovered_vendor_file_count(options)
+    per_vendor_counts = _discovered_vendor_file_count_by_id(options)
     result = _safe_load_usage(options) if vendor_file_count else None
     checks = build_health_report(
         options=options,
@@ -2739,6 +2742,38 @@ def doctor(
         }
         for check in checks
     ]
+    # Per-tool detection rows — Claude Code / OpenAI Codex / Cursor / Aider.
+    # Built independently of the health checks so the user can see at a
+    # glance which sources were searched-for vs. found.
+    _TOOL_LABELS = (
+        ("claude-code", "Claude Code"),
+        ("openai-codex", "OpenAI Codex"),
+        ("cursor", "Cursor"),
+        ("aider", "Aider"),
+    )
+    tool_records: list[dict[str, Any]] = []
+    for vid, label in _TOOL_LABELS:
+        n = per_vendor_counts.get(vid, 0)
+        if n > 0:
+            tool_records.append(
+                {
+                    "tool": label,
+                    "vendor_id": vid,
+                    "status": "detected",
+                    "files": n,
+                    "detail": f"{n} session file{'s' if n != 1 else ''} discovered",
+                }
+            )
+        else:
+            tool_records.append(
+                {
+                    "tool": label,
+                    "vendor_id": vid,
+                    "status": "not found",
+                    "files": 0,
+                    "detail": "no session files in the configured paths",
+                }
+            )
     warning_summary_records = [
         summary.to_record()
         for summary in parser_warning_summary(
@@ -2755,6 +2790,7 @@ def doctor(
                     "checks": check_records,
                     "worst": worst,
                     "warning_summary": warning_summary_records,
+                    "tools": tool_records,
                 }
             )
         )
@@ -2775,7 +2811,30 @@ def doctor(
         raise typer.Exit(HEALTH_EXIT_CODES[worst])
 
     console.print("[bold]Caliper - Doctor[/bold]")
-    table = Table(show_lines=False)
+
+    # Per-tool detection panel — what the user most often wants to see when
+    # diagnosing "why isn't Codex / Cursor / Aider showing up?"
+    tools_table = Table(title="Sources detected", show_lines=False, title_justify="left")
+    tools_table.add_column("Tool")
+    tools_table.add_column("Status")
+    tools_table.add_column("Files")
+    tools_table.add_column("Detail")
+    for rec in tool_records:
+        if rec["status"] == "detected":
+            style = HEALTH_STATUS_STYLES.get("ok", "green")
+            glyph = "[green]✓[/green]"
+        else:
+            style = "yellow"
+            glyph = "[yellow]·[/yellow]"
+        tools_table.add_row(
+            f"{glyph} {rec['tool']}",
+            f"[{style}]{rec['status'].upper()}[/{style}]",
+            str(rec["files"]),
+            rec["detail"],
+        )
+    console.print(tools_table)
+
+    table = Table(title="Health checks", show_lines=False, title_justify="left")
     table.add_column("Check")
     table.add_column("Status")
     table.add_column("Detail")
@@ -2797,6 +2856,12 @@ def _discovered_vendor_file_count(options: RuntimeOptions) -> int:
     from caliper.vendors import vendor_file_count
 
     return vendor_file_count(options)
+
+
+def _discovered_vendor_file_count_by_id(options: RuntimeOptions) -> dict[str, int]:
+    from caliper.vendors import vendor_file_count_by_id
+
+    return vendor_file_count_by_id(options)
 
 
 @app.command()

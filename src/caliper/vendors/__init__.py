@@ -124,6 +124,23 @@ def vendor_file_count(options: RuntimeOptions) -> int:
     return total
 
 
+def vendor_file_count_by_id(options: RuntimeOptions) -> dict[str, int]:
+    """Per-vendor file count, keyed by ``vendor.id``.
+
+    Powers the ``caliper doctor`` per-tool detection table so the user can
+    see, at a glance, which of Claude Code / OpenAI Codex / Cursor / Aider
+    actually surfaced logs in this run. Tolerates ``OSError`` from missing
+    home directories the same way :func:`vendor_file_count` does.
+    """
+    counts: dict[str, int] = {}
+    for vendor in enabled_vendors(options):
+        try:
+            counts[vendor.id] = len(dedupe_paths(vendor.discover(options)))
+        except OSError:
+            counts[vendor.id] = 0
+    return counts
+
+
 def discover_usage_files(
     options: RuntimeOptions,
     progress: ParseProgress = NULL_PROGRESS,
