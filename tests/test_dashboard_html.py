@@ -424,9 +424,12 @@ def test_anomaly_rows_use_constructive_copy_without_scale_noise() -> None:
 
     assert "scale $" not in html
     assert "Spend spike" in html
-    assert "above typical" in html
     assert "Compared with 8 prior sessions in same project/model/tier cohort." in html
-    assert "impact +400%" in html
+    assert "Actual spend" in html
+    assert "Expected spend" in html
+    assert "Cost impact" in html
+    assert "Impact %" in html
+    assert "+400%" in html
 
 
 def test_dashboard_renders_operator_first_sections() -> None:

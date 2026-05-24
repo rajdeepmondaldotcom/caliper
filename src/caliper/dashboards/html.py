@@ -3243,10 +3243,26 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
         impact = fmt_money(a.impact_usd)
         sigma_label = _fmt_sigma(a.z_score)
         action = _anomaly_action(a.kind)
-        impact_pct_label = (
-            f'impact +{a.impact_percent:.0f}%'
-            if a.impact_percent is not None
-            else "impact % n/a"
+        impact_pct = f"+{a.impact_percent:.0f}%" if a.impact_percent is not None else "n/a"
+        anomaly_metrics = [
+            ("Actual spend", observed),
+            ("Expected spend", baseline),
+            ("Cost impact", f"+{impact}"),
+            ("Impact %", impact_pct),
+        ]
+        metrics_html = (
+            '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px">'
+            + "".join(
+                '<span style="display:inline-flex;gap:5px;align-items:baseline;'
+                'border:1px solid var(--border);border-radius:3px;'
+                'background:var(--panel-2);padding:3px 6px;white-space:nowrap">'
+                f'<span style="font-size:10px;color:var(--mute);text-transform:uppercase;'
+                f'letter-spacing:.06em">{_esc(label)}</span>'
+                f'<span style="font-size:11px;color:var(--ink);font-family:var(--mono)">'
+                f"{_esc(value)}</span></span>"
+                for label, value in anomaly_metrics
+            )
+            + "</div>"
         )
         comparison = ""
         if a.baseline_sample_count and a.comparison_scope:
@@ -3265,8 +3281,9 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             f'<div style="color:var(--ink);font-size:13px;font-weight:500">'
             f'{_esc(a.kind)} · <span style="font-family:var(--mono);color:var(--ink-2)">{_private_text(a.label, pm)}</span></div>'
             f'<div style="color:var(--mute);font-size:12px;margin-top:3px">'
-            f"Observed {observed} vs typical {baseline}; {impact} above typical on {_esc(a.timestamp)}."
+            f"Detected on {_esc(a.timestamp)}."
             f"{_esc(comparison)}</div>"
+            f"{metrics_html}"
             f'<div style="color:var(--ink-2);font-size:12px;margin-top:5px">{_esc(action)}</div>'
             "</div>"
             '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">'
@@ -3275,8 +3292,6 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             f"{_pill(_esc(a.evidence_status), tone=evidence_tone)}"
             f'<span style="font-size:11px;color:var(--mute);font-family:var(--mono);'
             f'white-space:nowrap">detector {_esc(sigma_label)}</span>'
-            f'<span style="font-size:11px;color:var(--mute);font-family:var(--mono);'
-            f'white-space:nowrap">{_esc(impact_pct_label)}</span>'
             "</div>"
             "</div>"
         )
