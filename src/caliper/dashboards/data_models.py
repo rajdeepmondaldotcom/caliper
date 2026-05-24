@@ -148,6 +148,15 @@ class MetricContext:
 
 
 @dataclass(frozen=True)
+class AdvisorAlternative:
+    model: str
+    vendor: str
+    projected_cost_usd: float
+    savings_usd: float
+    events: int = 0
+
+
+@dataclass(frozen=True)
 class AdvisorRecommendation:
     title: str
     value: str
@@ -158,6 +167,7 @@ class AdvisorRecommendation:
     sessions: int
     tone: ImpactTone = "neutral"
     savings_usd: float = 0.0
+    alternatives: tuple[AdvisorAlternative, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -177,6 +187,28 @@ class ExecutiveBrief:
     subtitle: str
     tone: ImpactTone = "neutral"
     findings: list[BriefFinding] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class BillboardCard:
+    """The single above-the-fold 'biggest fix' headline (Peak-End Rule).
+
+    Selected upstream from ``advisor_recommendations`` + ``inefficiencies``
+    so the renderer makes no business decisions — it only emits display
+    strings already prepared by the adapter. ``kind="tidy"`` is the
+    positive-framing fallback when no actionable fix exists in the window
+    (still useful: shows total spend so the page never feels empty).
+    """
+
+    kind: Literal["fix", "tidy"]
+    headline: str  # "BIGGEST FIX" | "YOU'RE TIDY"
+    value: str  # "$182/mo saveable" | "$1,243 spend · last 14 days"
+    rationale: str  # one-line plain-English explanation
+    cta_label: str  # "Investigate" | "Open savings"
+    cta_anchor: str  # section id (no '#'), e.g. "inefficiencies"
+    confidence_pct: int | None = None  # 0..100; None hides the chip
+    command: str = ""  # optional copy-pasteable CLI command
+    tone: ImpactTone = "neutral"
 
 
 @dataclass(frozen=True)
@@ -747,3 +779,8 @@ class Dashboard:
     # v2 redesign: dedicated budget burn rows (daily / weekly / monthly).
     # Optional so older fixtures that omit this field still build.
     budgets: list[BudgetRow] = field(default_factory=list)
+
+    # UX overhaul (Phase 1): the above-the-fold "biggest fix" headline.
+    # Adapter selects this from existing recommendations; renderer just emits.
+    # Optional so empty / legacy payloads still build.
+    billboard: BillboardCard | None = None

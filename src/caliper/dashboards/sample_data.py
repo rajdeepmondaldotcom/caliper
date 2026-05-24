@@ -16,10 +16,12 @@ from __future__ import annotations
 
 from caliper import __version__
 from caliper.dashboards.data_models import (
+    AdvisorAlternative,
     AdvisorRecommendation,
     AgentRow,
     AnomalyRow,
     Banner,
+    BillboardCard,
     BriefFinding,
     BudgetRow,
     CacheLeverageRow,
@@ -188,7 +190,11 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             label="Last 14 days",
             range="2026-05-03 → 2026-05-17",
             timezone="America/Los_Angeles",
-            vendors_active=["claude-code"],
+            # Use the canonical vendor IDs the real parsers emit. See
+            # ``caliper.models.VENDOR_*`` constants — the masthead now shows
+            # every known source with detected/missing status, so consistency
+            # with real-world IDs is what makes the demo trustworthy.
+            vendors_active=["claude-code", "openai-codex", "cursor", "aider"],
             vendor_count_total=4,
         ),
         generated_at="2026-05-17T12:34:56-07:00",
@@ -285,7 +291,9 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
         by_model=[
             ModelRow("anthropic", "claude-sonnet-4-6", "standard", 812.40, 320, 2_400_000, 0.78),
             ModelRow("anthropic", "claude-opus-4-7", "standard", 312.18, 80, 1_100_000, 0.62),
+            ModelRow("openai", "gpt-5.5", "standard", 184.20, 42, 540_000, 0.48),
             ModelRow("anthropic", "claude-haiku-4-5", "fast", 118.60, 80, 620_000, 0.81),
+            ModelRow("openai", "gpt-5.4-mini", "fast", 36.40, 28, 220_000, 0.55),
         ],
         by_project=[
             ProjectRow(
@@ -448,7 +456,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "info",
                 "Sonnet dominates spend",
                 "claude-sonnet-4-6 accounts for 65% of selected-window cost. Try "
-                "`caliper whatif --model claude-haiku-4.5` for the same window.",
+                "`caliper whatif --hypothetical-model gpt-5.4-mini` for the same window.",
                 impact="$812 · 65%",
                 evidence_metrics={"events": 320, "sessions": 28, "tokens": 2_400_000},
             ),
@@ -755,21 +763,32 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 96.40,
             ),
             AdvisorRecommendation(
-                "Use Sonnet for Opus non-reasoning turns",
-                "$68.80",
-                "21 matching events across 4 sessions. Target claude-sonnet-4.6.",
-                "caliper whatif --model claude-sonnet-4.6",
+                "Use Sonnet 4.6 for Opus non-reasoning turns",
+                "$61.24",
+                "21 matching events across 4 sessions. Test current alternatives: "
+                "claude-sonnet-4.6 (anthropic, saves $61.24), "
+                "gpt-5.4 (openai, saves $55.10), "
+                "gpt-5.4-mini (openai, saves $68.80).",
+                "caliper whatif --hypothetical-model claude-sonnet-4.6",
                 0.80,
                 21,
                 4,
                 "good",
-                68.80,
+                61.24,
+                (
+                    AdvisorAlternative("claude-sonnet-4.6", "anthropic", 15.76, 61.24, 21),
+                    AdvisorAlternative("gpt-5.4", "openai", 21.90, 55.10, 21),
+                    AdvisorAlternative("gpt-5.4-mini", "openai", 8.20, 68.80, 21),
+                ),
             ),
             AdvisorRecommendation(
-                "Route short premium contexts to a smaller model",
+                "Route short premium contexts to current cheaper models",
                 "$19.00",
-                "37 matching events across 6 sessions. Target cheaper model.",
-                "caliper advise --rule premium-short-context",
+                "37 matching events across 6 sessions. Keep GPT-5.5 and Sonnet 4.6 "
+                "for complex work. Test current alternatives: "
+                "gpt-5.4 (openai, saves $12.40), "
+                "gpt-5.4-mini (openai, saves $19.00).",
+                "caliper whatif --hypothetical-model gpt-5.4",
                 0.70,
                 37,
                 6,
@@ -908,24 +927,50 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
         ),
         agents=[
             AgentRow(
-                "planner-agent",
+                "claude-code · planner",
                 "direct",
                 "estimated",
-                "logged agent identity",
-                "assistant",
-                142.40,
-                610_000,
-                74,
-                88,
-                6,
-                [18, 12, 0, 28, 44, 0, 12, 8, 20, 0, 0, 0, 0, 0],
+                "logged via claude-code session header",
+                "claude-code",
+                812.40,
+                2_400_000,
+                320,
+                240,
+                18,
+                [88, 62, 144, 51, 18, 0, 84, 168, 92, 108, 110, 33, 134, 154],
             ),
             AgentRow(
-                "review-agent",
-                "overhead",
+                "codex · multi-file edit",
+                "direct",
+                "exact",
+                "logged via openai codex CLI",
+                "codex",
+                184.20,
+                540_000,
+                42,
+                36,
+                4,
+                [0, 0, 8, 12, 0, 0, 14, 22, 18, 16, 20, 12, 28, 34],
+            ),
+            AgentRow(
+                "cursor · agent mode",
+                "direct",
                 "partial",
-                "inferred from session metadata",
-                "assistant",
+                "inferred from cursor agent flag",
+                "cursor",
+                146.20,
+                480_000,
+                78,
+                52,
+                7,
+                [0, 12, 18, 8, 0, 0, 10, 22, 14, 16, 12, 6, 18, 10],
+            ),
+            AgentRow(
+                "aider · refactor",
+                "direct",
+                "estimated",
+                "inferred from aider commit prefix",
+                "aider",
                 64.80,
                 240_000,
                 31,
@@ -933,10 +978,24 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 3,
                 [0, 0, 12, 0, 8, 0, 0, 14, 0, 18, 0, 0, 0, 12],
             ),
+            AgentRow(
+                "background · review",
+                "overhead",
+                "partial",
+                "inferred from session metadata",
+                "assistant",
+                35.58,
+                180_000,
+                9,
+                12,
+                2,
+                [0, 4, 0, 6, 0, 0, 8, 0, 10, 0, 0, 0, 4, 3],
+            ),
         ],
         skills=[
             SkillRow("diagnose", "estimated", "session marker", 48.20, 8.03, 180_000, 6, 4),
             SkillRow("tdd", "partial", "prompt pattern", 24.10, 6.02, 92_000, 4, 3),
+            SkillRow("refactor", "partial", "prompt pattern", 18.60, 5.20, 74_000, 3, 2),
         ],
         inefficiencies=[
             InefficiencyRow(
@@ -1090,6 +1149,20 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             BudgetRow(period="weekly", spent=412.0, cap=500.0, warn=400.0, tone="warn"),
             BudgetRow(period="monthly", spent=1640.0, cap=2000.0, warn=1600.0, tone="warn"),
         ],
+        billboard=BillboardCard(
+            kind="fix",
+            headline="BIGGEST FIX",
+            value="$612/mo saveable",
+            rationale=(
+                "320 short-context Opus events would run cheaper on Sonnet 4.6 "
+                "with no measurable capability loss."
+            ),
+            cta_label="Investigate",
+            cta_anchor="inefficiencies",
+            confidence_pct=92,
+            command="caliper whatif --hypothetical-model claude-sonnet-4-6",
+            tone="warn",
+        ),
     )
 
 

@@ -269,23 +269,47 @@ def test_interactive_off_emits_no_script(demo_dashboard) -> None:
 
 def test_interactive_on_emits_exactly_one_inline_script(demo_dashboard) -> None:
     html = render_dashboard(demo_dashboard, interactive=True)
-    assert html.count("<script>") == 1
-    assert html.count("</script>") == 1
+    # Exactly one executable controller. Non-executable JSON data blocks
+    # (e.g., the Phase 3 palette index `<script type="application/json">`)
+    # don't count — they're data, not behaviour — but the privacy gate
+    # still forbids any other executable tag.
+    assert html.count("<script>") == 1, "Expected exactly one executable <script> tag (no type=)."
+    # Total <script> opens may include non-executable JSON data blocks.
+    open_total = html.count("<script ") + html.count("<script>")
+    close_total = html.count("</script>")
+    assert open_total == close_total, "Open/close <script> mismatch"
+    # Any extra script tags must be JSON data blocks, never executable.
+    import re
+
+    other_scripts = re.findall(r"<script\s+([^>]*)>", html)
+    for attrs in other_scripts:
+        assert 'type="application/json"' in attrs, (
+            f"Unexpected non-JSON script tag with attrs {attrs!r}"
+        )
     # The toolbar landmark and the save button anchor are both present.
     assert 'class="cal-tweaks-panel"' in html
     assert 'id="cal-save-snapshot"' in html
 
 
-def test_interactive_includes_both_rhythm_bodies(demo_dashboard) -> None:
-    """With interactive mode the file embeds both rhythms; CSS swaps them."""
+def test_interactive_embeds_only_requested_rhythm(demo_dashboard) -> None:
+    """Phase 3 polish (Terminal removed from the visible UI): interactive
+    mode only embeds the rhythm the caller asked for. The unselected
+    rhythm is no longer carried as dead weight, and the Terminal toggle
+    is gone from the tweaks panel."""
     html = render_dashboard(demo_dashboard, interactive=True, rhythm="receipt")
     assert 'class="cal-rhythm-receipt"' in html
-    assert 'class="cal-rhythm-terminal"' in html
-    # The initial active rhythm is set via the body data-attr.
+    assert 'class="cal-rhythm-terminal"' not in html
     assert 'data-rhythm="receipt"' in html
-    # Both masthead variants appear (only one is visible, the other hidden).
-    assert "Cost layer for AI-assisted development" in html  # receipt
-    assert "OFFLINE" in html  # terminal
+    assert "Cost layer for AI-assisted development" in html
+    # The Terminal toggle no longer appears in the tweaks panel.
+    assert 'data-toggle="rhythm"' not in html
+    assert ">Terminal<" not in html
+
+    # Terminal rhythm still works for callers who explicitly ask for it.
+    html_term = render_dashboard(demo_dashboard, interactive=True, rhythm="terminal")
+    assert 'class="cal-rhythm-terminal"' in html_term
+    assert 'class="cal-rhythm-receipt"' not in html_term
+    assert "OFFLINE" in html_term
 
 
 def test_interactive_script_has_no_network_apis(demo_dashboard) -> None:

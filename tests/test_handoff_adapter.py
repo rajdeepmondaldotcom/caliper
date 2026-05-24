@@ -190,6 +190,50 @@ def test_build_handoff_dashboard_decimal_to_float(monkeypatch, tmp_path) -> None
     assert {row.dimension for row in d.usage_mix} >= {"vendor", "model/tier", "tier", "source"}
 
 
+def test_build_handoff_dashboard_reuses_expensive_inputs_and_reports_progress(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _write_session(tmp_path, [_row(i=i) for i in range(1, 4)])
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    options = _options(tmp_path)
+    result = load_usage(options)
+    calls = {"audit": 0, "agents": 0, "skills": 0}
+
+    def fake_run_audit(*_args, **_kwargs):
+        calls["audit"] += 1
+        return []
+
+    def fake_agents(*_args, **_kwargs):
+        calls["agents"] += 1
+        return []
+
+    def fake_skills(*_args, **_kwargs):
+        calls["skills"] += 1
+        return []
+
+    class RecordingProgress:
+        def __init__(self) -> None:
+            self.details: list[str] = []
+
+        def stage_advance(self, n: int = 1, detail: str | None = None) -> None:
+            del n
+            if detail:
+                self.details.append(detail)
+
+    monkeypatch.setattr("caliper.dashboards.adapter.run_audit", fake_run_audit)
+    monkeypatch.setattr("caliper.dashboards.adapter.build_agent_attributions", fake_agents)
+    monkeypatch.setattr("caliper.dashboards.adapter.build_skill_attributions", fake_skills)
+
+    progress = RecordingProgress()
+    build_handoff_dashboard(result, options, with_deltas=False, progress=progress)
+
+    assert calls == {"audit": 1, "agents": 1, "skills": 1}
+    assert progress.details[:3] == ["totals", "daily shape", "models"]
+    assert "insights" in progress.details
+    assert "forecasts" in progress.details
+
+
 def test_usage_mix_keeps_codex_fast_reasoning_tiers_costed(tmp_path) -> None:
     def event(*, service_tier: str, reasoning_effort: str = "") -> UsageEvent:
         return UsageEvent(

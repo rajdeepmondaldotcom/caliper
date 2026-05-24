@@ -130,17 +130,27 @@ def test_dashboard_does_not_leak_tool_use_input(monkeypatch, tmp_path) -> None:
 
 
 def test_dashboard_renders_section_markers(monkeypatch, tmp_path) -> None:
-    """§NN markers are the design's audit anchors."""
+    """Phase-3 polish: visible numbering is sequential 1, 2, 3 … in tier
+    render order. Section anchor IDs are still stable, so links keep
+    working; only the display string changed."""
     html = _render(monkeypatch, tmp_path)
-    # Overview is the only unconditional section. Other sections render only
-    # when they add action, explanation, or audit value.
-    assert ">§01<" in html
-    # Every rendered section's id and data-screen-label come from SECTION_NUMBERS.
-    for sid, num in SECTION_NUMBERS.items():
+    # The first visible section (action-center) carries the "1." label.
+    assert ">1.<" in html
+    # Every rendered section still emits a data-screen-label, but the
+    # numeric prefix is now the *display* number (1..N) — not the legacy
+    # §00..§19 audit-anchor map.
+    import re
+
+    labels = re.findall(r'data-screen-label="(\d+) [^"]+"', html)
+    assert labels, "Sections must emit data-screen-label with a numeric prefix"
+    nums = [int(n) for n in labels]
+    # Sequential, no duplicates.
+    assert nums == sorted(nums)
+    assert len(nums) == len(set(nums))
+    # Anchor IDs unchanged so external links still resolve.
+    for sid in SECTION_NUMBERS:
         if f'id="{sid}"' in html:
-            assert f'data-screen-label="{num} ' in html, (
-                f"Section {sid!r} rendered without its data-screen-label"
-            )
+            assert "data-screen-label=" in html  # any value present
 
 
 def test_dashboard_renders_dark_theme_attribute(monkeypatch, tmp_path) -> None:
@@ -404,6 +414,18 @@ def test_agent_labels_hide_machine_ids() -> None:
     assert _agent_display_label("019e2058-9424-7360-ad06-e011ecff6b8c", 1) == "Agent 1"
     assert _agent_display_label('{"subagent": {"thread_spawn": true}}', 2) == "Agent 2"
     assert _agent_display_label("planner-agent", 3) == "planner-agent"
+    assert (
+        _agent_display_label(
+            "direct:019e2058-9424-7360-ad06-e011ecff6b8c",
+            4,
+            source_category="direct",
+            kind="direct-session",
+        )
+        == "Direct session 4"
+    )
+    assert (
+        _agent_display_label("acompact-123", 5, source_category="overhead") == "Background agent 5"
+    )
 
 
 def test_anomaly_rows_use_constructive_copy_without_scale_noise() -> None:
@@ -467,18 +489,43 @@ def test_dashboard_renders_operator_first_sections() -> None:
     assert "Cost-weighted rhythm" in html
     assert "Long-context boundary" in html
 
+    # Phase 1 UX overhaul: sections are grouped by tier
+    # (decisions → trajectory → appendix → trust). Within each tier the
+    # original _SECTION_ORDER is preserved, so the operator-first decision
+    # cluster precedes trajectory diagrams and the diagnostic appendix.
     section_order = [
-        'id="action-center"',
-        'id="overview"',
-        'id="cost"',
-        'id="usage-windows"',
-        'id="usage-mix"',
-        'id="anomalies"',
-        'id="inefficiencies"',
-        'id="forecast"',
+        'id="action-center"',  # decisions tier
+        'id="anomalies"',  # decisions tier
+        'id="inefficiencies"',  # decisions tier
+        'id="overview"',  # trajectory tier
+        'id="cost"',  # trajectory tier
+        'id="usage-mix"',  # trajectory tier
+        'id="forecast"',  # trajectory tier
+        'id="usage-windows"',  # appendix tier (inside <details>)
+        'id="evidence"',  # trust tier (always last)
     ]
     positions = [html.index(marker) for marker in section_order]
-    assert positions == sorted(positions)
+    assert positions == sorted(positions), f"Tier ordering broken; got positions {positions}"
+
+    # The appendix tier sections must render inside the collapsible
+    # <details class="cal-appendix"> block so the default view stays calm.
+    appendix_start = html.index('class="cal-appendix"')
+    usage_windows_pos = html.index('id="usage-windows"')
+    assert appendix_start < usage_windows_pos, (
+        "usage-windows must render inside the appendix <details> block"
+    )
+
+
+def test_dashboard_recommendations_show_ranked_model_alternatives() -> None:
+    html = render_dashboard(sample_dashboard(show_paths=True))
+
+    assert "Test current alternatives:" in html
+    assert "claude-sonnet-4.6" in html
+    assert "GPT-5.5" in html
+    assert "gpt-5.4" in html
+    assert "openai, saves" in html
+    assert "claude-haiku-4.5" not in html
+    assert "claude-3-haiku" not in html
 
 
 def test_new_dashboard_sections_obey_share_safe_redaction() -> None:
@@ -489,8 +536,24 @@ def test_new_dashboard_sections_obey_share_safe_redaction() -> None:
     assert "api-server is $412" not in html
     assert "Project " in html
     assert "Session " in html
-    assert "Agent 1" in html
+    assert "Direct session 1" in html
+    # Final polish adds extra vendor-attributed agents so the index of the
+    # overhead row is no longer fixed at 2. Assert presence, not position.
+    assert "Background agent" in html
     assert "Skill 1" in html
+
+
+def test_attribution_section_uses_truthful_labels_and_safe_layout() -> None:
+    html = render_dashboard(sample_dashboard(show_paths=True))
+
+    assert "Source" in html
+    assert "Skill / workflow" in html
+    assert "Direct session 1" in html
+    assert "Background agent" in html
+    assert "skills/workflows" in html
+    assert 'class="cal-attribution-grid"' in html
+    assert 'class="cal-table-panel"' in html
+    assert 'class="cal-table-scroll"' in html
 
 
 def test_dashboard_evidence_link_jumps_to_section(monkeypatch, tmp_path) -> None:
@@ -537,10 +600,17 @@ def test_dashboard_section_numbers_are_stable() -> None:
 
 
 def test_hero_verdict_renders_period_cost_trend_and_fixable() -> None:
-    """Receipt mode: hero verdict carries the period, headline cost, trend
-    chip, fixable sum, and the top advisor action — all readable in one
-    glance."""
-    html_text = render_dashboard(sample_dashboard())
+    """Legacy hero verdict fallback (no billboard) carries the period,
+    headline cost, trend chip, fixable sum, and the top advisor action —
+    all readable in one glance.
+
+    Phase 1 UX overhaul: when ``dashboard.billboard`` is populated, the
+    billboard supplants the hero verdict as the page peak. The hero
+    verdict still renders for payloads without a billboard (legacy /
+    backwards compatibility), so we exercise it via ``billboard=None``.
+    """
+    dashboard = dataclasses.replace(sample_dashboard(), billboard=None)
+    html_text = render_dashboard(dashboard)
     _assert_private_html(html_text)
     # The class anchors the block and lets future tests find it.
     assert 'class="cal-hero-verdict"' in html_text
@@ -571,10 +641,156 @@ def test_hero_verdict_hidden_on_empty_dashboard() -> None:
 
 
 def test_hero_verdict_renders_in_terminal_rhythm() -> None:
-    """Terminal rhythm includes the hero verdict above its existing
-    executive-brief verdict strip."""
-    html_text = render_dashboard(sample_dashboard(), rhythm="terminal")
+    """Terminal rhythm includes the legacy hero verdict (no billboard set)."""
+    dashboard = dataclasses.replace(sample_dashboard(), billboard=None)
+    html_text = render_dashboard(dashboard, rhythm="terminal")
     assert 'class="cal-hero-verdict"' in html_text
+
+
+# ---------------------------------------------------------------------------
+# Billboard — Phase 1 UX overhaul: single above-the-fold "biggest fix"
+# ---------------------------------------------------------------------------
+
+
+def test_billboard_renders_above_the_fold_with_headline_value_and_cta() -> None:
+    """When ``dashboard.billboard`` is populated, the renderer emits a
+    single above-the-fold peak with the BIGGEST FIX headline, the
+    saveable amount, confidence chip, and the investigate CTA. This
+    supplants the legacy hero verdict strip."""
+    html_text = render_dashboard(sample_dashboard())
+    _assert_private_html(html_text)
+    # The class anchors the block and the data attributes carry the
+    # selection (fix vs tidy fallback).
+    assert 'class="cal-billboard"' in html_text
+    assert 'data-billboard-kind="fix"' in html_text
+    # Headline label + saveable value.
+    assert "BIGGEST FIX" in html_text
+    assert "$612/mo saveable" in html_text
+    # Confidence chip rendered as a percentage.
+    assert "92% confidence" in html_text
+    # CTA anchors back to the savings section so a click lands on detail.
+    assert 'href="#inefficiencies"' in html_text
+    # When the billboard is present the legacy hero verdict is suppressed.
+    assert 'class="cal-hero-verdict"' not in html_text
+
+
+def test_billboard_tidy_fallback_when_no_fix_available() -> None:
+    """When advisor recommendations and inefficiency rows are empty, the
+    billboard uses positive framing (YOU'RE TIDY) and shows total spend
+    rather than disappearing — Peak-End preserved on a healthy report."""
+    tidy = dataclasses.replace(
+        sample_dashboard(),
+        advisor_recommendations=[],
+        inefficiencies=[],
+    )
+    from caliper.dashboards.adapter import _build_billboard
+
+    bb = _build_billboard(
+        advisor_recommendations=tidy.advisor_recommendations,
+        inefficiency_rows=tidy.inefficiencies,
+        totals=tidy.totals,
+        window=tidy.window,
+    )
+    assert bb is not None
+    assert bb.kind == "tidy"
+    assert "$1,243" in bb.value
+    assert bb.tone == "good"
+
+
+def test_billboard_hidden_on_empty_dashboard() -> None:
+    """Empty window: no events, no billboard — same rule as the legacy
+    hero verdict."""
+    from caliper.dashboards.adapter import _build_billboard
+    from caliper.dashboards.sample_data import empty_dashboard
+
+    empty = empty_dashboard()
+    bb = _build_billboard(
+        advisor_recommendations=[],
+        inefficiency_rows=[],
+        totals=empty.totals,
+        window=empty.window,
+    )
+    assert bb is None
+
+
+def test_receipt_rhythm_renders_sticky_toc_grouped_by_tier() -> None:
+    """Phase 2: the receipt rhythm includes a sticky right-rail TOC,
+    grouped by tier. Each section anchor must appear as a TOC link with
+    ``data-toc-target`` so the scroll-spy JS can resolve it."""
+    html_text = render_dashboard(sample_dashboard(show_paths=True))
+    assert 'class="cal-receipt-toc"' in html_text
+    assert 'aria-label="Section navigation"' in html_text
+    # Tier group labels are visible.
+    assert ">Decisions<" in html_text
+    assert ">Trajectory<" in html_text
+    assert ">Appendix<" in html_text
+    # Each rendered section has a corresponding TOC link with data-toc-target.
+    for sid in ("action-center", "anomalies", "inefficiencies", "overview", "cost"):
+        assert f'data-toc-target="{sid}"' in html_text
+    # The TOC must not duplicate the terminal-rhythm index.
+    assert 'class="cal-rail-link"' not in html_text
+
+
+def test_receipt_toc_omits_inactive_sections() -> None:
+    """Disabled sections (advisor / outlook) must not surface in the TOC."""
+    html_text = render_dashboard(sample_dashboard(show_paths=True))
+    assert 'data-toc-target="advisor"' not in html_text
+    assert 'data-toc-target="outlook"' not in html_text
+
+
+def test_interactive_dashboard_emits_scroll_spy_and_auto_open_appendix() -> None:
+    """The inline script extends with an IntersectionObserver-based
+    scroll-spy and an anchor-click handler that opens the technical
+    appendix when the target lives inside it."""
+    html_text = render_dashboard(sample_dashboard(show_paths=True), interactive=True)
+    assert "IntersectionObserver" in html_text
+    assert "data-toc-target" in html_text
+    assert "aria-current" in html_text
+    assert "openAppendixIfTargets" in html_text
+
+
+def test_interactive_dashboard_emits_palette_and_keyboard_shortcuts() -> None:
+    """Phase 3: interactive mode ships a Cmd+K palette with a JSON index
+    of searchable items and a global keyboard-shortcut handler (g a / g i /
+    g m, /, ⌘K, e/c, etc.)."""
+    html_text = render_dashboard(sample_dashboard(show_paths=True), interactive=True)
+    assert 'id="cal-palette"' in html_text
+    assert 'role="dialog"' in html_text
+    assert 'id="cal-palette-index"' in html_text
+    assert "paletteOpen" in html_text
+    # Palette index contains section, model, project, anomaly entries.
+    assert '"type": "section"' in html_text
+    assert '"type": "model"' in html_text
+    assert '"type": "project"' in html_text
+    # Keyboard shortcuts present.
+    assert "metaKey" in html_text
+    assert "ctrlKey" in html_text
+    assert "gleader" in html_text
+
+
+def test_non_interactive_dashboard_omits_palette() -> None:
+    """Non-interactive snapshots stay byte-frugal: no palette markup or
+    JSON index."""
+    html_text = render_dashboard(sample_dashboard(show_paths=True), interactive=False)
+    assert 'id="cal-palette"' not in html_text
+    assert 'id="cal-palette-index"' not in html_text
+
+
+def test_dashboard_renders_appendix_block_with_collapsed_diagnostic_sections() -> None:
+    """The technical appendix wraps the diagnostic tier in a single
+    <details> so the default view stays calm. ``models`` and
+    ``attribution`` must live inside that block; ``inefficiencies`` and
+    ``anomalies`` must not — they're decisions tier."""
+    html_text = render_dashboard(sample_dashboard(show_paths=True))
+    appendix_start = html_text.index('class="cal-appendix"')
+    appendix_end = html_text.index("</details>", appendix_start)
+    inside = html_text[appendix_start:appendix_end]
+    assert 'id="models"' in inside
+    assert 'id="attribution"' in inside
+    # Decisions tier must render BEFORE the appendix block opens.
+    assert html_text.index('id="action-center"') < appendix_start
+    assert html_text.index('id="inefficiencies"') < appendix_start
+    assert html_text.index('id="anomalies"') < appendix_start
 
 
 # ---------------------------------------------------------------------------

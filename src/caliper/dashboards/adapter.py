@@ -22,12 +22,13 @@ from typing import Any
 
 from caliper.aggregation import (
     aggregate_daily,
-    aggregate_events,
+    aggregate_many,
     aggregate_model_mode,
+    aggregate_overview_windows,
     aggregate_projects,
     aggregate_sessions,
     aggregate_total,
-    aggregate_vendors,
+    budget_impact_sort_key,
     event_cost,
 )
 from caliper.analysis.session_shape import (
@@ -58,10 +59,12 @@ from caliper.budgets import (
     evaluate as evaluate_budgets,
 )
 from caliper.dashboards.data_models import (
+    AdvisorAlternative,
     AdvisorRecommendation,
     AgentRow,
     AnomalyRow,
     Banner,
+    BillboardCard,
     BriefFinding,
     BudgetRow,
     CacheLeverageRow,
@@ -106,13 +109,14 @@ from caliper.dashboards.data_models import (
     WindowMeta,
     YearlyHeatmap,
 )
+from caliper.efficiency import rank_recommendations, run_audit
 from caliper.evidence import evidence_dimensions
 from caliper.forecasts import project as project_forecast
 from caliper.health import rate_card_age_days
 from caliper.humanize import human_datetime as _format_human_datetime
 from caliper.humanize import session_label_lookup
 from caliper.inefficiencies import build_inefficiency_findings
-from caliper.insights import build_insights
+from caliper.insights import _inefficiency_insight, build_insights_from
 from caliper.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions
 from caliper.parser import load_usage
 from caliper.predict import (
@@ -128,6 +132,8 @@ from caliper.pricing import RateCard, load_rate_card, model_vendor
 # Constants
 # ---------------------------------------------------------------------------
 
+DASHBOARD_BUILD_STEPS = 14
+
 # Map our `caliper.analysis.session_shape` category constant
 # ("exploration"/"execution"/"diagnostic"/"mixed"/"no-tools") to the
 # handoff's SessionShapeName literal. Same values today; keeping the map
@@ -139,6 +145,13 @@ _SHAPE_NAME_MAP = {
     CATEGORY_MIXED: "mixed",
     CATEGORY_NONE: "no-tools",
 }
+
+
+def _advance_build(progress: Any | None, detail: str) -> None:
+    callback = getattr(progress, "stage_advance", None)
+    if callback is not None:
+        callback(detail=detail)
+
 
 # Severity mapping: our internal insights use "info" / "warn" / "fail";
 # the handoff design speaks "info" / "warn" / "critical".
@@ -182,6 +195,7 @@ def build_handoff_dashboard(
     rolling_result: LoadResult | None = None,
     rolling_options: RuntimeOptions | None = None,
     budget_config: dict[str, Any] | None = None,
+    progress: Any | None = None,
 ) -> Dashboard:
     """Assemble the handoff `Dashboard` payload for `render_dashboard`."""
     from caliper import __version__
@@ -192,6 +206,7 @@ def build_handoff_dashboard(
     total = aggregate_total(result, options, rate_card=rate_card)
     daily_aggregates = aggregate_daily(result, options, rate_card=rate_card)
     shape_report = compute_session_shape(result)
+    _advance_build(progress, "totals")
 
     daily_session_count = _daily_session_counts(result, options)
     daily_points = _build_daily(daily_aggregates, shape_report, options)
@@ -212,6 +227,7 @@ def build_handoff_dashboard(
     )
 
     shape = _build_session_shape(shape_report)
+    _advance_build(progress, "daily shape")
     model_daily_cost = _daily_cost_sparkline_by_key(
         result,
         options,
@@ -222,6 +238,7 @@ def build_handoff_dashboard(
         aggregate_model_mode(result, options, rate_card=rate_card),
         daily_by_model=model_daily_cost,
     )
+    _advance_build(progress, "models")
     project_daily_cost = _daily_cost_sparkline_by_key(
         result,
         options,
@@ -242,19 +259,43 @@ def build_handoff_dashboard(
         daily_by_project=project_daily_cost,
         forecast_bands=project_forecast_bands,
     )
+    _advance_build(progress, "projects")
     anomalies = _build_anomaly_rows(
         result=result,
         options=options,
         rate_card=rate_card,
         daily_aggregates=daily_aggregates,
     )
-    insights = _build_insights(result, options, rate_card)
     forecast = _build_forecast(daily_points, options)
     evidence = _build_evidence(result, total)
     banner = _build_banner(result, options)
     heatmap = _build_yearly_heatmap(result, options)
     recap = _build_recap(result, options, total, by_model)
+    _advance_build(progress, "signals")
+    audit_findings = run_audit(result, options, rate_card) if result.events else []
+    agent_attributions = build_agent_attributions(result, rate_card)
+    skill_attributions = build_skill_attributions(result, rate_card)
+    inefficiency_findings = build_inefficiency_findings(
+        result,
+        options,
+        rate_card,
+        budget_config=budget_config,
+        audit_findings=audit_findings,
+        agents=agent_attributions,
+        skills=skill_attributions,
+    )
+    insights = _build_insights(
+        result,
+        rate_card,
+        total=total,
+        projects=project_aggregates,
+        daily=daily_aggregates,
+        audit_findings=audit_findings,
+        inefficiency_findings=inefficiency_findings,
+    )
+    _advance_build(progress, "insights")
     usage_windows = _build_usage_windows(rolling_source, rolling_runtime, rate_card)
+    _advance_build(progress, "rolling windows")
     impact_cards = _build_impact_cards(
         result=result,
         rolling_result=rolling_source,
@@ -266,17 +307,37 @@ def build_handoff_dashboard(
         rate_card=rate_card,
         budget_config=budget_config,
     )
-    advisor_recommendations = _build_advisor_recommendations(result, rate_card, options)
-    top_sessions = _build_top_sessions(result, options, rate_card)
+    advisor_recommendations = _build_advisor_recommendations(
+        result,
+        rate_card,
+        options,
+        audit_findings=audit_findings,
+    )
+    _advance_build(progress, "recommendations")
+    session_aggregates = aggregate_sessions(result, options, rate_card=rate_card)
+    top_sessions = _build_top_sessions(
+        result,
+        options,
+        rate_card,
+        session_aggregates=session_aggregates,
+    )
     usage_mix = _build_usage_mix(result, options, rate_card)
-    agent_rows = _build_agent_rows(result, rate_card, options=options)
-    skill_rows = _build_skill_rows(result, rate_card)
+    _advance_build(progress, "usage mix")
+    agent_rows = _build_agent_rows(
+        result,
+        rate_card,
+        options=options,
+        attributions=agent_attributions,
+    )
+    skill_rows = _build_skill_rows(result, rate_card, attributions=skill_attributions)
     inefficiency_rows = _build_inefficiency_rows(
         result,
         options,
         rate_card,
         budget_config=budget_config,
+        findings=inefficiency_findings,
     )
+    _advance_build(progress, "attribution")
     forecast_drivers = _build_forecast_drivers(
         by_project=by_project,
         by_model=by_model,
@@ -319,6 +380,7 @@ def build_handoff_dashboard(
         quality_score=quality_score,
         comparisons=comparisons,
     )
+    _advance_build(progress, "decisions")
     executive_brief = _build_executive_brief(
         totals=totals,
         usage_windows=usage_windows,
@@ -329,10 +391,16 @@ def build_handoff_dashboard(
     tier_provenance = _build_tier_provenance(result)
     outlook = _build_outlook(daily_points)
     model_forecasts = _build_model_forecasts(result, options, rate_card, by_model)
-    cache_leverage = _build_cache_leverage(result, options, rate_card)
+    cache_leverage = _build_cache_leverage(
+        result,
+        options,
+        rate_card,
+        session_aggregates=session_aggregates,
+    )
     long_context_histogram = _build_long_context_histogram(result, rate_card)
     cohort_deltas = _build_cohort_deltas(result, options, rate_card, total) if with_deltas else []
     budgets = _build_budget_rows(result, options, rate_card, budget_config)
+    _advance_build(progress, "forecasts")
 
     # v2 design: the verdict strip shows up to 4 findings sorted by tone, so
     # cap here. The renderer also slices defensively, but enforcing it in the
@@ -340,9 +408,17 @@ def build_handoff_dashboard(
     if executive_brief is not None and executive_brief.findings:
         executive_brief = _cap_brief_findings(executive_brief, limit=4)
 
+    window = _build_window(options, result)
+    billboard = _build_billboard(
+        advisor_recommendations=advisor_recommendations,
+        inefficiency_rows=inefficiency_rows,
+        totals=totals,
+        window=window,
+    )
+
     return Dashboard(
         caliper=CaliperMeta(version=__version__, schema_version=3),
-        window=_build_window(options, result),
+        window=window,
         generated_at=(generated_at or dt.datetime.now(tz=dt.UTC)).isoformat(timespec="seconds"),
         totals=totals,
         daily=daily_points,
@@ -380,6 +456,7 @@ def build_handoff_dashboard(
         long_context_histogram=long_context_histogram,
         cohort_deltas=cohort_deltas,
         budgets=budgets,
+        billboard=billboard,
     )
 
 
@@ -401,6 +478,129 @@ def _cap_brief_findings(brief: ExecutiveBrief, *, limit: int) -> ExecutiveBrief:
         subtitle=brief.subtitle,
         tone=brief.tone,
         findings=capped,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Billboard — the single above-the-fold "biggest fix" headline (Phase 1 UX)
+# ---------------------------------------------------------------------------
+
+_INEFF_CONFIDENCE_PCT = {"high": 90, "medium": 70, "low": 50}
+
+
+def _fmt_money_compact(amount: float) -> str:
+    """Compact money for the billboard: $1,243 / $612 / $0.85.
+
+    Round to whole dollars at >= $1 so the page peak doesn't show fake
+    precision (savings are estimates). Sub-dollar amounts keep cents.
+    """
+    if amount >= 1:
+        return "$" + format(int(round(amount)), ",")
+    return "$" + format(float(amount), ".2f")
+
+
+def _first_sentence(text: str, *, max_chars: int = 140) -> str:
+    """First sentence (or first clause) of detail copy, capped to ``max_chars``.
+
+    The billboard rationale must read at a glance, so we trim aggressively.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    cut = raw
+    for delim in (". ", " · ", " — "):
+        idx = cut.find(delim)
+        if 0 < idx < max_chars:
+            cut = cut[:idx]
+            break
+    if len(cut) > max_chars:
+        cut = cut[: max_chars - 1].rstrip() + "…"
+    return cut.rstrip(".")
+
+
+def _build_billboard(
+    *,
+    advisor_recommendations: list[AdvisorRecommendation],
+    inefficiency_rows: list[InefficiencyRow],
+    totals: Totals,
+    window: WindowMeta,
+) -> BillboardCard | None:
+    """Pick the single highest-leverage fix and shape it for above-the-fold display.
+
+    Preference order:
+    1. Highest ``savings_usd × confidence`` from advisor recommendations.
+    2. Highest ``impact_usd`` (× string-mapped confidence) from inefficiency rows.
+    3. Tidy fallback — "no fix detected" + total spend for the window.
+    4. ``None`` when the window has zero events (nothing to say).
+    """
+    if totals is None or totals.events == 0:
+        return None
+
+    best_advisor: AdvisorRecommendation | None = None
+    best_advisor_score = 0.0
+    for rec in advisor_recommendations or []:
+        savings = float(rec.savings_usd or 0.0)
+        if savings <= 0:
+            continue
+        score = savings * max(float(rec.confidence or 0.0), 0.1)
+        if score > best_advisor_score:
+            best_advisor = rec
+            best_advisor_score = score
+
+    if best_advisor is not None:
+        conf_pct = int(round(max(0.0, min(1.0, best_advisor.confidence or 0.0)) * 100))
+        return BillboardCard(
+            kind="fix",
+            headline="BIGGEST FIX",
+            value=f"{_fmt_money_compact(best_advisor.savings_usd)} saveable",
+            rationale=_first_sentence(best_advisor.detail) or best_advisor.title,
+            cta_label="Investigate",
+            cta_anchor="inefficiencies",
+            confidence_pct=conf_pct or None,
+            command=best_advisor.action or "",
+            tone="warn" if best_advisor.tone in ("warn", "critical") else "neutral",
+        )
+
+    best_ineff: InefficiencyRow | None = None
+    best_ineff_score = 0.0
+    for row in inefficiency_rows or []:
+        impact = float(row.impact_usd or 0.0)
+        if impact <= 0:
+            continue
+        conf_mult = _INEFF_CONFIDENCE_PCT.get((row.confidence or "").lower(), 60) / 100.0
+        score = impact * max(conf_mult, 0.1)
+        if score > best_ineff_score:
+            best_ineff = row
+            best_ineff_score = score
+
+    if best_ineff is not None:
+        conf_pct = _INEFF_CONFIDENCE_PCT.get((best_ineff.confidence or "").lower())
+        return BillboardCard(
+            kind="fix",
+            headline="BIGGEST FIX",
+            value=f"{_fmt_money_compact(best_ineff.impact_usd)} saveable",
+            rationale=_first_sentence(best_ineff.detail) or best_ineff.title,
+            cta_label="Investigate",
+            cta_anchor="inefficiencies",
+            confidence_pct=conf_pct,
+            command=best_ineff.action or "",
+            tone="warn" if best_ineff.severity in ("warn", "fail", "critical") else "neutral",
+        )
+
+    # Tidy fallback — positive framing so the page never feels empty.
+    return BillboardCard(
+        kind="tidy",
+        headline="YOU'RE TIDY",
+        value=f"{_fmt_money_compact(totals.cost_usd)} spend",
+        rationale=(
+            f"No fixable waste detected in the {window.label.lower()}. "
+            "Keep an eye on the trajectory below."
+        ),
+        cta_label="Open evidence",
+        cta_anchor="evidence",
+        confidence_pct=None,
+        command="",
+        tone="good",
     )
 
 
@@ -682,17 +882,22 @@ def _build_usage_windows(
 ) -> list[UsageWindow]:
     out: list[UsageWindow] = []
     end = options.end
-    for days in ROLLING_USAGE_DAYS:
+    windows = [(f"Last {days} days", end - dt.timedelta(days=days)) for days in ROLLING_USAGE_DAYS]
+    aggregates, _total = aggregate_overview_windows(
+        result,
+        options,
+        windows,
+        rate_card=rate_card,
+    )
+    daily_by_day = {agg.label: agg for agg in aggregate_daily(result, options, rate_card=rate_card)}
+    active_days = _active_days_by_window(result, options, windows)
+    for days, total in zip(ROLLING_USAGE_DAYS, aggregates, strict=True):
         start = end - dt.timedelta(days=days)
         window_options = dataclasses.replace(options, start=start, end=end)
-        scoped = _scoped_result(result, start=start, end=end)
-        total = aggregate_total(
-            scoped,
+        daily_cost, daily_tokens = _daily_window_sparklines_from_aggregates(
+            daily_by_day,
             window_options,
-            label=f"Last {days} days",
-            rate_card=rate_card,
         )
-        daily_cost, daily_tokens = _daily_window_sparklines(scoped, window_options, rate_card)
         input_tokens = total.totals.input_tokens
         cache_hit_rate = total.totals.cached_input_tokens / input_tokens if input_tokens else 0.0
         out.append(
@@ -710,7 +915,7 @@ def _build_usage_windows(
                 events=total.totals.events,
                 sessions=len(total.session_ids),
                 cache_hit_rate=cache_hit_rate,
-                active_days=_active_day_count(scoped.events, window_options),
+                active_days=len(active_days[days]),
                 daily_cost_sparkline=daily_cost,
                 daily_token_sparkline=daily_tokens,
             )
@@ -729,10 +934,16 @@ def _daily_window_sparklines(
     options: RuntimeOptions,
     rate_card: RateCard,
 ) -> tuple[list[float], list[float]]:
+    daily_by_day = {agg.label: agg for agg in aggregate_daily(result, options, rate_card=rate_card)}
+    return _daily_window_sparklines_from_aggregates(daily_by_day, options)
+
+
+def _daily_window_sparklines_from_aggregates(
+    daily_by_day: dict[str, Aggregate],
+    options: RuntimeOptions,
+) -> tuple[list[float], list[float]]:
     from caliper.timeutil import load_timezone
 
-    daily = aggregate_daily(result, options, rate_card=rate_card)
-    by_day = {agg.label: agg for agg in daily}
     tz = load_timezone(options.timezone)
     day = options.start.astimezone(tz).date()
     end = options.end.astimezone(tz).date()
@@ -740,11 +951,28 @@ def _daily_window_sparklines(
     tokens: list[float] = []
     while day < end:
         key = day.isoformat()
-        agg = by_day.get(key)
+        agg = daily_by_day.get(key)
         cost.append(float(agg.costs.cost_usd) if agg else 0.0)
         tokens.append(float(agg.totals.total_tokens) if agg else 0.0)
         day = day + dt.timedelta(days=1)
     return cost, tokens
+
+
+def _active_days_by_window(
+    result: LoadResult,
+    options: RuntimeOptions,
+    windows: list[tuple[str, dt.datetime]],
+) -> dict[int, set[str]]:
+    from caliper.timeutil import load_timezone
+
+    tz = load_timezone(options.timezone)
+    out = {days: set() for days in ROLLING_USAGE_DAYS}
+    for event in result.events:
+        day = event.timestamp.astimezone(tz).date().isoformat()
+        for days, (_label, start) in zip(ROLLING_USAGE_DAYS, windows, strict=True):
+            if start <= event.timestamp < options.end:
+                out[days].add(day)
+    return out
 
 
 def _active_day_count(events, options: RuntimeOptions) -> int:
@@ -952,10 +1180,24 @@ def _project_trend_label(series: list[float]) -> tuple[str, str]:
 
 def _build_insights(
     result: LoadResult,
-    options: RuntimeOptions,
     rate_card: Any,
+    *,
+    total: Aggregate,
+    projects: list[Aggregate],
+    daily: list[Aggregate],
+    audit_findings: list[Any],
+    inefficiency_findings: list[Any],
 ) -> list[Insight]:
-    raw = build_insights(result, options, rate_card=rate_card)[:10]
+    raw = build_insights_from(
+        result=result,
+        rate_card=rate_card,
+        total=total,
+        projects=projects,
+        daily=daily,
+        audit_findings=audit_findings,
+    )
+    raw.extend(_inefficiency_insight(item) for item in inefficiency_findings[:3])
+    raw = sorted(raw, key=lambda item: (-item.priority, item.title))[:10]
     return [
         Insight(
             severity=_SEVERITY_MAP.get(item.severity, "info"),  # type: ignore[arg-type]
@@ -1204,6 +1446,8 @@ def _build_advisor_recommendations(
     result: LoadResult,
     rate_card: RateCard,
     options: RuntimeOptions | None = None,
+    *,
+    audit_findings: list[Any] | None = None,
 ) -> list[AdvisorRecommendation]:
     """Surface the highest-value arbitrage and efficiency recommendations.
 
@@ -1229,9 +1473,19 @@ def _build_advisor_recommendations(
                 sessions=rec.sessions,
                 tone=tone,
                 savings_usd=savings,
+                alternatives=tuple(
+                    AdvisorAlternative(
+                        model=item.model,
+                        vendor=item.vendor,
+                        projected_cost_usd=float(Decimal(item.projected_cost_usd_exact or "0")),
+                        savings_usd=float(Decimal(item.estimated_savings_usd_exact or "0")),
+                        events=item.events,
+                    )
+                    for item in rec.alternatives
+                ),
             )
         )
-    rows.extend(_efficiency_advisor_rows(result, rate_card, options))
+    rows.extend(_efficiency_advisor_rows(result, rate_card, options, audit_findings=audit_findings))
     return sorted(rows, key=lambda row: (-row.savings_usd, -row.confidence, -row.events))
 
 
@@ -1239,16 +1493,16 @@ def _efficiency_advisor_rows(
     result: LoadResult,
     rate_card: RateCard,
     options: RuntimeOptions | None,
+    *,
+    audit_findings: list[Any] | None = None,
 ) -> list[AdvisorRecommendation]:
     """Adapt :mod:`caliper.efficiency` findings into advisor rows."""
     if options is None:
         return []
     try:
-        from caliper.efficiency import rank_recommendations, run_audit
-    except ImportError:
-        return []
-    try:
-        findings = run_audit(result, options, rate_card)
+        findings = (
+            audit_findings if audit_findings is not None else run_audit(result, options, rate_card)
+        )
     except Exception:
         return []
     recs = rank_recommendations(findings, top=5)
@@ -1279,6 +1533,8 @@ def _build_top_sessions(
     result: LoadResult,
     options: RuntimeOptions,
     rate_card: RateCard,
+    *,
+    session_aggregates: list[Aggregate] | None = None,
 ) -> list[SessionRow]:
     """Cost/token/tool outliers, deduped by upstream session identity."""
     if not result.events:
@@ -1294,7 +1550,8 @@ def _build_top_sessions(
         )
 
     rows: list[SessionRow] = []
-    for agg in aggregate_sessions(result, options, rate_card=rate_card)[:10]:
+    aggregates = session_aggregates or aggregate_sessions(result, options, rate_card=rate_card)
+    for agg in aggregates[:10]:
         raw_label = _session_label(agg.label, agg.key)
         label = _human_session_label(
             agg.first_seen,
@@ -1467,23 +1724,17 @@ def _build_usage_mix(
         tier = _tier_with_reasoning_label(event)
         return f"{model}\0{tier}", f"{model} / {tier}"
 
+    vendor_aggs, model_tier_aggs, tier_aggs, source_aggs = aggregate_many(
+        result.events,
+        [vendor_key, model_tier_key, tier_key, source_key],
+        options,
+        rate_card=rate_card,
+    )
     dimensions = [
-        ("vendor", aggregate_vendors(result, options, rate_card=rate_card), vendor_key),
-        (
-            "model/tier",
-            aggregate_events(result.events, model_tier_key, options, rate_card=rate_card),
-            model_tier_key,
-        ),
-        (
-            "tier",
-            aggregate_events(result.events, tier_key, options, rate_card=rate_card),
-            tier_key,
-        ),
-        (
-            "source",
-            aggregate_events(result.events, source_key, options, rate_card=rate_card),
-            source_key,
-        ),
+        ("vendor", sorted(vendor_aggs, key=budget_impact_sort_key), vendor_key),
+        ("model/tier", sorted(model_tier_aggs, key=budget_impact_sort_key), model_tier_key),
+        ("tier", sorted(tier_aggs, key=budget_impact_sort_key), tier_key),
+        ("source", sorted(source_aggs, key=budget_impact_sort_key), source_key),
     ]
     total_cost = sum(float(agg.costs.cost_usd) for _, aggs, _ in dimensions[:1] for agg in aggs)
     if total_cost <= 0:
@@ -1522,10 +1773,14 @@ def _build_agent_rows(
     rate_card: RateCard,
     *,
     options: RuntimeOptions | None = None,
+    attributions: list[Any] | None = None,
 ) -> list[AgentRow]:
     daily_by_agent = _per_agent_daily_cost(result, rate_card, options) if options else {}
     rows: list[AgentRow] = []
-    for row in build_agent_attributions(result, rate_card)[:12]:
+    source_rows = (
+        attributions if attributions is not None else build_agent_attributions(result, rate_card)
+    )
+    for row in source_rows[:12]:
         rows.append(
             AgentRow(
                 agent_id=row.agent_id,
@@ -1676,9 +1931,17 @@ def _build_cohort_deltas(
     ]
 
 
-def _build_skill_rows(result: LoadResult, rate_card: RateCard) -> list[SkillRow]:
+def _build_skill_rows(
+    result: LoadResult,
+    rate_card: RateCard,
+    *,
+    attributions: list[Any] | None = None,
+) -> list[SkillRow]:
     rows: list[SkillRow] = []
-    for row in build_skill_attributions(result, rate_card)[:12]:
+    source_rows = (
+        attributions if attributions is not None else build_skill_attributions(result, rate_card)
+    )
+    for row in source_rows[:12]:
         rows.append(
             SkillRow(
                 name=row.name,
@@ -1700,15 +1963,19 @@ def _build_inefficiency_rows(
     rate_card: RateCard,
     *,
     budget_config: dict[str, Any] | None,
+    findings: list[Any] | None = None,
 ) -> list[InefficiencyRow]:
     rows: list[InefficiencyRow] = []
     prompt_rot_curve_data = _median_prompt_rot_curve(result)
-    for finding in build_inefficiency_findings(
-        result,
-        options,
-        rate_card,
-        budget_config=budget_config,
-    )[:12]:
+    source_findings = findings
+    if source_findings is None:
+        source_findings = build_inefficiency_findings(
+            result,
+            options,
+            rate_card,
+            budget_config=budget_config,
+        )
+    for finding in source_findings[:12]:
         curve = prompt_rot_curve_data if finding.code == "PROMPT_ROT" else ()
         rows.append(
             InefficiencyRow(
@@ -1768,6 +2035,7 @@ def _build_cache_leverage(
     rate_card: RateCard,
     *,
     top_n: int = 8,
+    session_aggregates: list[Aggregate] | None = None,
 ) -> list[CacheLeverageRow]:
     """Rank sessions by how much cache savings their cached input produced.
 
@@ -1776,7 +2044,7 @@ def _build_cache_leverage(
     """
     if not result.events:
         return []
-    session_aggs = aggregate_sessions(result, options, rate_card=rate_card)
+    session_aggs = session_aggregates or aggregate_sessions(result, options, rate_card=rate_card)
     rows: list[CacheLeverageRow] = []
     for agg in session_aggs:
         totals = agg.totals

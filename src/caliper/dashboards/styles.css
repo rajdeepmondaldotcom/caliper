@@ -62,6 +62,16 @@
 
   --row-pad-y: 12px;
   --row-pad-x: 16px;
+
+  /* Phase 1 UX overhaul — single spacing scale (4/8/12/16/24/32) used by
+     billboard, severity chips, appendix block. Older sections still use
+     their own paddings; new components should reach for these tokens. */
+  --sp-xxs: 4px;
+  --sp-xs: 8px;
+  --sp-s: 12px;
+  --sp-m: 16px;
+  --sp-l: 24px;
+  --sp-xl: 32px;
 }
 
 /* Light theme */
@@ -272,6 +282,13 @@ table { font-variant-numeric: tabular-nums lining-nums; }
      "claude-/sonnet-4-6 ·/standard". */
   table-layout: auto;
 }
+.cal-table-panel,
+.cal-attribution-grid > * {
+  min-width: 0;
+}
+.cal-table-scroll {
+  max-width: 100%;
+}
 .cal-table th,
 .cal-table td {
   vertical-align: middle;
@@ -338,13 +355,13 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 }
 
 /* Section spacing */
-section[id] { scroll-margin-top: 24px; }
+section[id] { scroll-margin-top: 36px; }
 
-/* Terminal left-rail link hover + :target highlight when an anchor is active */
+/* Terminal left-rail link hover. The legacy ``section[id]:target`` inset
+   rail was removed because it visually collided with the section-number
+   column at x=0. The TOC's ``aria-current="location"`` already shows the
+   reader where they are; no need to double-mark inside the section. */
 .cal-rail-link:hover { color: var(--accent) !important; background: var(--accent-tint); }
-section[id]:target > [class*="cal-section-head"] {
-  box-shadow: inset 3px 0 0 var(--accent);
-}
 
 /* Mobile responsive — when wrapping element has data-viewport=mobile */
 [data-viewport="mobile"] .cal-summary-row { grid-template-columns: 1fr 1fr !important; }
@@ -387,14 +404,28 @@ section[id]:target > [class*="cal-section-head"] {
   }
   .cal-anomaly-row {
     grid-template-columns: 1fr !important;
-    gap: 10px !important;
+    gap: 12px !important;
+    padding: 14px 16px !important;
   }
   .cal-anomaly-side {
-    align-items: flex-start !important;
+    align-items: center !important;
     flex-direction: row !important;
     flex-wrap: wrap !important;
+    justify-content: space-between !important;
     min-width: 0;
+    width: 100%;
+    gap: 8px !important;
   }
+  .cal-anomaly-side > * { white-space: nowrap; }
+  /* Metric chips fill the row two-up so users see all four metrics
+     without horizontal scrolling. */
+  .cal-metric-strip { gap: 8px !important; }
+  .cal-metric-chip {
+    flex: 1 1 calc(50% - 4px) !important;
+    padding: 6px 9px !important;
+  }
+  .cal-metric-label { font-size: 9px !important; }
+  .cal-metric-value { font-size: 12px !important; }
   .cal-insight-row {
     grid-template-columns: 1fr !important;
     gap: 8px !important;
@@ -554,11 +585,32 @@ section[id]:target > [class*="cal-section-head"] {
 /* Selection */
 ::selection { background: var(--accent-tint-2); color: var(--ink); }
 
-/* Variant-aware section header underline for receipt */
+/* Receipt section head — premium typography rhythm.
+   The underline used to draw an extra hairline across every section
+   header, doubling visual weight against the masthead's already-bold
+   divider. Whitespace alone is enough to separate sections now that
+   the vertical grid gap is generous (40px). */
 .cal-section-head.receipt {
   position: relative;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+  border-bottom: none;
+  margin-bottom: 20px;
+}
+.cal-section-head.receipt h2 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+.cal-section-head.receipt .cal-section-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--mute);
+  font-weight: 600;
+  /* Fixed column so titles align vertically across sections. */
+  min-width: 22px;
+  display: inline-block;
 }
 
 /* Pretty wrap */
@@ -769,6 +821,46 @@ p, h1, h2, h3 { text-wrap: pretty; }
   border-right: 0;
   transform: rotate(-45deg) translate(1px, -1px);
 }
+/* Visible search button — touch users' entry to the cmd+K palette. */
+.cal-tweaks-panel .cal-tweaks-search {
+  appearance: none;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: background-color 120ms ease-out, color 120ms ease-out,
+              border-color 120ms ease-out;
+}
+.cal-tweaks-panel .cal-tweaks-search:hover {
+  background: var(--accent-tint);
+  color: var(--ink);
+  border-color: var(--accent-tint-2);
+}
+.cal-tweaks-panel .cal-tweaks-search:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cal-tweaks-search-icon {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--accent);
+}
+.cal-tweaks-search-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ghost);
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin-left: 2px;
+}
 /* Floating, never blocks printing or PDF export. */
 @media print { .cal-tweaks-panel { display: none !important; } }
 [data-viewport="mobile"] .cal-tweaks-panel {
@@ -778,6 +870,73 @@ p, h1, h2, h3 { text-wrap: pretty; }
   flex-wrap: wrap;
   border-radius: var(--r-md);
   justify-content: center;
+}
+
+/* Mobile responsive — tweaks panel + palette + billboard CTA.
+
+   The tweaks panel docks to the bottom of the viewport on phones and
+   compacts so it doesn't steal a third of the screen. The palette gets
+   touch-friendly tap targets. The billboard CTA spans the full width so
+   "Investigate" is a 44px+ touch target. */
+@media (max-width: 720px) {
+  .cal-tweaks-panel {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    padding: 8px 10px;
+    gap: 8px;
+    font-size: 11px;
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+  }
+  .cal-tweaks-panel .cal-tweaks-label,
+  .cal-tweaks-search-hint,
+  .cal-tweaks-search-label { display: none; }
+  .cal-tweaks-panel .cal-tweaks-search {
+    padding: 7px 10px;
+    min-width: 36px;
+    min-height: 36px;
+    justify-content: center;
+  }
+  .cal-tweaks-panel .cal-tweaks-btn { padding: 6px 10px; min-height: 34px; }
+  .cal-tweaks-panel .cal-tweaks-save { padding: 7px 12px; min-height: 36px; }
+  .cal-tweaks-panel .cal-tweaks-divider { display: none; }
+  /* Reserve space at the bottom of the page so the floating panel never
+     covers the trust footer. */
+  .cal-receipt-root { padding-bottom: 96px !important; }
+
+  /* Palette dialog — bigger input, taller rows for thumbs. */
+  .cal-palette { padding-top: 8vh; }
+  .cal-palette-dialog { width: calc(100vw - 16px); border-radius: var(--r-md); }
+  .cal-palette-input {
+    font-size: 16px; /* prevents iOS zoom-on-focus */
+    padding: 16px 18px;
+  }
+  .cal-palette-item {
+    padding: 12px 16px;
+    grid-template-columns: 60px minmax(0, 1fr) auto;
+    min-height: 48px;
+  }
+  .cal-palette-hints { font-size: 10px; padding: 10px 16px; }
+
+  /* Billboard — full-width CTA tap target. */
+  .cal-billboard-cta {
+    display: flex !important;
+    width: 100%;
+    justify-content: center;
+    padding: 14px 18px !important;
+    min-height: 48px;
+  }
+  .cal-billboard { padding: 20px 18px 22px !important; }
+  .cal-billboard-value { font-size: 26px !important; }
+
+  /* Source chips — slightly more compact so 4 chips fit two-up. */
+  .cal-source-chip { padding: 3px 7px !important; font-size: 11px !important; }
+  .cal-source-row {
+    justify-content: flex-start !important;
+    gap: 6px !important;
+  }
 }
 
 /* Privacy mode — CSS-only swap between real and redacted labels.
@@ -793,4 +952,443 @@ p, h1, h2, h3 { text-wrap: pretty; }
 @media print {
   .cal-real { display: none !important; }
   .cal-redacted { display: inline !important; }
+}
+
+/* ============================================================================
+   Phase 1 UX overhaul — billboard + appendix + canonical severity token
+
+   These components apply Krug-1 ("don't make me think"), Peak-End Rule,
+   Von Restorff, and Progressive Disclosure. Visual rules:
+
+   * Billboard is the page peak — one number, one action.
+   * Appendix collapses everything diagnostic behind a single <details>.
+   * Severity is colour + glyph + label (never colour alone). Critical
+     gets a 1-shot pulse; everything else is calm.
+   * All animations gated by prefers-reduced-motion.
+   ============================================================================ */
+
+.cal-billboard {
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.cal-billboard-cta {
+  transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.cal-billboard-cta:hover {
+  background: var(--accent-strong) !important;
+  text-decoration: none;
+}
+.cal-billboard-cta:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-billboard-cta { transition: none; }
+}
+
+/* Appendix block — single progressive disclosure that hides every
+   non-actionable section behind one click. <details> is a native
+   interactive element so no JS is required; the CI privacy gate stays
+   green. */
+.cal-appendix {
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-s) var(--sp-m);
+  margin: 0;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out,
+              padding 120ms ease-out;
+}
+.cal-appendix[open] {
+  background: transparent;
+  border-color: transparent;
+  border-style: solid;
+  padding: 0;
+}
+.cal-appendix-summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--mute);
+  text-transform: uppercase;
+  font-weight: 600;
+  user-select: none;
+  padding: 4px 0;
+}
+.cal-appendix-summary::marker,
+.cal-appendix-summary::-webkit-details-marker { display: none; }
+.cal-appendix-summary:hover { color: var(--ink-2); }
+.cal-appendix-chev {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--ghost);
+  transition: transform 140ms ease-out;
+  width: 8px;
+}
+.cal-appendix[open] .cal-appendix-chev { transform: rotate(90deg); }
+.cal-appendix-count {
+  color: var(--ghost);
+  font-weight: 500;
+}
+.cal-appendix-body {
+  display: grid;
+  gap: 40px;
+  margin-top: var(--sp-m);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-appendix,
+  .cal-appendix-chev { transition: none; }
+}
+
+/* Canonical severity token — one shape per level. Pair the colour with
+   a glyph and label so colour-blind users still parse the signal. */
+.sev {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.sev-glyph { font-size: 9px; line-height: 1; }
+.sev-critical {
+  color: var(--bad);
+  background: var(--bad-tint);
+  border-color: var(--bad-tint);
+}
+.sev-warn {
+  color: var(--warn);
+  background: var(--warn-tint);
+  border-color: var(--warn-tint);
+}
+.sev-info {
+  color: var(--ink-2);
+  background: var(--panel-2);
+  border-color: var(--border);
+}
+.sev-ok {
+  color: var(--ok);
+  background: var(--ok-tint);
+  border-color: var(--ok-tint);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sev-critical { animation: sev-pulse 1400ms ease-out 1; }
+  @keyframes sev-pulse {
+    0%   { box-shadow: 0 0 0 0 var(--bad-tint); }
+    100% { box-shadow: 0 0 0 6px rgba(0,0,0,0); }
+  }
+}
+
+/* ============================================================================
+   Receipt scroll-spy TOC (Phase 2)
+
+   The right-rail nav is rendered alongside the main content via a 2-col
+   grid. Sticky positioning keeps it in view as the user scrolls; an
+   IntersectionObserver toggles ``aria-current="location"`` on the link
+   matching the visible section. Below 1100px we collapse to single-column
+   so the content gets full width — the TOC has done its job by then.
+   ============================================================================ */
+
+.cal-receipt-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 36px;
+  margin-top: 24px;
+  align-items: start;
+}
+.cal-receipt-main {
+  display: grid;
+  gap: 40px;
+  min-width: 0;
+}
+.cal-receipt-toc {
+  position: sticky;
+  top: 20px;
+  align-self: start;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  font-family: var(--font);
+  padding: var(--sp-xs) 0;
+  scrollbar-width: thin;
+}
+.cal-toc-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--mute);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.cal-toc-group { margin-bottom: 16px; }
+.cal-toc-group:last-child { margin-bottom: 0; }
+.cal-toc-group-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0;
+  color: var(--ghost);
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 0 8px 6px;
+  border-bottom: 1px dotted var(--border);
+  margin-bottom: 4px;
+}
+.cal-toc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 1px;
+}
+.cal-toc-link {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 8px;
+  border-radius: 3px;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 12px;
+  border-left: 2px solid transparent;
+  transition: background-color 120ms ease-out, color 120ms ease-out,
+              border-color 120ms ease-out;
+}
+.cal-toc-link:hover {
+  color: var(--ink);
+  background: var(--accent-tint);
+  text-decoration: none;
+  border-left-color: var(--accent-tint-2);
+}
+.cal-toc-link[aria-current="location"] {
+  color: var(--ink);
+  background: var(--accent-tint);
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
+.cal-toc-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cal-toc-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ghost);
+  letter-spacing: 0;
+}
+.cal-toc-link[aria-current="location"] .cal-toc-num { color: var(--accent); }
+.cal-toc-title {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+/* Compact desktop — keep the TOC but narrow it slightly. */
+@media (max-width: 1380px) and (min-width: 1100px) {
+  .cal-receipt-body {
+    grid-template-columns: minmax(0, 1fr) 180px;
+    gap: 28px;
+  }
+}
+/* Narrow desktop / large tablet — drop the TOC. */
+@media (max-width: 1099px) {
+  .cal-receipt-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .cal-receipt-toc { display: none; }
+  .cal-receipt-main { gap: 32px; }
+}
+/* Tablet — softer padding so content fills the page without crowding. */
+@media (max-width: 900px) and (min-width: 721px) {
+  .cal-receipt-root { padding: 28px 24px 64px; }
+  .cal-receipt-main { gap: 28px; }
+  .cal-anomaly-row,
+  .cal-insight-row { padding: 14px 16px !important; }
+}
+@media print {
+  .cal-receipt-toc { display: none; }
+  .cal-receipt-body { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-toc-link { transition: none; }
+}
+
+/* Whole-card click target (Fitts's Law). Wrap any card or row in an
+   <a class="cal-card-link"> and the full block becomes the hit area.
+   The hover/focus polish is colour-only — no padding, margin, border-
+   width, or transform changes, so the hover-jump guard stays green. */
+.cal-card-link {
+  display: block;
+  position: relative;
+  border-radius: var(--r-md);
+  transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.cal-card-link:hover {
+  background: var(--accent-tint);
+  box-shadow: 0 0 0 1px var(--accent-tint-2);
+}
+.cal-card-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-card-link { transition: none; }
+}
+
+/* Cmd+K command palette (Phase 3) — recognition over recall + Doherty.
+   Single fixed-position modal; the inline JS controller toggles `[hidden]`
+   and re-renders results on each keystroke. */
+.cal-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.cal-palette[hidden] { display: none !important; }
+.cal-palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.cal-palette-dialog {
+  position: relative;
+  width: min(580px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.cal-palette-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 14px 18px;
+  font-size: 14px;
+  font-family: var(--font);
+  background: var(--panel);
+  color: var(--ink);
+  outline: none;
+}
+.cal-palette-input::placeholder { color: var(--ghost); }
+.cal-palette-results {
+  list-style: none;
+  padding: 6px 0;
+  margin: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.cal-palette-item {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 9px 18px;
+  font-size: 13px;
+  align-items: baseline;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background-color 80ms ease-out;
+}
+.cal-palette-item.is-active {
+  background: var(--accent-tint);
+  border-left-color: var(--accent);
+}
+.cal-palette-item:hover {
+  background: var(--accent-tint);
+}
+.cal-palette-type {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--mute);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.cal-palette-label {
+  color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cal-palette-hint {
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.cal-palette-empty {
+  list-style: none;
+  padding: 14px 18px;
+  color: var(--ghost);
+  font-size: 13px;
+  text-align: center;
+}
+.cal-palette-hints {
+  padding: 9px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 11px;
+  color: var(--mute);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.cal-palette-hints kbd {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  margin-right: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-palette-item { transition: none; }
+}
+@media print {
+  .cal-palette { display: none !important; }
+}
+
+/* Skip-to-content link — keyboard-first accessibility (Phase 3).
+   First focusable element on the page; visually hidden until focused,
+   so sighted users never see it but keyboard users can jump straight
+   to the main content. */
+.cal-skip-link {
+  position: fixed;
+  top: -100px;
+  left: 0;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  border-radius: 0 0 var(--r-md) 0;
+  z-index: 10001;
+  transition: top 140ms ease-out;
+}
+.cal-skip-link:focus,
+.cal-skip-link:focus-visible {
+  top: 0;
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-skip-link { transition: none; }
 }

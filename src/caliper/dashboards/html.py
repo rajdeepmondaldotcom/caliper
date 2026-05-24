@@ -34,11 +34,14 @@ from __future__ import annotations
 import html
 import math
 from collections.abc import Iterable, Sequence
+from contextvars import ContextVar
 from typing import Any
 
 from .data_models import (
     AdvisorRecommendation,
+    AgentRow,
     Banner,
+    BillboardCard,
     BriefFinding,
     Dashboard,
     Forecast,
@@ -136,6 +139,16 @@ INLINE_STYLES = """
 
   --row-pad-y: 12px;
   --row-pad-x: 16px;
+
+  /* Phase 1 UX overhaul — single spacing scale (4/8/12/16/24/32) used by
+     billboard, severity chips, appendix block. Older sections still use
+     their own paddings; new components should reach for these tokens. */
+  --sp-xxs: 4px;
+  --sp-xs: 8px;
+  --sp-s: 12px;
+  --sp-m: 16px;
+  --sp-l: 24px;
+  --sp-xl: 32px;
 }
 
 /* Light theme */
@@ -346,6 +359,13 @@ table { font-variant-numeric: tabular-nums lining-nums; }
      "claude-/sonnet-4-6 ·/standard". */
   table-layout: auto;
 }
+.cal-table-panel,
+.cal-attribution-grid > * {
+  min-width: 0;
+}
+.cal-table-scroll {
+  max-width: 100%;
+}
 .cal-table th,
 .cal-table td {
   vertical-align: middle;
@@ -412,13 +432,13 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 }
 
 /* Section spacing */
-section[id] { scroll-margin-top: 24px; }
+section[id] { scroll-margin-top: 36px; }
 
-/* Terminal left-rail link hover + :target highlight when an anchor is active */
+/* Terminal left-rail link hover. The legacy ``section[id]:target`` inset
+   rail was removed because it visually collided with the section-number
+   column at x=0. The TOC's ``aria-current="location"`` already shows the
+   reader where they are; no need to double-mark inside the section. */
 .cal-rail-link:hover { color: var(--accent) !important; background: var(--accent-tint); }
-section[id]:target > [class*="cal-section-head"] {
-  box-shadow: inset 3px 0 0 var(--accent);
-}
 
 /* Mobile responsive — when wrapping element has data-viewport=mobile */
 [data-viewport="mobile"] .cal-summary-row { grid-template-columns: 1fr 1fr !important; }
@@ -461,14 +481,28 @@ section[id]:target > [class*="cal-section-head"] {
   }
   .cal-anomaly-row {
     grid-template-columns: 1fr !important;
-    gap: 10px !important;
+    gap: 12px !important;
+    padding: 14px 16px !important;
   }
   .cal-anomaly-side {
-    align-items: flex-start !important;
+    align-items: center !important;
     flex-direction: row !important;
     flex-wrap: wrap !important;
+    justify-content: space-between !important;
     min-width: 0;
+    width: 100%;
+    gap: 8px !important;
   }
+  .cal-anomaly-side > * { white-space: nowrap; }
+  /* Metric chips fill the row two-up so users see all four metrics
+     without horizontal scrolling. */
+  .cal-metric-strip { gap: 8px !important; }
+  .cal-metric-chip {
+    flex: 1 1 calc(50% - 4px) !important;
+    padding: 6px 9px !important;
+  }
+  .cal-metric-label { font-size: 9px !important; }
+  .cal-metric-value { font-size: 12px !important; }
   .cal-insight-row {
     grid-template-columns: 1fr !important;
     gap: 8px !important;
@@ -628,11 +662,32 @@ section[id]:target > [class*="cal-section-head"] {
 /* Selection */
 ::selection { background: var(--accent-tint-2); color: var(--ink); }
 
-/* Variant-aware section header underline for receipt */
+/* Receipt section head — premium typography rhythm.
+   The underline used to draw an extra hairline across every section
+   header, doubling visual weight against the masthead's already-bold
+   divider. Whitespace alone is enough to separate sections now that
+   the vertical grid gap is generous (40px). */
 .cal-section-head.receipt {
   position: relative;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+  border-bottom: none;
+  margin-bottom: 20px;
+}
+.cal-section-head.receipt h2 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+.cal-section-head.receipt .cal-section-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--mute);
+  font-weight: 600;
+  /* Fixed column so titles align vertically across sections. */
+  min-width: 22px;
+  display: inline-block;
 }
 
 /* Pretty wrap */
@@ -843,6 +898,46 @@ p, h1, h2, h3 { text-wrap: pretty; }
   border-right: 0;
   transform: rotate(-45deg) translate(1px, -1px);
 }
+/* Visible search button — touch users' entry to the cmd+K palette. */
+.cal-tweaks-panel .cal-tweaks-search {
+  appearance: none;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: background-color 120ms ease-out, color 120ms ease-out,
+              border-color 120ms ease-out;
+}
+.cal-tweaks-panel .cal-tweaks-search:hover {
+  background: var(--accent-tint);
+  color: var(--ink);
+  border-color: var(--accent-tint-2);
+}
+.cal-tweaks-panel .cal-tweaks-search:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cal-tweaks-search-icon {
+  font-size: 14px;
+  line-height: 1;
+  color: var(--accent);
+}
+.cal-tweaks-search-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ghost);
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin-left: 2px;
+}
 /* Floating, never blocks printing or PDF export. */
 @media print { .cal-tweaks-panel { display: none !important; } }
 [data-viewport="mobile"] .cal-tweaks-panel {
@@ -852,6 +947,73 @@ p, h1, h2, h3 { text-wrap: pretty; }
   flex-wrap: wrap;
   border-radius: var(--r-md);
   justify-content: center;
+}
+
+/* Mobile responsive — tweaks panel + palette + billboard CTA.
+
+   The tweaks panel docks to the bottom of the viewport on phones and
+   compacts so it doesn't steal a third of the screen. The palette gets
+   touch-friendly tap targets. The billboard CTA spans the full width so
+   "Investigate" is a 44px+ touch target. */
+@media (max-width: 720px) {
+  .cal-tweaks-panel {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    padding: 8px 10px;
+    gap: 8px;
+    font-size: 11px;
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+  }
+  .cal-tweaks-panel .cal-tweaks-label,
+  .cal-tweaks-search-hint,
+  .cal-tweaks-search-label { display: none; }
+  .cal-tweaks-panel .cal-tweaks-search {
+    padding: 7px 10px;
+    min-width: 36px;
+    min-height: 36px;
+    justify-content: center;
+  }
+  .cal-tweaks-panel .cal-tweaks-btn { padding: 6px 10px; min-height: 34px; }
+  .cal-tweaks-panel .cal-tweaks-save { padding: 7px 12px; min-height: 36px; }
+  .cal-tweaks-panel .cal-tweaks-divider { display: none; }
+  /* Reserve space at the bottom of the page so the floating panel never
+     covers the trust footer. */
+  .cal-receipt-root { padding-bottom: 96px !important; }
+
+  /* Palette dialog — bigger input, taller rows for thumbs. */
+  .cal-palette { padding-top: 8vh; }
+  .cal-palette-dialog { width: calc(100vw - 16px); border-radius: var(--r-md); }
+  .cal-palette-input {
+    font-size: 16px; /* prevents iOS zoom-on-focus */
+    padding: 16px 18px;
+  }
+  .cal-palette-item {
+    padding: 12px 16px;
+    grid-template-columns: 60px minmax(0, 1fr) auto;
+    min-height: 48px;
+  }
+  .cal-palette-hints { font-size: 10px; padding: 10px 16px; }
+
+  /* Billboard — full-width CTA tap target. */
+  .cal-billboard-cta {
+    display: flex !important;
+    width: 100%;
+    justify-content: center;
+    padding: 14px 18px !important;
+    min-height: 48px;
+  }
+  .cal-billboard { padding: 20px 18px 22px !important; }
+  .cal-billboard-value { font-size: 26px !important; }
+
+  /* Source chips — slightly more compact so 4 chips fit two-up. */
+  .cal-source-chip { padding: 3px 7px !important; font-size: 11px !important; }
+  .cal-source-row {
+    justify-content: flex-start !important;
+    gap: 6px !important;
+  }
 }
 
 /* Privacy mode — CSS-only swap between real and redacted labels.
@@ -867,6 +1029,445 @@ p, h1, h2, h3 { text-wrap: pretty; }
 @media print {
   .cal-real { display: none !important; }
   .cal-redacted { display: inline !important; }
+}
+
+/* ============================================================================
+   Phase 1 UX overhaul — billboard + appendix + canonical severity token
+
+   These components apply Krug-1 ("don't make me think"), Peak-End Rule,
+   Von Restorff, and Progressive Disclosure. Visual rules:
+
+   * Billboard is the page peak — one number, one action.
+   * Appendix collapses everything diagnostic behind a single <details>.
+   * Severity is colour + glyph + label (never colour alone). Critical
+     gets a 1-shot pulse; everything else is calm.
+   * All animations gated by prefers-reduced-motion.
+   ============================================================================ */
+
+.cal-billboard {
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.cal-billboard-cta {
+  transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.cal-billboard-cta:hover {
+  background: var(--accent-strong) !important;
+  text-decoration: none;
+}
+.cal-billboard-cta:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-billboard-cta { transition: none; }
+}
+
+/* Appendix block — single progressive disclosure that hides every
+   non-actionable section behind one click. <details> is a native
+   interactive element so no JS is required; the CI privacy gate stays
+   green. */
+.cal-appendix {
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-s) var(--sp-m);
+  margin: 0;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out,
+              padding 120ms ease-out;
+}
+.cal-appendix[open] {
+  background: transparent;
+  border-color: transparent;
+  border-style: solid;
+  padding: 0;
+}
+.cal-appendix-summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--mute);
+  text-transform: uppercase;
+  font-weight: 600;
+  user-select: none;
+  padding: 4px 0;
+}
+.cal-appendix-summary::marker,
+.cal-appendix-summary::-webkit-details-marker { display: none; }
+.cal-appendix-summary:hover { color: var(--ink-2); }
+.cal-appendix-chev {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--ghost);
+  transition: transform 140ms ease-out;
+  width: 8px;
+}
+.cal-appendix[open] .cal-appendix-chev { transform: rotate(90deg); }
+.cal-appendix-count {
+  color: var(--ghost);
+  font-weight: 500;
+}
+.cal-appendix-body {
+  display: grid;
+  gap: 40px;
+  margin-top: var(--sp-m);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-appendix,
+  .cal-appendix-chev { transition: none; }
+}
+
+/* Canonical severity token — one shape per level. Pair the colour with
+   a glyph and label so colour-blind users still parse the signal. */
+.sev {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.sev-glyph { font-size: 9px; line-height: 1; }
+.sev-critical {
+  color: var(--bad);
+  background: var(--bad-tint);
+  border-color: var(--bad-tint);
+}
+.sev-warn {
+  color: var(--warn);
+  background: var(--warn-tint);
+  border-color: var(--warn-tint);
+}
+.sev-info {
+  color: var(--ink-2);
+  background: var(--panel-2);
+  border-color: var(--border);
+}
+.sev-ok {
+  color: var(--ok);
+  background: var(--ok-tint);
+  border-color: var(--ok-tint);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sev-critical { animation: sev-pulse 1400ms ease-out 1; }
+  @keyframes sev-pulse {
+    0%   { box-shadow: 0 0 0 0 var(--bad-tint); }
+    100% { box-shadow: 0 0 0 6px rgba(0,0,0,0); }
+  }
+}
+
+/* ============================================================================
+   Receipt scroll-spy TOC (Phase 2)
+
+   The right-rail nav is rendered alongside the main content via a 2-col
+   grid. Sticky positioning keeps it in view as the user scrolls; an
+   IntersectionObserver toggles ``aria-current="location"`` on the link
+   matching the visible section. Below 1100px we collapse to single-column
+   so the content gets full width — the TOC has done its job by then.
+   ============================================================================ */
+
+.cal-receipt-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 36px;
+  margin-top: 24px;
+  align-items: start;
+}
+.cal-receipt-main {
+  display: grid;
+  gap: 40px;
+  min-width: 0;
+}
+.cal-receipt-toc {
+  position: sticky;
+  top: 20px;
+  align-self: start;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  font-family: var(--font);
+  padding: var(--sp-xs) 0;
+  scrollbar-width: thin;
+}
+.cal-toc-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--mute);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.cal-toc-group { margin-bottom: 16px; }
+.cal-toc-group:last-child { margin-bottom: 0; }
+.cal-toc-group-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0;
+  color: var(--ghost);
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 0 8px 6px;
+  border-bottom: 1px dotted var(--border);
+  margin-bottom: 4px;
+}
+.cal-toc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 1px;
+}
+.cal-toc-link {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 8px;
+  border-radius: 3px;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 12px;
+  border-left: 2px solid transparent;
+  transition: background-color 120ms ease-out, color 120ms ease-out,
+              border-color 120ms ease-out;
+}
+.cal-toc-link:hover {
+  color: var(--ink);
+  background: var(--accent-tint);
+  text-decoration: none;
+  border-left-color: var(--accent-tint-2);
+}
+.cal-toc-link[aria-current="location"] {
+  color: var(--ink);
+  background: var(--accent-tint);
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
+.cal-toc-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cal-toc-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ghost);
+  letter-spacing: 0;
+}
+.cal-toc-link[aria-current="location"] .cal-toc-num { color: var(--accent); }
+.cal-toc-title {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+/* Compact desktop — keep the TOC but narrow it slightly. */
+@media (max-width: 1380px) and (min-width: 1100px) {
+  .cal-receipt-body {
+    grid-template-columns: minmax(0, 1fr) 180px;
+    gap: 28px;
+  }
+}
+/* Narrow desktop / large tablet — drop the TOC. */
+@media (max-width: 1099px) {
+  .cal-receipt-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .cal-receipt-toc { display: none; }
+  .cal-receipt-main { gap: 32px; }
+}
+/* Tablet — softer padding so content fills the page without crowding. */
+@media (max-width: 900px) and (min-width: 721px) {
+  .cal-receipt-root { padding: 28px 24px 64px; }
+  .cal-receipt-main { gap: 28px; }
+  .cal-anomaly-row,
+  .cal-insight-row { padding: 14px 16px !important; }
+}
+@media print {
+  .cal-receipt-toc { display: none; }
+  .cal-receipt-body { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-toc-link { transition: none; }
+}
+
+/* Whole-card click target (Fitts's Law). Wrap any card or row in an
+   <a class="cal-card-link"> and the full block becomes the hit area.
+   The hover/focus polish is colour-only — no padding, margin, border-
+   width, or transform changes, so the hover-jump guard stays green. */
+.cal-card-link {
+  display: block;
+  position: relative;
+  border-radius: var(--r-md);
+  transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.cal-card-link:hover {
+  background: var(--accent-tint);
+  box-shadow: 0 0 0 1px var(--accent-tint-2);
+}
+.cal-card-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-card-link { transition: none; }
+}
+
+/* Cmd+K command palette (Phase 3) — recognition over recall + Doherty.
+   Single fixed-position modal; the inline JS controller toggles `[hidden]`
+   and re-renders results on each keystroke. */
+.cal-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.cal-palette[hidden] { display: none !important; }
+.cal-palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.cal-palette-dialog {
+  position: relative;
+  width: min(580px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.cal-palette-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 14px 18px;
+  font-size: 14px;
+  font-family: var(--font);
+  background: var(--panel);
+  color: var(--ink);
+  outline: none;
+}
+.cal-palette-input::placeholder { color: var(--ghost); }
+.cal-palette-results {
+  list-style: none;
+  padding: 6px 0;
+  margin: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.cal-palette-item {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 9px 18px;
+  font-size: 13px;
+  align-items: baseline;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background-color 80ms ease-out;
+}
+.cal-palette-item.is-active {
+  background: var(--accent-tint);
+  border-left-color: var(--accent);
+}
+.cal-palette-item:hover {
+  background: var(--accent-tint);
+}
+.cal-palette-type {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--mute);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.cal-palette-label {
+  color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cal-palette-hint {
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.cal-palette-empty {
+  list-style: none;
+  padding: 14px 18px;
+  color: var(--ghost);
+  font-size: 13px;
+  text-align: center;
+}
+.cal-palette-hints {
+  padding: 9px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 11px;
+  color: var(--mute);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.cal-palette-hints kbd {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  margin-right: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-palette-item { transition: none; }
+}
+@media print {
+  .cal-palette { display: none !important; }
+}
+
+/* Skip-to-content link — keyboard-first accessibility (Phase 3).
+   First focusable element on the page; visually hidden until focused,
+   so sighted users never see it but keyboard users can jump straight
+   to the main content. */
+.cal-skip-link {
+  position: fixed;
+  top: -100px;
+  left: 0;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  border-radius: 0 0 var(--r-md) 0;
+  z-index: 10001;
+  transition: top 140ms ease-out;
+}
+.cal-skip-link:focus,
+.cal-skip-link:focus-visible {
+  top: 0;
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-skip-link { transition: none; }
 }
 
 """
@@ -1257,8 +1858,20 @@ def _private_text(text: str | None, pm: _PrivacyMap) -> str:
     return "".join(out)
 
 
-def _agent_display_label(agent_id: str, index: int) -> str:
+def _agent_display_label(
+    agent_id: str,
+    index: int,
+    *,
+    source_category: str = "",
+    kind: str = "",
+) -> str:
     raw = str(agent_id or "").strip()
+    if source_category == "direct" or kind == "direct-session" or raw.startswith("direct:"):
+        return f"Direct session {index}"
+    if source_category == "overhead":
+        return f"Background agent {index}"
+    if source_category == "unknown":
+        return f"Agent source {index}"
     if not raw:
         return f"Agent {index}"
     lowered = raw.lower()
@@ -1273,6 +1886,30 @@ def _agent_display_label(agent_id: str, index: int) -> str:
     if looks_hex_id or looks_thread_payload or len(raw) > 64:
         return f"Agent {index}"
     return raw
+
+
+def _agent_private_label(row: AgentRow, index: int) -> str:
+    if (
+        row.source_category == "direct"
+        or row.kind == "direct-session"
+        or row.agent_id.startswith("direct:")
+    ):
+        return f"Direct session {index}"
+    if row.source_category == "overhead":
+        return f"Background agent {index}"
+    if row.source_category == "unknown":
+        return f"Agent source {index}"
+    return f"Agent {index}"
+
+
+def _skill_display_label(name: str, index: int, *, private: bool = False) -> str:
+    raw = str(name or "").strip()
+    if raw.startswith("workflow:"):
+        workflow = raw.removeprefix("workflow:").replace("-", " ").replace("_", " ")
+        return f"{workflow.capitalize()} workflow" if workflow else f"Workflow {index}"
+    if private:
+        return f"Skill {index}"
+    return raw or f"Skill {index}"
 
 
 _ANCHOR_ALIASES = {
@@ -1864,7 +2501,7 @@ def _caliper_mark(size: int = 22) -> str:
 
 
 def _section_head(section_id: str, *, rhythm: str, meta: str | None = None) -> str:
-    num = SECTION_NUMBERS[section_id]
+    num = _display_num(section_id)
     title = _SECTION_TITLES[section_id]
     if rhythm == "terminal":
         meta_html = (
@@ -1881,7 +2518,7 @@ def _section_head(section_id: str, *, rhythm: str, meta: str | None = None) -> s
             'margin-bottom:16px;gap:16px">'
             '<div style="display:flex;align-items:baseline;gap:12px;min-width:0">'
             f'<span aria-hidden="true" style="font-family:var(--mono);font-size:11px;color:var(--mute);'
-            f'letter-spacing:0">§{num}</span>'
+            f'letter-spacing:0">{num}.</span>'
             # Real <h2> in terminal mode too — screen readers shouldn't have
             # to guess that this monospace, accent-coloured span is the
             # section heading.
@@ -1897,17 +2534,16 @@ def _section_head(section_id: str, *, rhythm: str, meta: str | None = None) -> s
         if meta
         else ""
     )
-    # Receipt header — §NN (no space) matches the design prototype.
+    # Receipt header — simple "N. Title" sequence (1, 2, 3 …) computed from
+    # render order. Typography/spacing come from the .cal-section-head.receipt
+    # CSS so headers stay consistent across themes and density.
     return (
         '<div class="cal-section-head receipt" '
         'style="display:flex;align-items:baseline;justify-content:space-between;'
-        'margin-bottom:12px;gap:16px">'
+        'gap:16px">'
         '<div style="display:flex;align-items:baseline;gap:12px;min-width:0">'
-        f'<span style="font-family:var(--mono);font-size:11px;color:var(--ghost)">'
-        f"§{num}</span>"
-        f'<h2 style="margin:0;font-size:15px;font-weight:650;letter-spacing:0;'
-        f"color:var(--ink);"
-        f'white-space:nowrap">{_esc(title)}</h2>'
+        f'<span class="cal-section-num">{num}.</span>'
+        f'<h2 style="margin:0">{_esc(title)}</h2>'
         "</div>"
         f"{meta_html}</div>"
     )
@@ -2208,7 +2844,7 @@ def _caliper_footer(d: Dashboard) -> str:
 
 
 def _section_wrap(section_id: str, *, rhythm: str, body: str, meta: str | None = None) -> str:
-    num = SECTION_NUMBERS[section_id]
+    num = _display_num(section_id)
     title = _SECTION_TITLES[section_id]
     return (
         f'<section id="{section_id}" data-screen-label="{num} {_esc(title)}">'
@@ -2241,7 +2877,8 @@ def _value_card(
         else ""
     )
     open_tag = (
-        f'<a href="#{_esc(_anchor_id(href))}" style="text-decoration:none;color:inherit">'
+        f'<a class="cal-card-link" href="#{_esc(_anchor_id(href))}" '
+        'style="text-decoration:none;color:inherit;display:block">'
         if href
         else ""
     )
@@ -2274,7 +2911,8 @@ def _compact_row(
 ) -> str:
     accent = _tone_color(tone, "var(--mute)")
     link_open = (
-        f'<a href="#{_esc(_anchor_id(href))}" style="text-decoration:none;color:inherit">'
+        f'<a class="cal-card-link" href="#{_esc(_anchor_id(href))}" '
+        'style="text-decoration:none;color:inherit;display:block">'
         if href
         else ""
     )
@@ -2319,13 +2957,16 @@ def _small_table(
             + "</tr>"
         )
     return (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);overflow:hidden">'
-        '<table class="cal-table" style="width:100%;border-collapse:collapse;font-size:13px">'
+        '<div class="cal-table-panel" style="background:var(--panel);'
+        "border:1px solid var(--border);border-radius:var(--r-md);"
+        'overflow:hidden;min-width:0">'
+        '<div class="cal-table-scroll" style="overflow-x:auto;max-width:100%">'
+        '<table class="cal-table" style="width:100%;min-width:100%;'
+        'border-collapse:collapse;font-size:13px">'
         + head
         + "<tbody>"
         + "".join(body)
-        + "</tbody></table></div>"
+        + "</tbody></table></div></div>"
     )
 
 
@@ -2529,9 +3170,19 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
         )
     cache_rows = []
     for row in d.cache_leverage[:6]:
+        # Wrap the timestamp-style session label so it doesn't break
+        # one-word-per-line inside the narrow cache-leverage column. The
+        # span keeps the date intact while ``overflow-wrap`` and the table's
+        # horizontal scroll handle very-narrow viewports gracefully.
+        label_html = (
+            '<span class="cal-cache-session" '
+            'style="white-space:nowrap;font-variant-numeric:tabular-nums lining-nums">'
+            f"{_private_text(row.session_label, pm)}"
+            "</span>"
+        )
         cache_rows.append(
             [
-                _private_text(row.session_label, pm),
+                label_html,
                 fmt_money(row.savings_usd),
                 fmt_pct(row.hit_rate),
                 fmt_tokens(row.cached_input_tokens),
@@ -2670,29 +3321,43 @@ def _section_attribution(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     if d.agents:
         rows = []
         for idx, row in enumerate(d.agents[:6], start=1):
-            label = _agent_display_label(row.agent_id, idx) if pm.mode == "off" else f"Agent {idx}"
+            real_label = _agent_display_label(
+                row.agent_id,
+                idx,
+                source_category=row.source_category,
+                kind=row.kind,
+            )
+            label = (
+                _esc(real_label)
+                if pm.mode == "off"
+                else _private(real_label, _agent_private_label(row, idx), pm)
+            )
             rows.append(
                 [
-                    _esc(label),
+                    label,
                     fmt_money(row.cost_usd),
                     fmt_tokens(row.total_tokens),
                     _esc(row.evidence_status),
                 ]
             )
-        panels.append(_small_table(["Agent", "Cost", "Tokens", "Evidence"], rows))
+        panels.append(_small_table(["Source", "Cost", "Tokens", "Evidence"], rows))
     if d.skills:
         rows = []
         for idx, row in enumerate(d.skills[:6], start=1):
-            label = row.name if pm.mode == "off" else f"Skill {idx}"
+            real_label = _skill_display_label(row.name, idx)
+            private_label = _skill_display_label(row.name, idx, private=True)
+            label = (
+                _esc(real_label) if pm.mode == "off" else _private(real_label, private_label, pm)
+            )
             rows.append(
                 [
-                    _esc(label),
+                    label,
                     fmt_money(row.estimated_cost_usd),
                     fmt_int(row.invocations),
                     _esc(row.evidence_status),
                 ]
             )
-        panels.append(_small_table(["Skill", "Cost", "Calls", "Evidence"], rows))
+        panels.append(_small_table(["Skill / workflow", "Cost", "Calls", "Evidence"], rows))
     if d.tier_provenance:
         t = d.tier_provenance
         rows = [
@@ -2709,8 +3374,9 @@ def _section_attribution(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
         labels = [fmt_tokens(edge) for edge in h.bins]
         panels.append(
             '<div style="background:var(--panel);border:1px solid var(--border);'
-            'border-radius:var(--r-md);padding:14px">'
-            '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px">'
+            'border-radius:var(--r-md);padding:14px;min-width:0;overflow:hidden">'
+            '<div style="display:flex;justify-content:space-between;gap:12px;'
+            'flex-wrap:wrap;align-items:baseline;margin-bottom:10px">'
             '<span style="font-size:12px;color:var(--ink);font-weight:600">Long-context boundary</span>'
             f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">threshold {fmt_tokens(h.threshold_tokens)}</span>'
             "</div>"
@@ -2730,11 +3396,11 @@ def _section_attribution(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
         ]
         panels.append(_small_table(["Cohort", "Current", "Previous", "Delta"], rows))
     body = (
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">'
-        + "".join(panels)
-        + "</div>"
+        '<div class="cal-attribution-grid" style="display:grid;'
+        "grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));"
+        'gap:12px;min-width:0">' + "".join(panels) + "</div>"
     )
-    meta = f"{len(d.agents)} agents · {len(d.skills)} skills"
+    meta = f"{len(d.agents)} sources · {len(d.skills)} skills/workflows"
     return _section_wrap("attribution", rhythm=rhythm, body=body, meta=meta)
 
 
@@ -3216,14 +3882,11 @@ def _insight_row(it: Insight, *, dense: bool, pm: _PrivacyMap) -> str:
     sev = it.severity
     if sev == "critical":
         accent = "var(--bad)"
-        tone = "var(--bad)"
     elif sev == "warn":
         accent = "var(--warn)"
-        tone = "var(--warn)"
     else:
         accent = "var(--accent)"
-        tone = "var(--mute)"
-    pad = "10px 14px" if dense else "12px 16px"
+    pad = "12px 16px" if dense else "16px 20px"
     impact_html = (
         f'<span style="font-size:11px;color:var(--ink-2);background:var(--panel-2);'
         f"border:1px solid var(--border);border-radius:3px;padding:3px 8px;"
@@ -3234,10 +3897,9 @@ def _insight_row(it: Insight, *, dense: bool, pm: _PrivacyMap) -> str:
     sample_chip = _insight_sample_size_chip(it)
     return (
         f'<div class="cal-insight-row" style="display:grid;grid-template-columns:auto 1fr auto;'
-        f"gap:14px;align-items:baseline;padding:{pad};border-left:3px solid {accent};"
+        f"gap:16px;align-items:baseline;padding:{pad};border-left:2px solid {accent};"
         f'background:var(--panel);border-top:1px solid var(--border)">'
-        f'<span style="font-family:var(--mono);font-size:10px;letter-spacing:0;color:{tone};'
-        f'text-transform:uppercase;font-weight:600;min-width:56px">{_esc(sev)}</span>'
+        f"{_severity_token(sev)}"
         '<div style="min-width:0">'
         f'<div style="color:var(--ink);font-size:13px;font-weight:500">{_private_text(it.title, pm)}</div>'
         f'<div style="color:var(--mute);font-size:12px;margin-top:3px;line-height:1.5">{_private_text(it.detail, pm)}</div>'
@@ -3290,7 +3952,7 @@ def _anomaly_action(kind: str) -> str:
 def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap) -> str:
     if not d.anomalies:
         return ""
-    pad = "10px 14px" if dense else "12px 16px"
+    pad = "12px 16px" if dense else "16px 20px"
     rows_html: list[str] = []
     for i, a in enumerate(d.anomalies):
         tone_color = "var(--bad)" if a.tone == "critical" else "var(--warn)"
@@ -3320,17 +3982,13 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
         )
         comparison = ""
         if a.baseline_sample_count and a.comparison_scope:
-            comparison = (
-                f" Compared with {a.baseline_sample_count:,} "
-                f"{a.comparison_scope}."
-            )
+            comparison = f" Compared with {a.baseline_sample_count:,} {a.comparison_scope}."
         rows_html.append(
-            f'<div class="cal-anomaly-row" style="display:grid;grid-template-columns:92px 1fr auto;gap:14px;'
-            f"align-items:start;padding:{pad};border-left:3px solid {tone_color};"
+            f'<div class="cal-anomaly-row" style="display:grid;grid-template-columns:auto 1fr auto;gap:16px;'
+            f"align-items:start;padding:{pad};border-left:2px solid {tone_color};"
             f'border-top:{top}">'
-            f'<span class="cal-anomaly-label" style="font-family:var(--mono);font-size:10px;letter-spacing:0;'
-            f"color:{tone_color};text-transform:uppercase;font-weight:600;"
-            'padding-top:2px">Spend spike</span>'
+            f'<span class="cal-anomaly-label" style="padding-top:2px">'
+            f"{_severity_token(a.tone, 'Spend spike')}</span>"
             '<div class="cal-anomaly-main">'
             f'<div style="color:var(--ink);font-size:13px;font-weight:500">'
             f'{_esc(a.kind)} · <span style="font-family:var(--mono);color:var(--ink-2)">{_private_text(a.label, pm)}</span></div>'
@@ -3770,6 +4428,365 @@ _SECTION_ORDER: list[str] = [
     "advisor",
 ]
 
+# ----------------------------------------------------------------------------
+# Tier system (Phase 1 UX overhaul)
+#
+# Section IDs and numbers (§00..§19) remain stable so anchor links keep
+# working. Tiers control visual grouping and progressive disclosure only:
+#
+#   decisions  — what to act on (always visible, rendered first)
+#   trajectory — what's happening (always visible)
+#   appendix   — supporting evidence (collapsed in a single <details>)
+#   trust      — evidence footer (always visible, terse)
+# ----------------------------------------------------------------------------
+
+_SECTION_TIER: dict[str, str] = {
+    "action-center": "decisions",
+    "inefficiencies": "decisions",
+    "anomalies": "decisions",
+    "budgets": "decisions",
+    "rate-limits": "decisions",
+    "insights": "decisions",
+    "overview": "trajectory",
+    "cost": "trajectory",
+    "forecast": "trajectory",
+    "projects": "trajectory",
+    "usage-mix": "trajectory",
+    "models": "appendix",
+    "shape": "appendix",
+    "sessions": "appendix",
+    "heatmap": "appendix",
+    "usage-windows": "appendix",
+    "attribution": "appendix",
+    "evidence": "trust",
+    # Disabled (never rendered) — bucket assignment is irrelevant.
+    "advisor": "appendix",
+    "outlook": "appendix",
+}
+
+_TIER_ORDER: tuple[str, ...] = ("decisions", "trajectory", "appendix", "trust")
+
+
+def _sections_by_tier(d: Dashboard) -> dict[str, list[str]]:
+    """Group renderable section IDs by tier, preserving ``_SECTION_ORDER``."""
+    out: dict[str, list[str]] = {tier: [] for tier in _TIER_ORDER}
+    for sid in _SECTION_ORDER:
+        if not _should_render(sid, d):
+            continue
+        out[_SECTION_TIER.get(sid, "appendix")].append(sid)
+    return out
+
+
+# Friendly display names for the canonical tool/vendor IDs. The parsers emit
+# raw IDs like ``"claude-code"`` and ``"openai-codex"``; the masthead shows
+# the human form. Order is the canonical "known sources" order — every tool
+# Caliper can ingest, surfaced even when a particular run didn't detect logs
+# from it (so the user can SEE that Codex was searched-for and not found).
+KNOWN_SOURCES: tuple[tuple[str, str], ...] = (
+    ("claude-code", "Claude Code"),
+    ("openai-codex", "OpenAI Codex"),
+    ("cursor", "Cursor"),
+    ("aider", "Aider"),
+)
+
+
+# Phase-3 polish: visible numbering. The audit-anchor map (`SECTION_NUMBERS`)
+# stays §00–§19 so external links keep resolving, but the *displayed* number
+# on each section / TOC entry counts 1..N in tier render order, skipping
+# disabled sections. This makes the index feel clean (1, 2, 3, …) instead of
+# leaking "§07" / "§17" gaps to the reader.
+_RENDER_NUM_MAP: ContextVar[dict[str, str] | None] = ContextVar(
+    "caliper_render_num_map", default=None
+)
+
+
+def _compute_display_numbers(d: Dashboard) -> dict[str, str]:
+    """Sequential 1..N labels in tier-respecting render order."""
+    out: dict[str, str] = {}
+    counter = 0
+    tiered = _sections_by_tier(d)
+    for tier in _TIER_ORDER:
+        for sid in tiered[tier]:
+            counter += 1
+            out[sid] = str(counter)
+    return out
+
+
+def _display_num(section_id: str) -> str:
+    """Resolve the visible number for a section. Falls back to the legacy
+    ``§NN`` label when no render-time map is active (e.g., raw helper calls
+    from tests)."""
+    mapping = _RENDER_NUM_MAP.get()
+    if mapping is not None and section_id in mapping:
+        return mapping[section_id]
+    return SECTION_NUMBERS.get(section_id, "")
+
+
+_TIER_LABEL: dict[str, str] = {
+    "decisions": "Decisions",
+    "trajectory": "Trajectory",
+    "appendix": "Appendix",
+    "trust": "Trust",
+}
+
+
+def _palette_index(d: Dashboard) -> str:
+    """Build a JSON search index for the cmd+K palette (Phase 3).
+
+    Searches over: tier sections, top models, top projects, anomalies,
+    advisor recommendations. The palette JS reads this as a `<script
+    type="application/json">` block and filters on each keystroke.
+    """
+    import json
+
+    items: list[dict[str, str]] = []
+    for sid in _SECTION_ORDER:
+        if _should_render(sid, d):
+            items.append(
+                {
+                    "type": "section",
+                    "label": _SECTION_TITLES[sid],
+                    "anchor": sid,
+                    "hint": _display_num(sid),
+                }
+            )
+    for m in (d.by_model or [])[:20]:
+        items.append(
+            {
+                "type": "model",
+                "label": f"{m.vendor} · {m.model}",
+                "anchor": "models",
+                "hint": fmt_money(m.cost_usd),
+            }
+        )
+    for p in (d.by_project or [])[:20]:
+        items.append(
+            {
+                "type": "project",
+                "label": p.name,
+                "anchor": "projects",
+                "hint": fmt_money(p.cost_usd),
+            }
+        )
+    for a in (d.anomalies or [])[:20]:
+        items.append(
+            {
+                "type": "anomaly",
+                "label": f"{a.kind} · {a.timestamp}",
+                "anchor": "anomalies",
+                "hint": fmt_money(a.impact_usd),
+            }
+        )
+    for r in (d.advisor_recommendations or [])[:10]:
+        items.append(
+            {
+                "type": "fix",
+                "label": r.title,
+                "anchor": "inefficiencies",
+                "hint": fmt_money(r.savings_usd),
+            }
+        )
+    return json.dumps(items, ensure_ascii=False)
+
+
+def _render_palette() -> str:
+    """Static markup for the cmd+K palette. The inline JS toggles `[hidden]`
+    and populates the results list on each keystroke."""
+    return (
+        '<div class="cal-palette" id="cal-palette" hidden '
+        'role="dialog" aria-modal="true" aria-label="Search palette">'
+        '<div class="cal-palette-backdrop" data-palette-close></div>'
+        '<div class="cal-palette-dialog">'
+        '<input class="cal-palette-input" type="search" '
+        'placeholder="Search sections, models, projects, anomalies…" '
+        'aria-label="Search query" autocomplete="off" spellcheck="false">'
+        '<ul class="cal-palette-results" role="listbox" '
+        'aria-label="Search results"></ul>'
+        '<div class="cal-palette-hints">'
+        "<kbd>↑</kbd><kbd>↓</kbd> navigate · "
+        "<kbd>↵</kbd> open · "
+        "<kbd>Esc</kbd> close"
+        "</div>"
+        "</div></div>"
+    )
+
+
+def _render_receipt_toc(d: Dashboard) -> str:
+    """Sticky right-rail table of contents for the Receipt rhythm.
+
+    Grouped by tier; the scroll-spy script (`_INTERACTIVE_SCRIPT`) toggles
+    `aria-current="location"` on the link whose section is in view. Renders
+    even when interactive JS is off — clicking still scrolls, and `:target`
+    handles the highlight without JS.
+    """
+    tiered = _sections_by_tier(d)
+    has_any = any(tiered[t] for t in _TIER_ORDER)
+    if not has_any:
+        return ""
+    groups: list[str] = []
+    for tier in _TIER_ORDER:
+        sids = tiered[tier]
+        if not sids:
+            continue
+        items: list[str] = []
+        for sid in sids:
+            num = _display_num(sid)
+            title = _SECTION_TITLES[sid]
+            items.append(
+                f'<li><a class="cal-toc-link" href="#{sid}" data-toc-target="{sid}">'
+                f'<span class="cal-toc-num">{num}</span>'
+                f'<span class="cal-toc-title">{_esc(title)}</span>'
+                "</a></li>"
+            )
+        groups.append(
+            '<div class="cal-toc-group">'
+            f'<div class="cal-toc-group-label">{_esc(_TIER_LABEL[tier])}</div>'
+            '<ul class="cal-toc-list">' + "".join(items) + "</ul>"
+            "</div>"
+        )
+    return (
+        '<nav class="cal-receipt-toc" aria-label="Section navigation">'
+        '<div class="cal-toc-eyebrow">Index</div>' + "".join(groups) + "</nav>"
+    )
+
+
+# ----------------------------------------------------------------------------
+# Severity token — single canonical chip used across the redesign
+# (Von Restorff: critical = filled + 1-shot pulse; everything else neutral)
+# ----------------------------------------------------------------------------
+
+_SEV_GLYPH: dict[str, str] = {
+    "critical": "●",
+    "warn": "◐",
+    "info": "○",
+    "ok": "✓",
+}
+
+
+def _severity_token(level: str, label: str | None = None) -> str:
+    """Render the canonical severity chip. ``level`` is one of the four tokens.
+
+    ``label`` is the visible text — kept in its original case so screen
+    readers and search/test tooling can see "Spend spike" rather than
+    "SPEND SPIKE". The visual uppercase comes from CSS (text-transform).
+    """
+    lvl = (level or "info").lower()
+    if lvl in ("bad", "critical", "fail"):
+        lvl = "critical"
+    elif lvl in ("warn", "warning"):
+        lvl = "warn"
+    elif lvl in ("good", "ok"):
+        lvl = "ok"
+    else:
+        lvl = "info"
+    text = _esc(label or lvl)
+    glyph = _SEV_GLYPH[lvl]
+    return (
+        f'<span class="sev sev-{lvl}" role="status">'
+        f'<span class="sev-glyph" aria-hidden="true">{glyph}</span>'
+        f"<span>{text}</span></span>"
+    )
+
+
+# ----------------------------------------------------------------------------
+# Billboard — single above-the-fold "biggest fix" peak (Peak-End Rule)
+# ----------------------------------------------------------------------------
+
+
+def _render_billboard(card: BillboardCard, rhythm: str) -> str:
+    """Render the one-headline above-the-fold billboard.
+
+    ``rhythm`` is reserved for future visual variants; today the same
+    markup serves both receipt and terminal. The card is purposely larger
+    and quieter than the existing ``_hero_verdict_strip`` so the eye lands
+    here first (Aesthetic-Usability + Krug billboard test).
+    """
+    tone = card.tone or "neutral"
+    rail = {
+        "warn": "var(--warn)",
+        "critical": "var(--bad)",
+        "good": "var(--ok)",
+    }.get(tone, "var(--accent)")
+    headline_color = {
+        "warn": "var(--warn)",
+        "critical": "var(--bad)",
+        "good": "var(--ok)",
+    }.get(tone, "var(--accent)")
+
+    confidence_html = ""
+    if card.confidence_pct is not None:
+        confidence_html = (
+            '<span class="cal-billboard-confidence" '
+            'style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;'
+            "border:1px solid var(--border);border-radius:999px;"
+            "font-family:var(--mono);font-size:11px;color:var(--mute);"
+            'background:var(--panel-2)">'
+            f'<span style="width:6px;height:6px;border-radius:50%;background:{rail}"></span>'
+            f"<span>{card.confidence_pct}% confidence</span>"
+            "</span>"
+        )
+
+    rationale_html = (
+        f'<p class="cal-billboard-rationale" '
+        'style="margin:0;color:var(--ink-2);font-size:14px;line-height:1.55;'
+        f'max-width:62ch">{_esc(card.rationale)}</p>'
+        if card.rationale
+        else ""
+    )
+
+    command_html = (
+        '<div class="cal-billboard-command" '
+        'style="font-family:var(--mono);font-size:12px;color:var(--accent);'
+        "margin-top:12px;padding:8px 12px;background:var(--panel-2);"
+        "border:1px solid var(--border);border-radius:var(--r-sm);"
+        'overflow-wrap:anywhere;word-break:break-word">'
+        f'<span style="color:var(--ghost)">$ </span>{_esc(card.command)}</div>'
+        if card.command
+        else ""
+    )
+
+    cta_html = (
+        f'<a class="cal-billboard-cta" href="#{_esc(card.cta_anchor or "")}" '
+        'style="display:inline-flex;align-items:center;gap:8px;margin-top:18px;'
+        "padding:11px 18px;background:var(--accent);color:var(--bg);"
+        "border-radius:var(--r-md);font-weight:600;font-size:13px;"
+        'text-decoration:none;letter-spacing:0">'
+        f"<span>{_esc(card.cta_label or 'Investigate')}</span>"
+        '<span class="cal-billboard-arrow" aria-hidden="true">→</span>'
+        "</a>"
+        if card.cta_label and card.cta_anchor
+        else ""
+    )
+
+    return (
+        '<div class="cal-billboard" '
+        f'data-billboard-kind="{_esc(card.kind)}" '
+        f'data-billboard-tone="{_esc(tone)}" '
+        'role="region" aria-label="Top recommendation" '
+        'style="position:relative;background:var(--panel);'
+        "border:1px solid var(--border);border-radius:var(--r-md);"
+        'padding:22px 26px 24px;overflow:hidden">'
+        f'<span aria-hidden="true" style="position:absolute;left:0;top:0;bottom:0;'
+        f'width:3px;background:{rail}"></span>'
+        f'<span class="cal-billboard-headline" '
+        'style="font-family:var(--mono);font-size:11px;letter-spacing:0;'
+        f'color:{headline_color};text-transform:uppercase;font-weight:700">'
+        f"{_esc(card.headline)}"
+        "</span>"
+        '<div class="cal-billboard-value-row" '
+        'style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-top:8px">'
+        '<span class="cal-billboard-value" '
+        'style="font-size:var(--num-xl);font-weight:700;color:var(--ink);'
+        'letter-spacing:0;line-height:1.05">'
+        f"{_esc(card.value)}</span>"
+        f"{confidence_html}"
+        "</div>"
+        f'<div style="margin-top:12px">{rationale_html}</div>'
+        f"{command_html}"
+        f"{cta_html}"
+        "</div>"
+    )
+
 
 def _render_section(
     section_id: str, d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap
@@ -3829,9 +4846,67 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
     ev = d.quality_score
     evidence_badge = _evidence_badge(ev) if ev else ""
     gen_line = (d.generated_at or "").replace("T", " ")[:16]
-    vendor_line = f"{len(d.window.vendors_active)} of {d.window.vendor_count_total} vendors"
+    vendor_count = len(d.window.vendors_active)
+    vendor_total = d.window.vendor_count_total
+    # Show EVERY known source as a chip with detected/missing status, so the
+    # reader can confirm at a glance that Codex, Cursor, Aider, Claude Code
+    # were all searched for — not just the ones that happened to be found.
+    active_set = set(d.window.vendors_active or ())
+    chips: list[str] = []
+    for vid, label in KNOWN_SOURCES:
+        detected = vid in active_set
+        if detected:
+            glyph = "✓"
+            color = "var(--ok)"
+            ink = "var(--ink)"
+            weight = "600"
+            border = "var(--ok-tint)"
+            bg = "var(--ok-tint)"
+            title = f"{label}: detected"
+        else:
+            glyph = "·"
+            color = "var(--ghost)"
+            ink = "var(--ghost)"
+            weight = "500"
+            border = "var(--border)"
+            bg = "transparent"
+            title = f"{label}: no logs found in this window"
+        chips.append(
+            '<span class="cal-source-chip" '
+            f'title="{_esc(title)}" '
+            'style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;'
+            f"border:1px solid {border};border-radius:999px;background:{bg};"
+            'font-family:var(--font);font-size:11px;white-space:nowrap">'
+            f'<span aria-hidden="true" style="color:{color};font-weight:700;font-size:10px">{glyph}</span>'
+            f'<span style="color:{ink};font-weight:{weight}">{_esc(label)}</span>'
+            "</span>"
+        )
+    # Show extra vendors (anything beyond the known four) as plain chips
+    # so unusual data doesn't silently disappear.
+    known_ids = {vid for vid, _ in KNOWN_SOURCES}
+    extras = sorted(v for v in active_set if v not in known_ids)
+    for extra in extras:
+        chips.append(
+            '<span class="cal-source-chip" '
+            f'title="{_esc(extra)}: detected (custom source)" '
+            'style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;'
+            "border:1px solid var(--accent-tint-2);border-radius:999px;"
+            "background:var(--accent-tint);"
+            'font-family:var(--font);font-size:11px;white-space:nowrap">'
+            '<span aria-hidden="true" style="color:var(--accent);font-weight:700;font-size:10px">✓</span>'
+            f'<span style="color:var(--ink);font-weight:600">{_esc(extra)}</span>'
+            "</span>"
+        )
+    sources_row = (
+        '<div class="cal-source-row" '
+        'style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">'
+        f'<span style="color:var(--mute);font-family:var(--mono);font-size:10px;'
+        f'letter-spacing:0;text-transform:uppercase;font-weight:600">Sources</span>'
+        f'<span style="color:var(--ghost);font-family:var(--mono);font-size:11px">'
+        f"{vendor_count}/{vendor_total}</span>" + "".join(chips) + "</div>"
+    )
     masthead = (
-        '<header style="display:grid;grid-template-columns:1fr auto;gap:16px;'
+        '<header role="banner" style="display:grid;grid-template-columns:1fr auto;gap:16px;'
         'align-items:start;padding-bottom:18px;border-bottom:1px solid var(--border)">'
         "<div>"
         '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">'
@@ -3841,10 +4916,11 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         "</h1></div>"
         '<div style="color:var(--mute);font-size:12px">'
         "Cost layer for AI-assisted development · offline, auditable, no login</div></div>"
-        '<div style="text-align:right;display:flex;flex-direction:column;gap:6px;align-items:flex-end">'
+        '<div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end;min-width:0">'
         f'<div style="display:flex;gap:8px;align-items:center">{evidence_badge}{_window_badge(d.window)}</div>'
-        '<div style="font-size:11px;color:var(--mute);font-family:var(--mono);display:flex;gap:14px;align-items:center">'
-        f"{_status_dot('good', 'offline')}<span>Generated {_esc(gen_line)}</span><span>{_esc(vendor_line)}</span></div>"
+        f"{sources_row}"
+        '<div style="font-size:11px;color:var(--mute);font-family:var(--mono);display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:flex-end">'
+        f"{_status_dot('good', 'offline')}<span>Generated {_esc(gen_line)}</span></div>"
         f'<div style="font-size:11px;color:var(--ghost);font-family:var(--mono)">{_build_id(d)}</div>'
         "</div></header>"
     )
@@ -3853,25 +4929,70 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         if d.banner is not None
         else ""
     )
-    hero_inner = _hero_verdict_strip(d, rhythm)
+    billboard_html = (
+        f'<div style="margin-top:22px">{_render_billboard(d.billboard, rhythm)}</div>'
+        if d.billboard is not None
+        else ""
+    )
+    # When a billboard is set, it replaces the hero verdict strip as the
+    # above-the-fold peak. Keep the existing strip available for legacy
+    # payloads that omit the billboard.
+    hero_inner = "" if d.billboard is not None else _hero_verdict_strip(d, rhythm)
     hero_html = f'<div style="margin-top:18px">{hero_inner}</div>' if hero_inner else ""
     verdict_html = (
         f'<div style="margin-top:18px">{_verdict_strip(d, rhythm)}</div>'
         if d.executive_brief and d.executive_brief.findings
         else ""
     )
-    sections = "".join(
-        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm)
-        for sid in _SECTION_ORDER
-        if _should_render(sid, d)
+    tiered = _sections_by_tier(d)
+    decisions_html = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["decisions"]
+    )
+    trajectory_html = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["trajectory"]
+    )
+    appendix_sections_html = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["appendix"]
+    )
+    trust_html = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["trust"]
+    )
+    appendix_count = len(tiered["appendix"])
+    appendix_html = ""
+    if appendix_sections_html:
+        plural = "" if appendix_count == 1 else "s"
+        appendix_html = (
+            '<details class="cal-appendix">'
+            '<summary class="cal-appendix-summary">'
+            '<span class="cal-appendix-chev" aria-hidden="true">▸</span>'
+            f'<span class="cal-appendix-label">Technical appendix</span>'
+            f'<span class="cal-appendix-count">{appendix_count} section{plural}</span>'
+            "</summary>"
+            f'<div class="cal-appendix-body">{appendix_sections_html}</div>'
+            "</details>"
+        )
+    main_html = decisions_html + trajectory_html + appendix_html + trust_html
+    toc_html = _render_receipt_toc(d)
+    body_html = (
+        '<div class="cal-receipt-body">'
+        f'<main id="cal-main" class="cal-receipt-main">{main_html}</main>'
+        f"{toc_html}"
+        "</div>"
+        if toc_html
+        else (
+            '<main id="cal-main" class="cal-receipt-main" '
+            'style="margin-top:24px">'
+            f"{main_html}</main>"
+        )
     )
     return (
         '<div class="cal-dashboard-root cal-receipt-root">'
         f"{masthead}"
         f"{banner_html}"
+        f"{billboard_html}"
         f"{hero_html}"
         f"{verdict_html}"
-        f'<div style="margin-top:24px;display:grid;gap:28px">{sections}</div>'
+        f"{body_html}"
         f"{_caliper_footer(d)}"
         "</div>"
     )
@@ -3972,7 +5093,7 @@ def _terminal_index(d: Dashboard) -> str:
     for sid in _SECTION_ORDER:
         if not _should_render(sid, d):
             continue
-        num = SECTION_NUMBERS[sid]
+        num = _display_num(sid)
         title = _SECTION_TITLES[sid]
         items.append(
             "<li>"
@@ -3982,7 +5103,7 @@ def _terminal_index(d: Dashboard) -> str:
             "border-radius:3px;font-size:12px;font-family:var(--mono);"
             "border-left:2px solid transparent;padding-left:8px;margin-left:-2px;"
             'transition:color 80ms, background-color 80ms">'
-            f'<span style="color:var(--ghost);font-size:10px">§{num}</span>'
+            f'<span style="color:var(--ghost);font-size:10px">{num}.</span>'
             f"<span>{_esc(title)}</span></a></li>"
         )
     sha = getattr(d.caliper, "build_sha", "") or ""
@@ -4014,26 +5135,55 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         if d.banner is not None
         else ""
     )
-    hero_inner = _hero_verdict_strip(d, rhythm)
+    billboard_html = (
+        f'<div style="margin-bottom:22px">{_render_billboard(d.billboard, rhythm)}</div>'
+        if d.billboard is not None
+        else ""
+    )
+    hero_inner = "" if d.billboard is not None else _hero_verdict_strip(d, rhythm)
     hero_html = f'<div style="margin-bottom:22px">{hero_inner}</div>' if hero_inner else ""
     verdict_html = (
         f'<div style="margin-bottom:22px">{_verdict_strip(d, rhythm)}</div>'
         if d.executive_brief and d.executive_brief.findings
         else ""
     )
-    sections = "".join(
-        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm)
-        for sid in _SECTION_ORDER
-        if _should_render(sid, d)
+    tiered = _sections_by_tier(d)
+    decisions_html = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["decisions"]
     )
+    trajectory_html = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["trajectory"]
+    )
+    appendix_sections_html = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["appendix"]
+    )
+    trust_html = "".join(
+        _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["trust"]
+    )
+    appendix_count = len(tiered["appendix"])
+    appendix_html = ""
+    if appendix_sections_html:
+        plural = "" if appendix_count == 1 else "s"
+        appendix_html = (
+            '<details class="cal-appendix">'
+            '<summary class="cal-appendix-summary">'
+            '<span class="cal-appendix-chev" aria-hidden="true">▸</span>'
+            f'<span class="cal-appendix-label">Technical appendix</span>'
+            f'<span class="cal-appendix-count">{appendix_count} section{plural}</span>'
+            "</summary>"
+            f'<div class="cal-appendix-body">{appendix_sections_html}</div>'
+            "</details>"
+        )
+    sections = decisions_html + trajectory_html + appendix_html + trust_html
     return (
         '<div class="cal-dashboard-root cal-terminal-root">'
         f"{_terminal_masthead(d)}"
         f"{ticker}"
         '<div class="cal-terminal-layout">'
         f"{_terminal_index(d)}"
-        '<main class="cal-terminal-main">'
+        '<main id="cal-main" class="cal-terminal-main">'
         f"{banner_html}"
+        f"{billboard_html}"
         f"{hero_html}"
         f"{verdict_html}"
         f'<div style="display:grid;gap:28px">{sections}</div>'
@@ -4112,6 +5262,231 @@ _INTERACTIVE_SCRIPT = """
     else if (name === 'mode') setMode(value);
     persist(currentState());
   });
+  // Scroll-spy for the receipt TOC. IntersectionObserver tracks every
+  // <section[id]> and toggles aria-current="location" on the matching
+  // .cal-toc-link. The TOC itself is sticky in CSS; this only updates
+  // which link gets the highlighted state. Falls back gracefully when no
+  // TOC is present (e.g., terminal rhythm).
+  var tocLinks = document.querySelectorAll('.cal-toc-link[data-toc-target]');
+  if (tocLinks.length && 'IntersectionObserver' in window) {
+    var tocMap = {};
+    for (var i = 0; i < tocLinks.length; i++) {
+      tocMap[tocLinks[i].dataset.tocTarget] = tocLinks[i];
+    }
+    var observed = [];
+    for (var key in tocMap) {
+      var sect = document.getElementById(key);
+      if (sect) observed.push(sect);
+    }
+    var setCurrent = function (id) {
+      for (var j = 0; j < tocLinks.length; j++) {
+        if (tocLinks[j].dataset.tocTarget === id) {
+          tocLinks[j].setAttribute('aria-current', 'location');
+        } else {
+          tocLinks[j].removeAttribute('aria-current');
+        }
+      }
+    };
+    var spy = new IntersectionObserver(function (entries) {
+      // Pick the section whose top is closest to the viewport top while
+      // still intersecting. This avoids flicker when several sections
+      // overlap the viewport during a long scroll.
+      var best = null;
+      var bestTop = Infinity;
+      for (var k = 0; k < entries.length; k++) {
+        if (!entries[k].isIntersecting) continue;
+        var top = entries[k].boundingClientRect.top;
+        if (top >= 0 && top < bestTop) { best = entries[k].target; bestTop = top; }
+      }
+      if (best) setCurrent(best.id);
+    }, { rootMargin: '-72px 0px -60% 0px', threshold: [0, 0.1, 0.5, 1] });
+    for (var m = 0; m < observed.length; m++) spy.observe(observed[m]);
+  }
+
+  // Anchor-click → open the technical appendix if the target lives inside
+  // it. Without this, clicking #models on a fresh load would scroll into
+  // the empty space above the collapsed <details>. The browser already
+  // auto-opens <details> for :target focus, but only after navigation —
+  // we open eagerly so the scroll lands on a rendered section.
+  var appendix = document.querySelector('details.cal-appendix');
+  function openAppendixIfTargets(hash) {
+    if (!appendix || !hash || hash.length < 2) return;
+    var target = document.getElementById(hash.slice(1));
+    if (target && appendix.contains(target) && !appendix.open) {
+      appendix.open = true;
+    }
+  }
+  openAppendixIfTargets(window.location.hash);
+  document.addEventListener('click', function (event) {
+    var a = event.target.closest('a[href^="#"]');
+    if (!a) return;
+    openAppendixIfTargets(a.getAttribute('href'));
+  }, true);
+
+  // Cmd+K / "/" command palette — fuzzy search over sections, models,
+  // projects, anomalies, recommendations. The static markup is always
+  // rendered (in interactive mode); this controller handles open/close
+  // and selection. Keyboard nav: ↑↓ Enter Esc.
+  var palette = document.getElementById('cal-palette');
+  var paletteInput = palette && palette.querySelector('.cal-palette-input');
+  var paletteList = palette && palette.querySelector('.cal-palette-results');
+  var paletteIndexEl = document.getElementById('cal-palette-index');
+  var paletteIndex = [];
+  if (paletteIndexEl) {
+    try { paletteIndex = JSON.parse(paletteIndexEl.textContent || '[]'); }
+    catch (e) { paletteIndex = []; }
+  }
+  var paletteSelected = 0;
+  var paletteResults = [];
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"]/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  function paletteRender() {
+    if (!paletteList) return;
+    var html = '';
+    for (var i = 0; i < paletteResults.length; i++) {
+      var r = paletteResults[i];
+      var active = i === paletteSelected ? ' is-active' : '';
+      html += '<li class="cal-palette-item' + active + '" role="option"' +
+              ' data-idx="' + i + '" data-anchor="' + escapeHtml(r.anchor) + '">' +
+              '<span class="cal-palette-type">' + escapeHtml(r.type) + '</span>' +
+              '<span class="cal-palette-label">' + escapeHtml(r.label) + '</span>' +
+              '<span class="cal-palette-hint">' + escapeHtml(r.hint) + '</span>' +
+              '</li>';
+    }
+    if (!paletteResults.length) {
+      html = '<li class="cal-palette-empty">No matches.</li>';
+    }
+    paletteList.innerHTML = html;
+  }
+  function paletteUpdate(query) {
+    var q = (query || '').toLowerCase().trim();
+    paletteResults = paletteIndex.filter(function(it) {
+      if (!q) return true;
+      return (it.label || '').toLowerCase().indexOf(q) !== -1
+          || (it.hint || '').toLowerCase().indexOf(q) !== -1
+          || (it.type || '').toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 30);
+    paletteSelected = 0;
+    paletteRender();
+  }
+  function paletteOpen() {
+    if (!palette) return;
+    palette.hidden = false;
+    paletteInput.value = '';
+    paletteUpdate('');
+    paletteInput.focus();
+  }
+  function paletteClose() {
+    if (!palette) return;
+    palette.hidden = true;
+  }
+  function jumpToAnchor(anchor) {
+    if (!anchor) return;
+    openAppendixIfTargets('#' + anchor);
+    var el = document.getElementById(anchor);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    history.replaceState(null, '', '#' + anchor);
+  }
+  function paletteCommit() {
+    var r = paletteResults[paletteSelected];
+    if (!r) return;
+    paletteClose();
+    jumpToAnchor(r.anchor);
+  }
+  if (palette) {
+    paletteInput.addEventListener('input', function(e) { paletteUpdate(e.target.value); });
+    // Visible "Search" button — touch / non-keyboard users get a tappable
+    // entry point; keyboard users still have ⌘K and "/".
+    var openBtn = document.getElementById('cal-open-palette');
+    if (openBtn) {
+      openBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        paletteOpen();
+      });
+    }
+    paletteInput.addEventListener('keydown', function(e) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        paletteSelected = Math.min(paletteResults.length - 1, paletteSelected + 1);
+        paletteRender();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        paletteSelected = Math.max(0, paletteSelected - 1);
+        paletteRender();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        paletteCommit();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        paletteClose();
+      }
+    });
+    paletteList.addEventListener('click', function(e) {
+      var item = e.target.closest('.cal-palette-item');
+      if (!item) return;
+      paletteSelected = parseInt(item.dataset.idx, 10) || 0;
+      paletteCommit();
+    });
+    palette.addEventListener('click', function(e) {
+      if (e.target && e.target.hasAttribute('data-palette-close')) paletteClose();
+    });
+  }
+
+  // Global keyboard shortcuts. Cmd/Ctrl+K and "/" open the palette;
+  // a g-leader prefix (vim-style) jumps to sections: g a, g i, g m,
+  // g s, g o. e/c expand or collapse the technical appendix.
+  var gleader = false;
+  var gtimer = null;
+  function inEditableTarget(t) {
+    if (!t || !t.matches) return false;
+    return t.matches('input, textarea, [contenteditable], [contenteditable="true"]');
+  }
+  document.addEventListener('keydown', function(e) {
+    if (inEditableTarget(e.target)) return;
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      paletteOpen();
+      return;
+    }
+    if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && palette) {
+      e.preventDefault();
+      paletteOpen();
+      return;
+    }
+    if (gleader) {
+      var jumpMap = {
+        'a': 'anomalies', 'i': 'inefficiencies', 'm': 'models',
+        's': 'sessions', 'o': 'overview', 'p': 'projects',
+        'c': 'cost', 'f': 'forecast', 'e': 'evidence',
+      };
+      var target = jumpMap[e.key];
+      if (target) {
+        e.preventDefault();
+        jumpToAnchor(target);
+      }
+      gleader = false;
+      if (gtimer) clearTimeout(gtimer);
+      return;
+    }
+    if (e.key === 'g' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      gleader = true;
+      if (gtimer) clearTimeout(gtimer);
+      gtimer = setTimeout(function() { gleader = false; }, 900);
+      return;
+    }
+    if (e.key === 'e' && appendix && !appendix.open) {
+      e.preventDefault();
+      appendix.open = true;
+    } else if (e.key === 'c' && appendix && appendix.open) {
+      e.preventDefault();
+      appendix.open = false;
+    }
+  });
+
   // Snapshot download — serialises the current DOM and offers it as a file
   // so the user can keep this exact playground state. Filename embeds the
   // active rhythm + mode for human-readable history.
@@ -4157,23 +5532,30 @@ def _render_tweaks_panel(*, initial_rhythm: str, initial_mode: str) -> str:
             f'role="radio" aria-checked="{aria}">{label}</button>'
         )
 
-    rhythm_btns = _btn("receipt", "Receipt", initial_rhythm == "receipt") + _btn(
-        "terminal", "Terminal", initial_rhythm == "terminal"
-    )
+    del initial_rhythm  # Terminal mode is no longer surfaced in the UI; the
+    # tweaks panel only exposes Dark / Light / Safe Share now. The underlying
+    # render_dashboard(rhythm="terminal") CLI flag stays functional for
+    # backwards compatibility but never appears as a visible toggle.
     mode_btns = (
         _btn("dark", "Dark", initial_mode == "dark")
         + _btn("light", "Light", initial_mode == "light")
         + _btn("safe-share", "Safe Share", initial_mode == "safe-share")
     )
+    # Visible search affordance — opens the cmd+K palette. Touch / non-
+    # keyboard users get a tappable surface; desktop users see the ⌘K hint.
+    search_btn = (
+        '<button id="cal-open-palette" class="cal-tweaks-search" type="button" '
+        'aria-label="Search sections, models, projects, anomalies (Cmd+K)" '
+        'title="Search sections, models, projects, anomalies (Cmd+K)">'
+        '<span class="cal-tweaks-search-icon" aria-hidden="true">⌕</span>'
+        '<span class="cal-tweaks-search-label">Search</span>'
+        '<span class="cal-tweaks-search-hint" aria-hidden="true">⌘K</span>'
+        "</button>"
+    )
     return (
         '<aside class="cal-tweaks-panel" role="toolbar" '
         'aria-label="Dashboard view controls">'
-        '<div class="cal-tweaks-section">'
-        '<span class="cal-tweaks-label">View</span>'
-        '<div class="cal-tweaks-group" data-toggle="rhythm" role="radiogroup" '
-        'aria-label="Layout rhythm">'
-        f"{rhythm_btns}"
-        "</div></div>"
+        f"{search_btn}"
         '<div class="cal-tweaks-divider" aria-hidden="true"></div>'
         '<div class="cal-tweaks-section">'
         '<span class="cal-tweaks-label">Mode</span>'
@@ -4227,6 +5609,10 @@ def _wrap_document(
     class_attr = " ".join(classes)
     share = "true" if share_safe else "false"
     script = f"<script>{_INTERACTIVE_SCRIPT}</script>" if interactive else ""
+    # Skip-to-content link — first focusable element so keyboard users can
+    # jump past the masthead/TOC straight into the main content. Visible
+    # only when focused (CSS) so it doesn't disrupt sighted users.
+    skip_link = '<a class="cal-skip-link" href="#cal-main">Skip to main content</a>'
     return (
         "<!doctype html>"
         '<html lang="en">'
@@ -4239,6 +5625,7 @@ def _wrap_document(
         f'<body class="{class_attr}" data-theme="{theme}" data-density="{density}" '
         f'data-share-safe="{share}" data-privacy="{privacy}" data-rhythm="{rhythm}" '
         f'data-mode="{mode}" data-interactive="{"true" if interactive else "false"}">'
+        f"{skip_link}"
         f"{body}"
         f"{script}"
         "</body></html>"
@@ -4299,6 +5686,10 @@ def render_dashboard(
     if privacy not in PRIVACY_MODES:
         raise ValueError(f"privacy must be one of {PRIVACY_MODES!r} — got {privacy!r}")
     dense = density == "compact"
+    # Compute the per-render numbering so headings / TOC / palette show
+    # clean sequential numbers (1, 2, 3 …) in tier render order rather than
+    # the audit-anchor map's §00..§19 with disabled-section gaps.
+    _RENDER_NUM_MAP.set(_compute_display_numbers(d))
     # Interactive mode needs BOTH spans in every sensitive cell so the
     # Safe Share toggle can swap visibility in-browser. We hand the renderer
     # a print-only privacy map regardless of the user's initial choice; the
@@ -4307,16 +5698,27 @@ def render_dashboard(
     render_privacy = "print-only" if interactive else privacy
     pm = _build_privacy_map(d, render_privacy)
     if interactive:
-        # Embed both rhythms; CSS hides the inactive one. The wrapper class
-        # is what the rhythm-swap rules ([data-rhythm="X"] .cal-rhythm-Y)
-        # key off of.
-        receipt_body = _render_receipt(d, dense=dense, pm=pm)
-        terminal_body = _render_terminal(d, dense=dense, pm=pm)
+        # Phase 3 polish: the Terminal rhythm is no longer surfaced as a
+        # toggle, so the interactive snapshot only embeds whichever rhythm
+        # the caller actually requested. Both rhythms still work via the
+        # CLI --rhythm flag for backwards compatibility.
+        if rhythm == "terminal":
+            rendered = _render_terminal(d, dense=dense, pm=pm)
+            wrapper_class = "cal-rhythm-terminal"
+        else:
+            rendered = _render_receipt(d, dense=dense, pm=pm)
+            wrapper_class = "cal-rhythm-receipt"
         mode = _mode_from_state(theme, privacy)
+        palette_index = _palette_index(d)
+        palette_data = (
+            '<script type="application/json" id="cal-palette-index">'
+            f"{palette_index}</script>"
+            f"{_render_palette()}"
+        )
         body = (
-            f'<div class="cal-rhythm-receipt">{receipt_body}</div>'
-            f'<div class="cal-rhythm-terminal">{terminal_body}</div>'
+            f'<div class="{wrapper_class}">{rendered}</div>'
             + _render_tweaks_panel(initial_rhythm=rhythm, initial_mode=mode)
+            + palette_data
         )
     else:
         mode = _mode_from_state(theme, privacy)
