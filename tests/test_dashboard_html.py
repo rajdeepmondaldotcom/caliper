@@ -713,6 +713,56 @@ def test_billboard_hidden_on_empty_dashboard() -> None:
     assert bb is None
 
 
+def test_every_section_has_an_explicit_tier() -> None:
+    """Guardrail: `_sections_by_tier` falls back to "appendix" via
+    `.get(sid, "appendix")`, so a section added to `_SECTION_ORDER` but
+    forgotten in `_SECTION_TIER` would silently land in the appendix with no
+    warning. Require every renderable section to declare its tier explicitly
+    so future additions are caught here instead of in production."""
+    from caliper.dashboards.html import _SECTION_ORDER, _SECTION_TIER, _TIER_ORDER
+
+    missing = [sid for sid in _SECTION_ORDER if sid not in _SECTION_TIER]
+    assert not missing, f"sections missing a _SECTION_TIER entry: {missing}"
+    bad_tier = {sid: t for sid, t in _SECTION_TIER.items() if t not in _TIER_ORDER}
+    assert not bad_tier, f"sections mapped to an unknown tier: {bad_tier}"
+
+
+def test_billboard_tidy_drops_cta_when_no_evidence_section() -> None:
+    """The tidy-fallback billboard anchors its CTA at the evidence section.
+    When there are no evidence rows that section won't render, so the CTA
+    must be omitted rather than linking to a dead anchor."""
+    from caliper.dashboards.adapter import _build_billboard
+    from caliper.dashboards.html import _render_billboard
+    from caliper.dashboards.sample_data import sample_dashboard
+
+    window = sample_dashboard().window
+    totals = sample_dashboard().totals
+    # No advisor recs, no inefficiencies, no evidence → tidy with no CTA.
+    card = _build_billboard(
+        advisor_recommendations=[],
+        inefficiency_rows=[],
+        totals=totals,
+        window=window,
+        has_evidence=False,
+    )
+    assert card is not None and card.kind == "tidy"
+    assert card.cta_anchor == ""
+    html = _render_billboard(card, "receipt")
+    assert "cal-billboard-cta" not in html  # no dangling link
+    assert "TIDY" in html  # headline still renders (apostrophe is HTML-escaped)
+
+    # With evidence present, the tidy CTA points at the evidence section.
+    card_ev = _build_billboard(
+        advisor_recommendations=[],
+        inefficiency_rows=[],
+        totals=totals,
+        window=window,
+        has_evidence=True,
+    )
+    assert card_ev is not None and card_ev.cta_anchor == "evidence"
+    assert 'href="#evidence"' in _render_billboard(card_ev, "receipt")
+
+
 def test_receipt_rhythm_renders_sticky_toc_grouped_by_tier() -> None:
     """Phase 2: the receipt rhythm includes a sticky right-rail TOC,
     grouped by tier. Each section anchor must appear as a TOC link with

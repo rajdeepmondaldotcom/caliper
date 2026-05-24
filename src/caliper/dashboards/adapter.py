@@ -414,6 +414,7 @@ def build_handoff_dashboard(
         inefficiency_rows=inefficiency_rows,
         totals=totals,
         window=window,
+        has_evidence=bool(evidence),
     )
 
     return Dashboard(
@@ -524,6 +525,7 @@ def _build_billboard(
     inefficiency_rows: list[InefficiencyRow],
     totals: Totals,
     window: WindowMeta,
+    has_evidence: bool = True,
 ) -> BillboardCard | None:
     """Pick the single highest-leverage fix and shape it for above-the-fold display.
 
@@ -532,6 +534,12 @@ def _build_billboard(
     2. Highest ``impact_usd`` (× string-mapped confidence) from inefficiency rows.
     3. Tidy fallback — "no fix detected" + total spend for the window.
     4. ``None`` when the window has zero events (nothing to say).
+
+    The fix paths anchor the CTA at the "inefficiencies" section, which is
+    guaranteed to render whenever a fix exists (its render guard is exactly
+    "advisor_recommendations or inefficiencies"). The tidy fallback anchors
+    at "evidence" only when evidence rows exist; otherwise it emits no
+    anchor so the renderer drops the CTA rather than linking nowhere.
     """
     if totals is None or totals.events == 0:
         return None
@@ -587,7 +595,9 @@ def _build_billboard(
             tone="warn" if best_ineff.severity in ("warn", "fail", "critical") else "neutral",
         )
 
-    # Tidy fallback — positive framing so the page never feels empty.
+    # Tidy fallback — positive framing so the page never feels empty. Only
+    # offer the "Open evidence" CTA when the evidence section will actually
+    # render; otherwise leave the anchor empty so the renderer drops the link.
     return BillboardCard(
         kind="tidy",
         headline="YOU'RE TIDY",
@@ -596,8 +606,8 @@ def _build_billboard(
             f"No fixable waste detected in the {window.label.lower()}. "
             "Keep an eye on the trajectory below."
         ),
-        cta_label="Open evidence",
-        cta_anchor="evidence",
+        cta_label="Open evidence" if has_evidence else "",
+        cta_anchor="evidence" if has_evidence else "",
         confidence_pct=None,
         command="",
         tone="good",
