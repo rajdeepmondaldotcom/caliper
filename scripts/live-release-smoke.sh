@@ -164,11 +164,23 @@ text_ok dashboard "$VENV/bin/caliper" dashboard "${COMMON[@]}" --days 1 --no-del
 test -s "$OUT/dashboard.html"
 "$VENV/bin/python" - "$OUT/dashboard.html" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 html = Path(sys.argv[1]).read_text(encoding="utf-8")
-assert html.count("<script>") == 1, "expected exactly one inline dashboard script"
-assert html.count("</script>") == 1, "expected exactly one inline dashboard script close"
+# Exactly one EXECUTABLE inline script (`<script>` with no type
+# attribute). Non-executable data blocks like the cmd+K palette
+# index (`<script type="application/json">`) are data, not
+# behaviour, and don't count against the privacy gate.
+assert html.count("<script>") == 1, "expected exactly one executable inline dashboard script"
+opens = re.findall(r"<script(\s[^>]*)?>", html)
+closes = html.count("</script>")
+assert closes == len(opens), "open/close <script> mismatch"
+for attrs in opens:
+    if attrs and attrs.strip():
+        assert 'type="application/json"' in attrs, (
+            f"unexpected non-JSON <script> attrs {attrs!r}"
+        )
 for needle in ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import("):
     assert needle not in html, f"dashboard privacy gate found {needle!r}"
 PY

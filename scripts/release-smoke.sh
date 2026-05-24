@@ -80,11 +80,22 @@ text_ok dashboard uv run caliper dashboard --lookback-days 1 --no-deltas --outpu
 test -s "$OUT/caliper.html"
 "$PYTHON_BIN" - "$OUT/caliper.html" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 html = Path(sys.argv[1]).read_text(encoding="utf-8")
-assert html.count("<script>") == 1, "expected exactly one inline dashboard script"
-assert html.count("</script>") == 1, "expected exactly one inline dashboard script close"
+# Exactly one EXECUTABLE inline script. Non-executable JSON data
+# blocks (e.g. the cmd+K palette index, `<script
+# type="application/json">`) are data, not behaviour.
+assert html.count("<script>") == 1, "expected exactly one executable inline dashboard script"
+opens = re.findall(r"<script(\s[^>]*)?>", html)
+closes = html.count("</script>")
+assert closes == len(opens), "open/close <script> mismatch"
+for attrs in opens:
+    if attrs and attrs.strip():
+        assert 'type="application/json"' in attrs, (
+            f"unexpected non-JSON <script> attrs {attrs!r}"
+        )
 for needle in ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import("):
     assert needle not in html, f"dashboard privacy gate found {needle!r}"
 PY
