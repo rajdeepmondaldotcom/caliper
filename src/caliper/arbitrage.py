@@ -9,6 +9,17 @@ from caliper.humanize import session_display_label
 from caliper.models import UsageEvent, decimal_string
 from caliper.pricing import MODELS_BY_NAME, RateCard, model_vendor, normalize_model
 
+# A network-refreshed catalog can list hundreds of models, but only the
+# cheapest handful can ever beat a given source model. Pricing the source
+# against every catalog entry is what made the dashboard "Building · signals"
+# stage hang. We price against the cheapest-by-input-rate roster instead; the
+# per-candidate savings sort is unchanged, so the chosen alternative is
+# identical in practice (the best alternative is always among the cheapest
+# models). The roster + per-event results are memoised on the RateCard (see
+# ``_candidate_model_names`` / ``_ranked_alternatives``).
+_MAX_CANDIDATE_MODELS = 32
+_CANDIDATE_CACHE_KEY = "roster"
+
 
 @dataclass(frozen=True)
 class ArbitrageSuggestion:
@@ -283,19 +294,19 @@ def _event_suggestions(event: UsageEvent, rate_card: RateCard) -> list[Arbitrage
     "Premium" is no longer a hard-coded list. A model is a candidate
     when the active rate card can price a cheaper alternative for the
     same token shape, including cross-vendor alternatives.
+
+    Performance: the cheaper-alternative lookup (which prices the event
+    against the candidate roster) is the expensive step, so it runs only
+    when a rule's cheap precondition already holds. The ``fast-tier-low-
+    output`` rule needs no alternative lookup at all, and events that match
+    neither the short-context nor the opus precondition skip the lookup
+    entirely. This is what keeps ``recommend()`` from repricing every event
+    on large catalogs.
     """
     suggestions: list[ArbitrageSuggestion] = []
     model = event.model.lower()
-    alternatives = model_alternatives_for_event(event, rate_card, limit=1)
-    has_alternative = bool(alternatives)
-    if has_alternative and event.usage.input_tokens < 2_000:
-        suggestions.append(
-            ArbitrageSuggestion(
-                rule_id="premium-short-context",
-                confidence=0.7,
-                evidence=_evidence(event) | {"input_tokens": event.usage.input_tokens},
-            )
-        )
+
+    # Cheapest rule first — no candidate pricing required.
     if event.service_tier == "fast" and event.usage.output_tokens < 500:
         suggestions.append(
             ArbitrageSuggestion(
@@ -304,7 +315,26 @@ def _event_suggestions(event: UsageEvent, rate_card: RateCard) -> list[Arbitrage
                 evidence=_evidence(event) | {"output_tokens": event.usage.output_tokens},
             )
         )
-    if "opus" in model and event.usage.reasoning_output_tokens == 0 and has_alternative:
+
+    # Only the two model-swap rules need a cheaper-alternative check, and
+    # only when their own precondition holds. Compute it at most once.
+    wants_short_context = event.usage.input_tokens < 2_000
+    wants_opus_swap = "opus" in model and event.usage.reasoning_output_tokens == 0
+    if not (wants_short_context or wants_opus_swap):
+        return suggestions
+
+    if not _has_cheaper_alternative(event, rate_card):
+        return suggestions
+
+    if wants_short_context:
+        suggestions.append(
+            ArbitrageSuggestion(
+                rule_id="premium-short-context",
+                confidence=0.7,
+                evidence=_evidence(event) | {"input_tokens": event.usage.input_tokens},
+            )
+        )
+    if wants_opus_swap:
         suggestions.append(
             ArbitrageSuggestion(
                 rule_id="opus-no-reasoning",
@@ -313,6 +343,36 @@ def _event_suggestions(event: UsageEvent, rate_card: RateCard) -> list[Arbitrage
             )
         )
     return suggestions
+
+
+def _has_cheaper_alternative(event: UsageEvent, rate_card: RateCard) -> bool:
+    """Does any recommendable model price the event's token shape cheaper?
+
+    Early-exits on the first cheaper candidate, so expensive source models
+    (where the cheapest candidate wins immediately) cost ~one pricing call.
+    Reuses the memoised full ranking when it's already been computed for
+    this shape, so screening and ranking never double-price the same event.
+    """
+    cached = rate_card._arbitrage_alt_cache.get(_alt_cache_key(event))
+    if cached is not None:
+        return bool(cached)
+    actual, _, _ = event_cost(rate_card, event)
+    if actual.cost_usd <= 0:
+        return False
+    source = normalize_model(event.model)
+    for candidate in _candidate_model_names(rate_card):
+        if candidate == source or not _is_recommendable_replacement(candidate):
+            continue
+        projected, _, unknown_model = rate_card.cost_for(
+            event.usage,
+            candidate,
+            event.service_tier,
+        )
+        if unknown_model or projected.unpriced_events or projected.cost_usd <= 0:
+            continue
+        if actual.cost_usd - projected.cost_usd > 0:
+            return True
+    return False
 
 
 def rank_model_alternatives(
@@ -350,12 +410,59 @@ def rank_model_alternatives(
     return tuple(rows[:limit])
 
 
+def _alt_cache_key(event: UsageEvent) -> tuple:
+    """Pricing-relevant signature of an event.
+
+    Mirrors the fields ``event_cost`` / ``cost_for`` actually read, so two
+    events with the same model, tier, token shape, and vendor-reported cost
+    produce identical alternatives and can share a cache entry. Excludes
+    identity fields (timestamp/path/session) that don't affect pricing.
+    """
+    u = event.usage
+    return (
+        event.model,
+        event.service_tier,
+        event.vendor_reported_cost_usd,
+        u.input_tokens,
+        u.cache_creation_input_tokens,
+        u.cache_read_input_tokens,
+        u.cache_creation_input_1h_tokens,
+        u.output_tokens,
+        u.reasoning_output_tokens,
+        u.total_tokens,
+    )
+
+
 def model_alternatives_for_event(
     event: UsageEvent,
     rate_card: RateCard,
     *,
     limit: int = 3,
 ) -> tuple[ModelAlternative, ...]:
+    rows = _ranked_alternatives(event, rate_card)
+    return rows if limit <= 0 else rows[:limit]
+
+
+def _ranked_alternatives(event: UsageEvent, rate_card: RateCard) -> tuple[ModelAlternative, ...]:
+    """Full ranked alternatives for an event, memoised per (card, shape).
+
+    The heavy work — repricing the event against the candidate roster — is
+    pure with respect to (model, tier, usage). Memoising it on the rate card
+    collapses the build's repeated repricing passes into one computation per
+    shape. The cache lives on the card (like ``_event_cost_cache``) so it is
+    naturally scoped to a single run and never leaks across builds.
+    """
+    cache = rate_card._arbitrage_alt_cache
+    key = _alt_cache_key(event)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    result = _compute_alternatives(event, rate_card)
+    cache[key] = result
+    return result
+
+
+def _compute_alternatives(event: UsageEvent, rate_card: RateCard) -> tuple[ModelAlternative, ...]:
     actual, _, _ = event_cost(rate_card, event)
     if actual.cost_usd <= 0:
         return ()
@@ -394,12 +501,16 @@ def model_alternatives_for_event(
             item.model,
         )
     )
-    return tuple(rows if limit <= 0 else rows[:limit])
+    return tuple(rows)
 
 
 def _candidate_model_names(rate_card: RateCard) -> tuple[str, ...]:
+    cache = rate_card._arbitrage_candidate_cache
+    cached = cache.get(_CANDIDATE_CACHE_KEY)
+    if cached is not None:
+        return cached
     seen: set[str] = set()
-    names: list[str] = []
+    priced: list[tuple[float, str]] = []
     for raw in list(rate_card.catalog_cards) + list(MODELS_BY_NAME):
         name = normalize_model(raw)
         if not name or name in seen:
@@ -408,8 +519,15 @@ def _candidate_model_names(rate_card: RateCard) -> tuple[str, ...]:
         if card is None or card.api_rates is None:
             continue
         seen.add(name)
-        names.append(name)
-    return tuple(names)
+        # Sort key: cheapest input rate first. Only the cheapest models can
+        # beat a given source, so capping to the cheapest roster bounds the
+        # per-event repricing cost on huge network catalogs without changing
+        # which alternative wins (savings ranking favours the cheapest).
+        priced.append((float(card.api_rates.input), name))
+    priced.sort(key=lambda item: item[0])
+    result = tuple(name for _, name in priced[:_MAX_CANDIDATE_MODELS])
+    cache[_CANDIDATE_CACHE_KEY] = result
+    return result
 
 
 def _is_recommendable_replacement(candidate: str) -> bool:

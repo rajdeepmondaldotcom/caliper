@@ -126,6 +126,57 @@ def test_recommendation_for_gpt55_picks_gpt54_first() -> None:
     assert "gpt-5.4" in targets
 
 
+def test_candidate_roster_is_capped_and_memoised_on_card() -> None:
+    """Regression guard for the dashboard "Building · signals" hang.
+
+    A large network catalog must not make the advisor reprice every event
+    against every model. The candidate roster is capped to the cheapest
+    ``_MAX_CANDIDATE_MODELS`` and memoised on the rate card, and per-event
+    alternatives are cached per token shape so the build's repeated
+    repricing passes collapse into one computation per shape.
+    """
+    import dataclasses
+
+    from caliper.arbitrage import (
+        _MAX_CANDIDATE_MODELS,
+        _candidate_model_names,
+        model_alternatives_for_event,
+    )
+    from caliper.pricing import MODELS_BY_NAME
+
+    card = RateCard.load(None, "model")
+    # Inflate the catalog far beyond the cap by cloning real priced cards.
+    real = dict(MODELS_BY_NAME)
+    base_names = list(real)
+    inflated = dict(real)
+    for i in range(120):
+        inflated[f"sim-model-{i}"] = real[base_names[i % len(base_names)]]
+
+    import caliper.arbitrage as arb_mod
+
+    original = arb_mod.MODELS_BY_NAME
+    arb_mod.MODELS_BY_NAME = inflated
+    try:
+        roster = _candidate_model_names(card)
+        assert len(roster) <= _MAX_CANDIDATE_MODELS
+        # Memoised: a second call returns the identical cached tuple.
+        assert _candidate_model_names(card) is roster
+        assert card._arbitrage_candidate_cache  # populated
+
+        # Per-event alternatives are cached by token shape on the card.
+        event = _event(model="claude-opus-4-7", tier="standard")
+        first = model_alternatives_for_event(event, card, limit=3)
+        assert card._arbitrage_alt_cache  # populated
+        # A second event with an identical shape reuses the cached ranking.
+        twin = dataclasses.replace(event, session_id="other-session")
+        before = len(card._arbitrage_alt_cache)
+        again = model_alternatives_for_event(twin, card, limit=3)
+        assert again == first
+        assert len(card._arbitrage_alt_cache) == before  # no new entry
+    finally:
+        arb_mod.MODELS_BY_NAME = original
+
+
 def test_advise_cli_json(tmp_path) -> None:
     session_root = tmp_path / "sessions"
     now = dt.datetime.now(tz=dt.UTC)

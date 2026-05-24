@@ -401,6 +401,21 @@ class RateCard:
         compare=False,
         repr=False,
     )
+    # Per-run caches for arbitrage model-alternative lookups. Keeping them on
+    # the card (lifecycle-tied, like the cost caches above) avoids re-pricing
+    # every event against the full catalog on each call — the regression that
+    # made the dashboard "Building · signals" stage hang on large catalogs.
+    # Typed generically so this module stays independent of caliper.arbitrage.
+    _arbitrage_candidate_cache: dict[str, tuple[str, ...]] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
+    _arbitrage_alt_cache: dict[tuple, tuple] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
 
     @classmethod
     def load(
