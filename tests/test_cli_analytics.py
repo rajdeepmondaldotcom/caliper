@@ -136,6 +136,63 @@ def test_predict_json_shape(tmp_path: Path):
     } <= payload.keys()
 
 
+def test_predict_json_anomalies_include_actionability_metadata(tmp_path: Path):
+    sessions = tmp_path / "sessions"
+    state = tmp_path / "state.sqlite"
+    config = tmp_path / "codex.toml"
+    sessions.mkdir(parents=True)
+    state.touch()
+    base = dt.datetime(2026, 5, 1, 12, 0, tzinfo=dt.UTC)
+    for idx in range(8):
+        write_session(
+            sessions,
+            f"prior-{idx}.jsonl",
+            [
+                turn_context(model="gpt-5.5", service_tier="standard"),
+                token_event(
+                    base + dt.timedelta(days=idx),
+                    {
+                        "input_tokens": 100,
+                        "cached_input_tokens": 0,
+                        "output_tokens": 10,
+                        "reasoning_output_tokens": 0,
+                        "total_tokens": 110,
+                    },
+                ),
+            ],
+        )
+    write_session(
+        sessions,
+        "huge.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(
+                base + dt.timedelta(days=9),
+                {
+                    "input_tokens": 10_000_000,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 100_000,
+                    "reasoning_output_tokens": 0,
+                    "total_tokens": 10_100_000,
+                },
+            ),
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        ["predict", "--output-format", "json", *_common(sessions, state, config)],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["anomalies"]
+    top = payload["anomalies"][0]
+    assert top["baseline_sample_count"] >= 4
+    assert top["comparison_scope"]
+    assert top["reason"]
+
+
 def test_recommend_markdown(tmp_path: Path):
     sessions, state, config = _setup(tmp_path)
     result = runner.invoke(app, ["recommend", *_common(sessions, state, config)])

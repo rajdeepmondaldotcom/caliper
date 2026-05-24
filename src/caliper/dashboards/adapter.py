@@ -43,12 +43,7 @@ from caliper.analysis.session_shape import (
     category_label,
     compute_session_shape,
 )
-from caliper.anomaly import (
-    detect_daily_anomalies,
-    detect_model_anomalies,
-    detect_project_daily_anomalies,
-    detect_session_anomalies,
-)
+from caliper.anomaly import detect_actionable_anomalies
 from caliper.arbitrage import recommend as recommend_arbitrage
 from caliper.attribution import build_agent_attributions, build_skill_attributions
 from caliper.budgets import (
@@ -1874,11 +1869,11 @@ def _build_anomaly_rows(
     rate_card: RateCard,
     daily_aggregates: list[Aggregate],
 ) -> list[AnomalyRow]:
-    raw = (
-        detect_session_anomalies(result.events, rate_card)
-        + detect_daily_anomalies(daily_aggregates)
-        + detect_model_anomalies(result.events, rate_card)
-        + detect_project_daily_anomalies(result.events, rate_card, options.timezone)
+    raw = detect_actionable_anomalies(
+        result.events,
+        rate_card,
+        options.timezone,
+        daily=daily_aggregates,
     )
     session_labels = _session_label_lookup(result.events, options.timezone)
     rows: list[AnomalyRow] = []
@@ -1901,9 +1896,12 @@ def _build_anomaly_rows(
                 impact_usd=float(item.impact_usd_exact),
                 evidence_status="estimated",
                 tone="critical" if item.z_score >= 5.0 else "warn",
+                comparison_scope=item.comparison_scope,
+                baseline_sample_count=item.baseline_sample_count,
+                reason=item.reason,
             )
         )
-    return sorted(rows, key=lambda row: (-row.z_score, -row.impact_usd, row.kind, row.label))[:12]
+    return sorted(rows, key=lambda row: (-row.impact_usd, -row.z_score, row.kind, row.label))[:12]
 
 
 def _anomaly_kind_label(kind: str) -> str:

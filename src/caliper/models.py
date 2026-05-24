@@ -741,6 +741,12 @@ class Anomaly:
     baseline_scale: float
     z_score: float
     impact_usd_exact: Decimal
+    comparison_scope: str = ""
+    baseline_sample_count: int = 0
+    cohort_key: str = ""
+    cohort_label: str = ""
+    reason: str = ""
+    dedupe_key: str = ""
 
 
 @dataclass(frozen=True)

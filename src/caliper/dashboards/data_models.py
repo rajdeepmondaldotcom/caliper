@@ -478,6 +478,9 @@ class AnomalyRow:
     impact_usd: float
     evidence_status: EvidenceStatus
     tone: ImpactTone = "warn"
+    comparison_scope: str = ""
+    baseline_sample_count: int = 0
+    reason: str = ""
 
 
 # ---------------------------------------------------------------------------

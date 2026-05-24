@@ -6,6 +6,7 @@ empty-state placeholder, table sort stability, and the masthead build id.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 
@@ -406,11 +407,24 @@ def test_agent_labels_hide_machine_ids() -> None:
 
 
 def test_anomaly_rows_use_constructive_copy_without_scale_noise() -> None:
-    html = render_dashboard(sample_dashboard())
+    dashboard = sample_dashboard()
+    dashboard = dataclasses.replace(
+        dashboard,
+        anomalies=[
+            dataclasses.replace(
+                dashboard.anomalies[0],
+                comparison_scope="prior sessions in same project/model/tier cohort",
+                baseline_sample_count=8,
+            ),
+            *dashboard.anomalies[1:],
+        ],
+    )
+    html = render_dashboard(dashboard)
 
     assert "scale $" not in html
     assert "Spend spike" in html
     assert "above typical" in html
+    assert "Compared with 8 prior sessions in same project/model/tier cohort." in html
 
 
 def test_dashboard_renders_operator_first_sections() -> None:

@@ -5569,12 +5569,7 @@ def predict(
     ] = 30,
 ) -> None:
     """Predictive analytics: per-model demand, seasonality, rate-limit ETA, anomalies."""
-    from caliper.anomaly import (
-        detect_daily_anomalies,
-        detect_model_anomalies,
-        detect_project_daily_anomalies,
-        detect_session_anomalies,
-    )
+    from caliper.anomaly import detect_actionable_anomalies
     from caliper.predict import (
         decompose_seasonality,
         forecast_per_model,
@@ -5592,11 +5587,11 @@ def predict(
     )
     seasonality = decompose_seasonality(result.events, rate_card, options.timezone)
     rate_limits = forecast_rate_limits(result.rate_limit_samples)
-    anomalies = (
-        detect_session_anomalies(result.events, rate_card)
-        + detect_daily_anomalies(daily)
-        + detect_model_anomalies(result.events, rate_card)
-        + detect_project_daily_anomalies(result.events, rate_card, options.timezone)
+    anomalies = detect_actionable_anomalies(
+        result.events,
+        rate_card,
+        options.timezone,
+        daily=daily,
     )
     daily_costs = [float(row.costs.cost_usd) for row in daily]
     outlook = total_outlook(daily_costs)

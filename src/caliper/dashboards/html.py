@@ -3243,6 +3243,12 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
         impact = fmt_money(a.impact_usd)
         sigma_label = _fmt_sigma(a.z_score)
         action = _anomaly_action(a.kind)
+        comparison = ""
+        if a.baseline_sample_count and a.comparison_scope:
+            comparison = (
+                f" Compared with {a.baseline_sample_count:,} "
+                f"{a.comparison_scope}."
+            )
         rows_html.append(
             f'<div style="display:grid;grid-template-columns:92px 1fr auto;gap:14px;'
             f"align-items:start;padding:{pad};border-left:3px solid {tone_color};"
@@ -3254,7 +3260,8 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             f'<div style="color:var(--ink);font-size:13px;font-weight:500">'
             f'{_esc(a.kind)} · <span style="font-family:var(--mono);color:var(--ink-2)">{_private_text(a.label, pm)}</span></div>'
             f'<div style="color:var(--mute);font-size:12px;margin-top:3px">'
-            f"Observed {observed} vs typical {baseline}; {impact} above typical on {_esc(a.timestamp)}.</div>"
+            f"Observed {observed} vs typical {baseline}; {impact} above typical on {_esc(a.timestamp)}."
+            f"{_esc(comparison)}</div>"
             f'<div style="color:var(--ink-2);font-size:12px;margin-top:5px">{_esc(action)}</div>'
             "</div>"
             '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">'
