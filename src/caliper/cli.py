@@ -486,6 +486,16 @@ VendorOpt = Annotated[
         help="Filter by tool vendor (codex, claude-code, cursor, aider). Repeatable.",
     ),
 ]
+ParseWorkersOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--parse-workers",
+        help=(
+            "Parallel parser workers. Use auto for CPU count; 1 disables process parallelism. "
+            "Can also be set with CALIPER_PARSE_WORKERS."
+        ),
+    ),
+]
 ByVendorOpt = Annotated[
     bool,
     typer.Option(
@@ -545,6 +555,7 @@ OPTION_KEYS = (
     "breakdown",
     "cost_mode",
     "vendors",
+    "parse_workers",
 )
 ROOT_OPTION_DEFAULTS: dict[str, Any] = {
     "output_format": "table",
@@ -573,6 +584,7 @@ ROOT_OPTION_DEFAULTS: dict[str, Any] = {
     "rate_limit_sample_limit": 100,
     "include_all_rate_limit_samples": False,
     "vendors": None,
+    "parse_workers": None,
     "by_vendor": False,
     "progress": False,
     "quiet": False,
@@ -741,6 +753,8 @@ def _emit_usage_footprint(progress, discovery, options: RuntimeOptions) -> None:
         vendor_summary=discovery.vendor_summary(),
         window_label=window_label(options.start, options.end, options.timezone),
         unreadable_files=discovery.unreadable_files,
+        parse_workers=options.parse_workers,
+        parse_cache=options.parse_cache,
     )
 
 
@@ -1056,6 +1070,7 @@ def main(
     rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
     include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
     vendors: VendorOpt = None,
+    parse_workers: ParseWorkersOpt = None,
     by_vendor: ByVendorOpt = False,
     progress: ProgressOpt = False,
     quiet: QuietOpt = False,
@@ -2286,6 +2301,7 @@ def dashboard(
     width: WidthOpt = None,
     top_threads: TopThreadsOpt = 10,
     vendors: VendorOpt = None,
+    parse_workers: ParseWorkersOpt = None,
     progress: ProgressOpt = False,
     quiet: QuietOpt = False,
     share_safe: ShareSafeOpt = True,

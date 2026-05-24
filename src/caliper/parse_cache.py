@@ -372,6 +372,45 @@ class ParseCache:
         self.misses += len(missing)
         return events, supported_paths, unsupported_paths, missing
 
+    def get_events_for_paths(
+        self,
+        paths: list[Path],
+        signature: str,
+    ) -> dict[Path, list[UsageEvent]]:
+        stat_by_path: dict[str, os.stat_result] = {}
+        path_by_text: dict[str, Path] = {}
+        for path in paths:
+            try:
+                stat_by_path[str(path)] = path.stat()
+            except OSError:
+                continue
+            path_by_text[str(path)] = path
+        if not stat_by_path:
+            self.misses += len(paths)
+            return {}
+
+        out: dict[Path, list[UsageEvent]] = {}
+        for chunk in _chunks(list(stat_by_path), 500):
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self._conn.execute(
+                f"""
+                select path, mtime_ns, size, payload from parsed_vendor_events
+                where signature = ? and path in ({placeholders})
+                """,  # nosec B608
+                (signature, *chunk),
+            ).fetchall()
+            for path_text, mtime_ns, size, payload in rows:
+                stat = stat_by_path.get(str(path_text))
+                if stat is None or stat.st_mtime_ns != mtime_ns or stat.st_size != size:
+                    continue
+                events = _decode_events_payload(payload)
+                if events is None:
+                    continue
+                out[path_by_text[str(path_text)]] = events
+        self.hits += len(out)
+        self.misses += max(0, len(paths) - len(out))
+        return out
+
     def put_indexed_events(
         self,
         path: Path,

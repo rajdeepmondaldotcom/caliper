@@ -229,6 +229,7 @@ class RuntimeOptions:
     breakdown: bool = False
     cost_mode: str = "auto"
     vendors: tuple[str, ...] = ("all",)
+    parse_workers: int = 1
 
 
 @dataclass(frozen=True)

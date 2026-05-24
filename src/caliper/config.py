@@ -380,6 +380,7 @@ def build_options(
     breakdown: bool = False,
     cost_mode: str = "auto",
     vendors: list[str] | tuple[str, ...] | None = None,
+    parse_workers: int | str | None = None,
 ) -> RuntimeOptions:
     loaded = load_config(config)
     timezone_value = str(cfg(loaded, "timezone", timezone, "local"))
@@ -433,6 +434,7 @@ def build_options(
     no_parse_cache_value = cfg_bool(loaded, "no_parse_cache", no_parse_cache, False)
     project_raw = cfg(loaded, "project", project, None)
     project_value = str(project_raw).strip() if project_raw else None
+    parse_workers_value = _parse_workers(loaded, parse_workers)
 
     return RuntimeOptions(
         session_root=cfg_path(loaded, "session_root", session_root, default_session_root()),
@@ -471,6 +473,7 @@ def build_options(
         breakdown=cfg_bool(loaded, "breakdown", breakdown, False),
         cost_mode=cost_mode_value,
         vendors=_vendors(loaded, vendors),
+        parse_workers=parse_workers_value,
     )
 
 
@@ -574,6 +577,41 @@ def _positive_optional_int(value, name: str) -> int | None:
     if value is None:
         return None
     return _positive_int(value, name)
+
+
+def _parse_workers(loaded: dict, value: int | str | None) -> int:
+    raw: object
+    env_value = os.environ.get("CALIPER_PARSE_WORKERS", "").strip()
+    if value not in (None, ""):
+        raw = value
+    elif env_value:
+        raw = env_value
+    elif "parse_workers" in loaded:
+        raw = loaded["parse_workers"]
+    else:
+        raw = "auto"
+    return resolve_parse_workers(raw)
+
+
+def resolve_parse_workers(value: object) -> int:
+    if value is None:
+        return _available_worker_count()
+    raw = str(value).strip().lower()
+    if raw in {"", "auto"}:
+        return _available_worker_count()
+    try:
+        workers = int(raw)
+    except ValueError as exc:
+        raise ValueError("parse_workers must be 'auto' or an integer greater than 0") from exc
+    if workers <= 0:
+        raise ValueError("parse_workers must be greater than 0")
+    return workers
+
+
+def _available_worker_count() -> int:
+    process_cpu_count = getattr(os, "process_cpu_count", None)
+    count = process_cpu_count() if process_cpu_count is not None else os.cpu_count()
+    return max(1, int(count or 1))
 
 
 def _vendors(loaded: dict, values: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:

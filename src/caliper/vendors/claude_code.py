@@ -22,6 +22,7 @@ from caliper.models import (
 )
 from caliper.normalize import normalize_model, normalize_tier
 from caliper.parse_cache import ParseCache
+from caliper.parse_parallel import assert_accounted_paths, path_size, run_path_batches
 from caliper.progress import NULL_PROGRESS, ParseProgress
 from caliper.timeutil import parse_event_timestamp
 
@@ -56,10 +57,11 @@ class ClaudeCodeParser:
         events: list[UsageEvent] = []
         warnings: list[str] = []
         cache = ParseCache.default() if options.parse_cache else None
-        paths = list(paths) if paths is not None else self.discover(options)
+        paths = sorted(set(paths)) if paths is not None else sorted(set(self.discover(options)))
         files_with_events = 0
         try:
             paths_to_parse = paths
+            accounted_paths: list[Path] = []
             if cache is not None:
                 cached = cache.get_indexed_events_for_paths(
                     paths,
@@ -74,23 +76,24 @@ class ClaudeCodeParser:
                     cached_paths = set(paths) - set(paths_to_parse)
                     for cached_path in cached_paths:
                         progress.cache_hit(cached_path)
-            for path in paths_to_parse:
-                try:
-                    parsed = _parse_cached_session(
-                        path,
-                        cache,
-                        options,
-                        start=start,
-                        end=end,
-                        progress=progress,
-                    )
-                except OSError as exc:
-                    warnings.append(f"Claude Code session unreadable: {path}: {exc}")
-                    progress.file_done(path)
+                    accounted_paths.extend(cached_paths)
+            parsed_paths = _parse_uncached_paths(
+                paths_to_parse,
+                options,
+                start=start,
+                end=end,
+                progress=progress,
+                cache=cache,
+            )
+            for path, parsed, warning in parsed_paths:
+                if warning:
+                    warnings.append(warning)
+                    accounted_paths.append(path)
                     continue
                 files_with_events += int(bool(parsed))
                 events.extend(parsed)
-                progress.file_done(path)
+                accounted_paths.append(path)
+            assert_accounted_paths(paths, accounted_paths, label="Claude Code loader")
         finally:
             if cache is not None:
                 cache.close()
@@ -148,30 +151,85 @@ def _parser_cache_signature(options: RuntimeOptions) -> str:
     )
 
 
-def _parse_cached_session(
-    path: Path,
-    cache: ParseCache | None,
+def _parse_uncached_paths(
+    paths: list[Path],
     options: RuntimeOptions,
     *,
     start: dt.datetime,
     end: dt.datetime,
-    progress: ParseProgress = NULL_PROGRESS,
-) -> list[UsageEvent]:
-    if cache is None:
-        return _events_in_window(
-            list(_parse_session(path, options, progress=progress)), start=start, end=end
-        )
+    progress: ParseProgress,
+    cache: ParseCache | None,
+) -> list[tuple[Path, list[UsageEvent], str]]:
     signature = _parser_cache_signature(options)
-    cached = cache.get_indexed_events(path, signature, start=start, end=end)
-    if cached is not None:
-        return cached
-    legacy = cache.get_events(path, signature)
-    if legacy is not None:
-        cache.put_indexed_events(path, signature, legacy, vendor=VENDOR_CLAUDE_CODE)
-        return _events_in_window(legacy, start=start, end=end)
-    events = list(_parse_session(path, options, progress=progress))
-    cache.put_indexed_events(path, signature, events, vendor=VENDOR_CLAUDE_CODE)
-    return _events_in_window(events, start=start, end=end)
+    parsed: list[tuple[Path, list[UsageEvent], str]] = []
+    cold_paths: list[Path] = []
+    if cache is not None:
+        legacy_by_path = _legacy_events_for_paths(cache, paths, signature)
+        for path in paths:
+            legacy = legacy_by_path.get(path)
+            if legacy is not None:
+                cache.put_indexed_events(path, signature, legacy, vendor=VENDOR_CLAUDE_CODE)
+                parsed.append((path, _events_in_window(legacy, start=start, end=end), ""))
+                progress.cache_hit(path)
+            else:
+                cold_paths.append(path)
+    else:
+        cold_paths = list(paths)
+
+    cold = run_path_batches(
+        cold_paths,
+        _parse_claude_batch,
+        workers=options.parse_workers,
+        size_of=path_size,
+        worker_args=(options,),
+        on_batch_done=lambda batch, _result: _report_path_batch_done(batch, progress),
+    )
+    for path, events, warning in cold:
+        if cache is not None and not warning:
+            cache.put_indexed_events(path, signature, events, vendor=VENDOR_CLAUDE_CODE)
+        parsed.append((path, _events_in_window(events, start=start, end=end), warning))
+    assert_accounted_paths(
+        paths,
+        (path for path, _events, _warning in parsed),
+        label="Claude Code parser",
+    )
+    return parsed
+
+
+def _report_path_batch_done(batch: tuple[Path, ...], progress: ParseProgress) -> None:
+    for path in batch:
+        progress.file_done(path)
+
+
+def _legacy_events_for_paths(
+    cache: ParseCache,
+    paths: list[Path],
+    signature: str,
+) -> dict[Path, list[UsageEvent]]:
+    get_events_for_paths = getattr(cache, "get_events_for_paths", None)
+    if get_events_for_paths is not None:
+        return get_events_for_paths(paths, signature)
+    out: dict[Path, list[UsageEvent]] = {}
+    for path in paths:
+        events = cache.get_events(path, signature)
+        if events is not None:
+            out[path] = events
+    return out
+
+
+def _parse_claude_batch(
+    paths: tuple[Path, ...],
+    options: RuntimeOptions,
+) -> list[tuple[Path, list[UsageEvent], str]]:
+    out: list[tuple[Path, list[UsageEvent], str]] = []
+    for path in paths:
+        try:
+            events = list(_parse_session(path, options, progress=NULL_PROGRESS))
+        except OSError as exc:
+            out.append((path, [], f"Claude Code session unreadable: {path}: {exc}"))
+            continue
+        out.append((path, events, ""))
+    return out
 
 
 def _events_in_window(

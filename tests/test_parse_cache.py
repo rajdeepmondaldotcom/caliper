@@ -142,6 +142,72 @@ def test_parse_cache_reuses_session_across_different_windows(monkeypatch, tmp_pa
     assert [event.usage.input_tokens for event in second.events] == [200]
 
 
+def test_parallel_codex_parse_populates_indexed_cache(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CALIPER_CACHE_DIR", str(tmp_path / "cache"))
+    session_root = tmp_path / "sessions"
+    base = dt.datetime(2026, 5, 12, tzinfo=dt.UTC)
+    for index in range(300):
+        write_session(
+            session_root,
+            f"rollout-2026-05-12T00-00-{index:03d}-parallel-cache.jsonl",
+            [
+                turn_context(model="gpt-5.5", service_tier="standard"),
+                token_event(
+                    base + dt.timedelta(seconds=index),
+                    {"input_tokens": index + 1, "output_tokens": 1, "total_tokens": index + 2},
+                ),
+            ],
+        )
+    options = build_options(
+        since=(base - dt.timedelta(seconds=1)).isoformat(),
+        until=(base + dt.timedelta(minutes=10)).isoformat(),
+        session_root=session_root,
+        state_db=tmp_path / "missing-state.sqlite",
+        codex_config=tmp_path / "missing.toml",
+        vendors=["openai-codex"],
+        parse_workers=2,
+    )
+
+    warmed = parser.load_usage(options)
+    assert len(warmed.events) == 300
+
+    def fail_batch(*_args, **_kwargs):
+        raise AssertionError("parallel cache miss")
+
+    monkeypatch.setattr(parser, "_parse_codex_batch", fail_batch)
+    cached = parser.load_usage(options)
+    assert len(cached.events) == 300
+    assert [event.usage.input_tokens for event in cached.events[:3]] == [1, 2, 3]
+
+
+def test_codex_loader_dedupes_duplicate_input_paths(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    now = dt.datetime(2026, 5, 12, tzinfo=dt.UTC)
+    session_path = write_session(
+        session_root,
+        "rollout-2026-05-12T00-00-00-duplicate-path.jsonl",
+        [
+            turn_context(model="gpt-5.5", service_tier="standard"),
+            token_event(now, {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}),
+        ],
+    )
+    options = build_options(
+        since=(now - dt.timedelta(seconds=1)).isoformat(),
+        until=(now + dt.timedelta(seconds=1)).isoformat(),
+        session_root=session_root,
+        state_db=tmp_path / "missing-state.sqlite",
+        codex_config=tmp_path / "missing.toml",
+        vendors=["openai-codex"],
+        no_parse_cache=True,
+        parse_workers=1,
+    )
+
+    result = parser.load_codex_usage(options, paths=[session_path, session_path])
+
+    assert len(result.events) == 1
+    assert result.vendor_stats["openai-codex"].discovered_files == 1
+
+
 def test_no_parse_cache_bypasses_existing_cache(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CALIPER_CACHE_DIR", str(tmp_path / "cache"))
     options = _fixture(tmp_path)

@@ -116,6 +116,16 @@ class TextualParseProgress:
         vendor_summary: str,
         window_label: str,
         unreadable_files: int = 0,
+        parse_workers: int = 1,
+        parse_cache: bool = True,
     ) -> None:
-        del total_files, total_bytes, vendor_summary, window_label, unreadable_files
+        del (
+            total_files,
+            total_bytes,
+            vendor_summary,
+            window_label,
+            unreadable_files,
+            parse_workers,
+            parse_cache,
+        )
         self._check_cancelled()

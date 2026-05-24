@@ -48,6 +48,8 @@ class ParseProgress(Protocol):
         vendor_summary: str,
         window_label: str,
         unreadable_files: int = 0,
+        parse_workers: int = 1,
+        parse_cache: bool = True,
     ) -> None:
         """Called after discovery so the CLI can set scan-size expectations."""
 
@@ -92,7 +94,10 @@ class NullProgress:
         vendor_summary: str,
         window_label: str,
         unreadable_files: int = 0,
+        parse_workers: int = 1,
+        parse_cache: bool = True,
     ) -> None:
+        del parse_workers, parse_cache
         return None
 
     def stage_start(self, name: str, total: int | None = None) -> None:

@@ -28,6 +28,7 @@ from caliper.models import (
 )
 from caliper.normalize import normalize_model, normalize_tier
 from caliper.parse_cache import ParseCache
+from caliper.parse_parallel import assert_accounted_paths, path_size, run_path_batches
 from caliper.progress import NULL_PROGRESS, ParseProgress, report_file_progress
 from caliper.timeutil import parse_datetime, parse_event_timestamp
 
@@ -494,8 +495,14 @@ def load_codex_usage(
     if not options.session_root.exists():
         accumulator.warnings.append(f"Session root does not exist: {options.session_root}")
 
-    paths = list(paths) if paths is not None else list(session_files(options.session_root))
+    paths = (
+        sorted(set(paths))
+        if paths is not None
+        else sorted(set(session_files(options.session_root)))
+    )
     try:
+        misses: list[tuple[Path, ThreadMeta, str]] = []
+        accounted_paths: list[Path] = []
         for path in paths:
             thread_meta = metadata.get(
                 str(path), metadata.get(path.name, ThreadMeta(rollout_path=str(path)))
@@ -513,28 +520,34 @@ def load_codex_usage(
                         cache.put_records(path, signature, parsed, vendor=VENDOR_OPENAI_CODEX)
                 cache_used = parsed is not None
             if parsed is None:
-                parsed = list(
-                    _parse_session(
-                        path,
-                        thread_meta=thread_meta,
-                        options=options,
-                        config_tier=config_tier,
-                        overrides=overrides,
-                        progress=progress,
-                    )
-                )
-                if cache:
-                    put_records = getattr(cache, "put_records", None)
-                    if put_records is not None:
-                        put_records(path, signature, parsed, vendor=VENDOR_OPENAI_CODEX)
-                    else:
-                        cache.put(path, signature, parsed)
+                misses.append((path, thread_meta, signature))
+                continue
             for record in parsed:
                 accumulator.add_record(path, record)
             if cache_used:
                 progress.cache_hit(path)
             else:
                 progress.file_done(path)
+            accounted_paths.append(path)
+        if misses:
+            parsed_misses = _parse_codex_misses(
+                misses,
+                options,
+                config_tier,
+                overrides,
+                progress,
+            )
+            for path, signature, parsed in parsed_misses:
+                if cache:
+                    put_records = getattr(cache, "put_records", None)
+                    if put_records is not None:
+                        put_records(path, signature, parsed, vendor=VENDOR_OPENAI_CODEX)
+                    else:
+                        cache.put(path, signature, parsed)
+                for record in parsed:
+                    accumulator.add_record(path, record)
+                accounted_paths.append(path)
+        assert_accounted_paths(paths, accounted_paths, label="Codex loader")
     finally:
         if cache is not None:
             cache.close()
@@ -583,13 +596,70 @@ def _parse_cache_signature(
     return json.dumps(payload, sort_keys=True)
 
 
+def _parse_codex_misses(
+    misses: list[tuple[Path, ThreadMeta, str]],
+    options: RuntimeOptions,
+    config_tier: str,
+    overrides: list[TierOverride],
+    progress: ParseProgress,
+) -> list[tuple[Path, str, list[ParsedSessionRecord]]]:
+    parsed = run_path_batches(
+        misses,
+        _parse_codex_batch,
+        workers=options.parse_workers,
+        size_of=_codex_task_size,
+        worker_args=(options, config_tier, overrides),
+        on_batch_done=lambda batch, _result: _report_codex_batch_done(batch, progress),
+    )
+    assert_accounted_paths(
+        [path for path, _thread_meta, _signature in misses],
+        (path for path, _signature, _records in parsed),
+        label="Codex parser",
+    )
+    return parsed
+
+
+def _codex_task_size(task: tuple[Path, ThreadMeta, str]) -> int:
+    return path_size(task[0])
+
+
+def _report_codex_batch_done(
+    batch: tuple[tuple[Path, ThreadMeta, str], ...],
+    progress: ParseProgress,
+) -> None:
+    for path, _thread_meta, _signature in batch:
+        progress.file_done(path)
+
+
+def _parse_codex_batch(
+    tasks: tuple[tuple[Path, ThreadMeta, str], ...],
+    options: RuntimeOptions,
+    config_tier: str,
+    overrides: list[TierOverride],
+) -> list[tuple[Path, str, list[ParsedSessionRecord]]]:
+    out: list[tuple[Path, str, list[ParsedSessionRecord]]] = []
+    for path, thread_meta, signature in tasks:
+        parsed = list(
+            _parse_session(
+                path,
+                thread_meta=thread_meta,
+                options=options,
+                config_tier=config_tier,
+                overrides=overrides,
+                progress=NULL_PROGRESS,
+            )
+        )
+        out.append((path, signature, parsed))
+    return out
+
+
 def load_usage(
     options: RuntimeOptions,
     progress: ParseProgress = NULL_PROGRESS,
     discovery: Any | None = None,
 ) -> LoadResult:
     from caliper.evidence import warnings_from_parser_issues
-    from caliper.vendors import enabled_vendors
+    from caliper.vendors import dedupe_paths, enabled_vendors
 
     events: list[UsageEvent] = []
     duplicates = 0
@@ -611,7 +681,7 @@ def load_usage(
         paths_by_vendor = {}
         for vendor in vendors:
             try:
-                paths = list(vendor.discover(options))
+                paths = list(dedupe_paths(vendor.discover(options)))
             except OSError:
                 paths_by_vendor[vendor.id] = []
                 continue

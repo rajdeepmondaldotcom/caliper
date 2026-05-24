@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -117,7 +118,7 @@ def vendor_file_count(options: RuntimeOptions) -> int:
     total = 0
     for vendor in enabled_vendors(options):
         try:
-            total += sum(1 for _ in vendor.discover(options))
+            total += len(dedupe_paths(vendor.discover(options)))
         except OSError:
             continue
     return total
@@ -133,19 +134,13 @@ def discover_usage_files(
     discovered: list[VendorDiscovery] = []
     for vendor in vendors:
         try:
-            paths = tuple(sorted(set(vendor.discover(options))))
+            paths = dedupe_paths(vendor.discover(options))
         except OSError:
             paths = ()
             unreadable = 1
             total_bytes = 0
         else:
-            unreadable = 0
-            total_bytes = 0
-            for path in paths:
-                try:
-                    total_bytes += path.stat().st_size
-                except OSError:
-                    unreadable += 1
+            total_bytes, unreadable = _scan_path_sizes(paths, workers=options.parse_workers)
         discovered.append(
             VendorDiscovery(
                 id=vendor.id,
@@ -171,7 +166,7 @@ def vendor_summaries(options: RuntimeOptions) -> list[VendorSummary]:
     rows: list[VendorSummary] = []
     for vendor_id, parser in sorted(VENDORS.items()):
         try:
-            files = len(list(parser.discover(options)))
+            files = len(dedupe_paths(parser.discover(options)))
         except OSError:
             files = 0
         rows.append(
@@ -189,6 +184,46 @@ def vendor_summaries(options: RuntimeOptions) -> list[VendorSummary]:
 def _selected_vendor_ids(values: tuple[str, ...]) -> set[str]:
     selected = {value.strip() for value in values if value.strip()}
     return selected or {"all"}
+
+
+def dedupe_paths(paths: Iterable[Path]) -> tuple[Path, ...]:
+    return tuple(sorted(set(paths)))
+
+
+def _scan_path_sizes(paths: tuple[Path, ...], *, workers: int) -> tuple[int, int]:
+    if not paths:
+        return 0, 0
+    if workers <= 1 or len(paths) < 512:
+        return _scan_path_sizes_sequential(paths)
+    total_bytes = 0
+    unreadable = 0
+    max_workers = min(max(1, workers), 32, len(paths))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for size, ok in executor.map(_path_size, paths):
+            if ok:
+                total_bytes += size
+            else:
+                unreadable += 1
+    return total_bytes, unreadable
+
+
+def _scan_path_sizes_sequential(paths: tuple[Path, ...]) -> tuple[int, int]:
+    total_bytes = 0
+    unreadable = 0
+    for path in paths:
+        size, ok = _path_size(path)
+        if ok:
+            total_bytes += size
+        else:
+            unreadable += 1
+    return total_bytes, unreadable
+
+
+def _path_size(path: Path) -> tuple[int, bool]:
+    try:
+        return path.stat().st_size, True
+    except OSError:
+        return 0, False
 
 
 def _format_discovery_bytes(size: int) -> str:

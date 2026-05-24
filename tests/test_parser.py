@@ -58,6 +58,51 @@ def test_load_usage_streams_events_dedupes_and_joins_state(tmp_path) -> None:
     assert result.events[0].limit_id == "codex"
 
 
+def test_parallel_codex_parse_matches_sequential_parse(tmp_path) -> None:
+    session_root = tmp_path / "sessions"
+    base = dt.datetime(2026, 5, 12, tzinfo=dt.UTC)
+    for index in range(300):
+        write_session(
+            session_root,
+            f"rollout-2026-05-12T00-00-{index:03d}-parallel.jsonl",
+            [
+                turn_context(model="gpt-5.5", service_tier="standard"),
+                token_event(
+                    base + dt.timedelta(seconds=index),
+                    {"input_tokens": index + 1, "output_tokens": 1, "total_tokens": index + 2},
+                ),
+            ],
+        )
+    common = dict(
+        since=(base - dt.timedelta(seconds=1)).isoformat(),
+        until=(base + dt.timedelta(minutes=10)).isoformat(),
+        session_root=session_root,
+        state_db=tmp_path / "missing-state.sqlite",
+        codex_config=tmp_path / "missing.toml",
+        vendors=["openai-codex"],
+        no_parse_cache=True,
+    )
+
+    sequential = load_usage(build_options(**common, parse_workers=1))
+    parallel = load_usage(build_options(**common, parse_workers=2))
+
+    def event_key(event):
+        return (
+            event.session_id,
+            event.timestamp,
+            event.usage.input_tokens,
+            event.usage.output_tokens,
+            event.model,
+            event.service_tier,
+        )
+
+    assert [event_key(event) for event in parallel.events] == [
+        event_key(event) for event in sequential.events
+    ]
+    assert len(parallel.rate_limit_samples) == len(sequential.rate_limit_samples) == 300
+    assert parallel.vendor_stats == sequential.vendor_stats
+
+
 def test_current_config_tier_is_labeled_as_inferred(tmp_path) -> None:
     session_root = tmp_path / "sessions"
     now = dt.datetime.now(tz=dt.UTC)

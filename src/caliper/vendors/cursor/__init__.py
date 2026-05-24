@@ -18,6 +18,7 @@ from caliper.models import (
     VendorParseStats,
 )
 from caliper.parse_cache import ParseCache
+from caliper.parse_parallel import assert_accounted_paths, path_size, run_path_batches
 from caliper.progress import NULL_PROGRESS, ParseProgress
 from caliper.vendors.cursor.chats import parse_chat_jsonl
 from caliper.vendors.cursor.projects import parse_project_jsonl
@@ -61,11 +62,12 @@ class CursorParser:
         cache = ParseCache.default() if options.parse_cache else None
         events = []
         warnings: list[str] = []
-        paths = list(paths) if paths is not None else self.discover(options)
+        paths = sorted(set(paths)) if paths is not None else sorted(set(self.discover(options)))
         unsupported_paths: list[Path] = []
         files_with_events = 0
         try:
             paths_to_parse = paths
+            accounted_paths: list[Path] = []
             if cache is not None:
                 cached = cache.get_indexed_events_for_paths(
                     paths,
@@ -80,19 +82,22 @@ class CursorParser:
                     unsupported_paths.extend(sorted(cached_unsupported))
                     for cached_path in set(paths) - set(paths_to_parse):
                         progress.cache_hit(cached_path)
-            for path in paths_to_parse:
-                parsed, _has_supported_usage, unsupported = _parse_cached_path(
-                    path,
-                    cache,
-                    start=start,
-                    end=end,
-                    progress=progress,
-                )
+                    accounted_paths.extend(set(paths) - set(paths_to_parse))
+            parsed_paths = _parse_uncached_paths(
+                paths_to_parse,
+                options,
+                start=start,
+                end=end,
+                progress=progress,
+                cache=cache,
+            )
+            for path, parsed, unsupported in parsed_paths:
                 if unsupported:
                     unsupported_paths.append(path)
                 files_with_events += int(bool(parsed))
                 events.extend(parsed)
-                progress.file_done(path)
+                accounted_paths.append(path)
+            assert_accounted_paths(paths, accounted_paths, label="Cursor loader")
         finally:
             if cache is not None:
                 cache.close()
@@ -126,42 +131,87 @@ def _cursor_root() -> Path:
     return Path(user_data_dir("Cursor"))
 
 
-def _parse_cached_path(
-    path: Path,
-    cache: ParseCache | None,
+def _parse_uncached_paths(
+    paths: list[Path],
+    options: RuntimeOptions,
     *,
     start: dt.datetime,
     end: dt.datetime,
-    progress: ParseProgress = NULL_PROGRESS,
-) -> tuple[list[UsageEvent], bool, bool]:
-    if cache is None:
-        events = _parse_path(path, progress=progress)
-        return _events_in_window(events, start=start, end=end), bool(events), not events
-    indexed = cache.get_indexed_events(path, PARSER_CACHE_SIGNATURE, start=start, end=end)
-    if indexed is not None:
-        counts = cache.indexed_file_counts(path, PARSER_CACHE_SIGNATURE)
-        has_supported_usage = bool(counts and counts[0] > 0)
-        unsupported = bool(counts and counts[2])
-        return indexed, has_supported_usage, unsupported
-    cached = cache.get_events(path, PARSER_CACHE_SIGNATURE)
-    if cached is not None:  # legacy blob cache migration path
-        cache.put_indexed_events(
-            path,
-            PARSER_CACHE_SIGNATURE,
-            cached,
-            vendor=VENDOR_CURSOR,
-            unsupported=not cached,
-        )
-        return _events_in_window(cached, start=start, end=end), bool(cached), not cached
-    events = _parse_path(path, progress=progress)
-    cache.put_indexed_events(
-        path,
-        PARSER_CACHE_SIGNATURE,
-        events,
-        vendor=VENDOR_CURSOR,
-        unsupported=not events,
+    progress: ParseProgress,
+    cache: ParseCache | None,
+) -> list[tuple[Path, list[UsageEvent], bool]]:
+    parsed: list[tuple[Path, list[UsageEvent], bool]] = []
+    cold_paths: list[Path] = []
+    if cache is not None:
+        legacy_by_path = _legacy_events_for_paths(cache, paths)
+        for path in paths:
+            cached = legacy_by_path.get(path)
+            if cached is not None:
+                cache.put_indexed_events(
+                    path,
+                    PARSER_CACHE_SIGNATURE,
+                    cached,
+                    vendor=VENDOR_CURSOR,
+                    unsupported=not cached,
+                )
+                parsed.append((path, _events_in_window(cached, start=start, end=end), not cached))
+                progress.cache_hit(path)
+            else:
+                cold_paths.append(path)
+    else:
+        cold_paths = list(paths)
+
+    cold = run_path_batches(
+        cold_paths,
+        _parse_cursor_batch,
+        workers=options.parse_workers,
+        size_of=path_size,
+        on_batch_done=lambda batch, _result: _report_path_batch_done(batch, progress),
     )
-    return _events_in_window(events, start=start, end=end), bool(events), not events
+    for path, events, unsupported in cold:
+        if cache is not None:
+            cache.put_indexed_events(
+                path,
+                PARSER_CACHE_SIGNATURE,
+                events,
+                vendor=VENDOR_CURSOR,
+                unsupported=unsupported,
+            )
+        parsed.append((path, _events_in_window(events, start=start, end=end), unsupported))
+    assert_accounted_paths(
+        paths,
+        (path for path, _events, _unsupported in parsed),
+        label="Cursor parser",
+    )
+    return parsed
+
+
+def _report_path_batch_done(batch: tuple[Path, ...], progress: ParseProgress) -> None:
+    for path in batch:
+        progress.file_done(path)
+
+
+def _legacy_events_for_paths(
+    cache: ParseCache,
+    paths: list[Path],
+) -> dict[Path, list[UsageEvent]]:
+    get_events_for_paths = getattr(cache, "get_events_for_paths", None)
+    if get_events_for_paths is not None:
+        return get_events_for_paths(paths, PARSER_CACHE_SIGNATURE)
+    out: dict[Path, list[UsageEvent]] = {}
+    for path in paths:
+        events = cache.get_events(path, PARSER_CACHE_SIGNATURE)
+        if events is not None:
+            out[path] = events
+    return out
+
+
+def _parse_cursor_batch(paths: tuple[Path, ...]) -> list[tuple[Path, list[UsageEvent], bool]]:
+    out: list[tuple[Path, list[UsageEvent], bool]] = []
+    for path in paths:
+        events = _parse_path(path, progress=NULL_PROGRESS)
+        out.append((path, events, not events))
+    return out
 
 
 def _parse_path(path: Path, progress: ParseProgress = NULL_PROGRESS) -> list[UsageEvent]:

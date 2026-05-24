@@ -165,6 +165,8 @@ def test_cli_report_progress_shows_footprint_and_file_byte_progress() -> None:
             total_bytes=12_300_000_000,
             vendor_summary="Claude Code 1,890, OpenAI Codex 153",
             window_label="Last 90 days",
+            parse_workers=8,
+            parse_cache=False,
         )
         progress.stage_done("discover", summary="3,523 files")
         progress.stage_start("parse", total=3_523)
@@ -173,6 +175,9 @@ def test_cli_report_progress_shows_footprint_and_file_byte_progress() -> None:
 
     transcript = console.export_text()
     assert "Caliper will read 3,523 files" in transcript
+    assert "Using 8 parser workers" in transcript
+    assert "parse-cache=off" in transcript
+    assert "ETA appears after the first completed batch" in transcript
     assert "First runs" in transcript
     assert "few minutes" in transcript
     assert "current 50%" in transcript

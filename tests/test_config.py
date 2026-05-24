@@ -105,3 +105,25 @@ def test_no_dedupe_option_is_ignored(tmp_path) -> None:
     options = build_options(days=1, no_dedupe=True, config=config)
 
     assert options.dedupe is True
+
+
+def test_parse_workers_can_come_from_config_env_or_cli(monkeypatch, tmp_path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text("parse_workers = 3\n")
+
+    configured = build_options(days=1, config=config)
+    assert configured.parse_workers == 3
+
+    monkeypatch.setenv("CALIPER_PARSE_WORKERS", "2")
+    from_env = build_options(days=1, config=config)
+    assert from_env.parse_workers == 2
+
+    explicit = build_options(days=1, config=config, parse_workers=4)
+    assert explicit.parse_workers == 4
+
+
+def test_parse_workers_rejects_invalid_values(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CALIPER_PARSE_WORKERS", "0")
+
+    with pytest.raises(ValueError, match="parse_workers"):
+        build_options(days=1, config=tmp_path / "missing.toml")

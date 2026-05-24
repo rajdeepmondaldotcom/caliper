@@ -11,7 +11,7 @@ from caliper.models import (
     LoadResult,
 )
 from caliper.parser import load_usage
-from caliper.vendors import VENDORS, enabled_vendors
+from caliper.vendors import VENDORS, discover_usage_files, enabled_vendors, vendor_file_count
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 
@@ -59,3 +59,32 @@ def test_load_usage_routes_through_registered_codex_parser(tmp_path) -> None:
     assert isinstance(result, LoadResult)
     assert len(result.events) == 1
     assert result.events[0].vendor == VENDOR_OPENAI_CODEX
+
+
+def test_discovery_dedupes_exact_duplicate_paths(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "usage.jsonl"
+    path.write_text("{}\n")
+
+    class DuplicateParser:
+        id = "duplicate-test"
+        label = "Duplicate Test"
+        schema_version = "1"
+
+        def discover(self, _options):
+            return [path, path]
+
+        def parse(self, _options, progress=None, paths=None):
+            raise AssertionError("parse should not run during discovery")
+
+    monkeypatch.setitem(VENDORS, "duplicate-test", DuplicateParser())
+    options = build_options(
+        days=1,
+        session_root=tmp_path / "missing",
+        vendors=["duplicate-test"],
+    )
+
+    discovery = discover_usage_files(options)
+
+    assert discovery.total_files == 1
+    assert discovery.total_bytes == path.stat().st_size
+    assert vendor_file_count(options) == 1

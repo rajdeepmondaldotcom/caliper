@@ -30,6 +30,7 @@ from rich.progress import (
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
+    TimeRemainingColumn,
 )
 
 from caliper.progress import NULL_PROGRESS, ParseProgress
@@ -108,8 +109,18 @@ class CliParseProgress:
         vendor_summary: str,
         window_label: str,
         unreadable_files: int = 0,
+        parse_workers: int = 1,
+        parse_cache: bool = True,
     ) -> None:
-        del total_files, total_bytes, vendor_summary, window_label, unreadable_files
+        del (
+            total_files,
+            total_bytes,
+            vendor_summary,
+            window_label,
+            unreadable_files,
+            parse_workers,
+            parse_cache,
+        )
         return None
 
     def _tick(self, path: Path) -> None:
@@ -253,15 +264,23 @@ class CliReportProgress:
         vendor_summary: str,
         window_label: str,
         unreadable_files: int = 0,
+        parse_workers: int = 1,
+        parse_cache: bool = True,
     ) -> None:
         detail = (
             f"Caliper will read {total_files:,} files ({_format_bytes(total_bytes)}) "
             f"across {vendor_summary} for {window_label}."
         )
+        workers = max(1, int(parse_workers or 1))
+        detail += (
+            f" Using {workers:,} parser worker{'s' if workers != 1 else ''}; "
+            f"parse-cache={'on' if parse_cache else 'off'}."
+        )
         if unreadable_files:
             detail += f" {unreadable_files:,} files could not be sized."
         if total_bytes >= 1_000_000_000 or total_files >= 1_000:
             detail += " First runs and cache rebuilds can take a few minutes."
+        detail += " ETA appears after the first completed batch."
         self._progress.console.print(detail, style="dim")
 
     # ---- Internals ---------------------------------------------------------
@@ -354,7 +373,10 @@ def cli_parse_progress(
         TextColumn("{task.description}"),
         BarColumn(bar_width=24),
         TaskProgressColumn(),
+        TextColumn("elapsed"),
         TimeElapsedColumn(),
+        TextColumn("eta"),
+        TimeRemainingColumn(),
         console=console,
         transient=False,
         refresh_per_second=8,
@@ -393,7 +415,10 @@ def cli_report_progress(
         TextColumn("{task.description}"),
         BarColumn(bar_width=24),
         TaskProgressColumn(),
+        TextColumn("elapsed"),
         TimeElapsedColumn(),
+        TextColumn("eta"),
+        TimeRemainingColumn(),
         console=console,
         transient=False,
         refresh_per_second=8,

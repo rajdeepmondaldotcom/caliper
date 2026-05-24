@@ -2,6 +2,28 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.47 - 2026-05-24
+
+### Added
+
+- **Parallel usage-log parsing.** Codex, Claude Code, Cursor, and Aider readers now
+  parse cold files in sized process-pool batches. `--parse-workers auto` uses the
+  available CPU count; `CALIPER_PARSE_WORKERS` and `parse_workers` in config provide
+  non-CLI controls.
+- **Progress with ETA.** Dashboard/report progress now shows the scan footprint,
+  parser worker count, parse-cache state, elapsed time, and ETA. Parallel reads
+  advance visibly as worker batches complete.
+
+### Fixed
+
+- **Strict file accounting.** Loader accounting now verifies that cache hits plus
+  worker results cover every discovered path exactly once. Missing or unexpected
+  parser results fail loudly instead of silently producing partial dashboard data.
+- **Duplicate-path reads.** Discovery and parser entry points dedupe exact duplicate
+  paths before sizing, cache lookup, and parsing.
+- **Bulk cache probes.** Legacy parse-cache reads can now fetch many files in one
+  SQLite pass, reducing repeated per-file cache lookups during dashboard loads.
+
 ## 0.0.46 - 2026-05-22
 
 ### Changed
