@@ -15,6 +15,7 @@ from collections.abc import Callable
 from decimal import Decimal
 
 from caliper.aggregation import event_cost
+from caliper.arbitrage import rank_model_alternatives
 from caliper.humanize import session_label_lookup
 from caliper.models import (
     Finding,
@@ -63,11 +64,9 @@ ALL_CODES: tuple[str, ...] = (
     CODE_PROMPT_ROT,
 )
 
-# Sibling-model cascade. Each entry maps from a "rich" model to its
-# cheaper sibling. Cross-vendor when impact is large enough to be
-# meaningful. The audit lookup walks down the chain until either the
-# next sibling does not exist in the rate card or the savings drops
-# below the per-finding minimum.
+# Legacy sibling-model map kept for callers that import the constant.
+# New recommendations use active rate-card repricing via arbitrage
+# alternatives rather than this static cascade.
 SIBLING_MODELS: dict[str, str] = {
     "claude-opus-4.7": "claude-sonnet-4.6",
     "claude-sonnet-4.6": "claude-haiku-4.5",
@@ -128,6 +127,15 @@ def _scale_to_monthly(impact: Decimal, options: RuntimeOptions) -> Decimal:
 
 def _finding_window_scope(scope: str) -> str:
     return scope
+
+
+def _format_money_exact(value: str) -> str:
+    amount = Decimal(value or "0")
+    if amount == 0:
+        return "$0"
+    if abs(amount) < Decimal("0.01"):
+        return f"${amount:,.4f}"
+    return f"${amount:,.2f}"
 
 
 # ---------------------------------------------------------------------------
@@ -364,23 +372,13 @@ def find_model_overselection(
     options: RuntimeOptions,
     card: RateCard,
 ) -> list[Finding]:
-    """Premium-model events whose token shape is trivial → would cost
-    less on a sibling model from the cascade table."""
+    """Premium-model events whose trivial shape has cheaper priced alternatives."""
     flagged: list[UsageEvent] = []
-    total_saving = Decimal("0")
     for event in result.events:
         if not is_trivial_turn(event):
             continue
-        normalized = normalize_model(event.model)
-        sibling = SIBLING_MODELS.get(normalized)
-        if not sibling:
+        if not rank_model_alternatives([event], card, limit=1):
             continue
-        actual, _, _ = event_cost(card, event)
-        sibling_cost, _, _ = card.cost_for(event.usage, sibling, event.service_tier)
-        delta = actual.cost_usd - sibling_cost.cost_usd
-        if delta <= Decimal("0"):
-            continue
-        total_saving += delta
         flagged.append(event)
     if not flagged:
         return []
@@ -388,7 +386,16 @@ def find_model_overselection(
     for event in flagged:
         by_model[event.model] = by_model.get(event.model, 0) + 1
     top_model = max(by_model, key=by_model.get)
-    sibling = SIBLING_MODELS.get(normalize_model(top_model), "")
+    alternatives = rank_model_alternatives(flagged, card, limit=3)
+    if not alternatives:
+        return []
+    top_alternative = alternatives[0]
+    total_saving = Decimal(top_alternative.estimated_savings_usd_exact)
+    choices = ", ".join(
+        f"{item.model} ({item.vendor}, saves "
+        f"{_format_money_exact(item.estimated_savings_usd_exact)})"
+        for item in alternatives
+    )
     return [
         Finding(
             code=CODE_MODEL_OVERSELECTION,
@@ -396,10 +403,13 @@ def find_model_overselection(
             title=f"{len(flagged)} trivial turns ran on premium models",
             detail=(
                 f"{len(flagged)} turns with no tool use and short output ran on "
-                f"{top_model}. A sibling model ({sibling}) handles the same shape for less."
+                f"{top_model}. Current alternatives for the same token shape: {choices}."
             ),
-            action=f"Route trivial turns to {sibling} or set a per-task model.",
-            payback_action=f"Route trivial turns to {sibling}.",
+            action=(
+                f"Route trivial turns to {top_alternative.model} or another ranked "
+                "small-model alternative."
+            ),
+            payback_action=f"Route trivial turns to {top_alternative.model}.",
             scope="models",
             impact_usd_exact=total_saving,
             monthly_projected_savings_usd=_scale_to_monthly(total_saving, options),
@@ -408,16 +418,18 @@ def find_model_overselection(
             evidence_metrics={
                 "events": len(flagged),
                 "top_model": top_model,
-                "sibling": sibling,
+                "sibling": top_alternative.model,
+                "top_alternative": top_alternative.to_record(),
+                "alternatives": [item.to_record() for item in alternatives],
             },
             commands=(
                 "caliper audit",
-                f"caliper whatif --hypothetical-model {sibling}" if sibling else "caliper models",
+                f"caliper whatif --hypothetical-model {top_alternative.model}",
             ),
             event_ids=tuple(_dedupe_id(event) for event in flagged),
             evidence_status="estimated",
             sample_size=len(result.events),
-            baseline="trivial-turn heuristic with configured sibling model",
+            baseline="trivial-turn heuristic with active rate-card alternatives",
         )
     ]
 

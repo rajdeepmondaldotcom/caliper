@@ -94,6 +94,7 @@ def build_insights_from(
     total,
     projects,
     daily,
+    audit_findings=None,
 ) -> list[Insight]:
     """Build insights from pre-computed aggregates.
 
@@ -110,7 +111,7 @@ def build_insights_from(
         _daily_acceleration_insight(daily),
         _model_concentration_insight(total),
         _vendor_mix_insight(total),
-        _top_waste_insight(result, rate_card),
+        _top_waste_insight(result, rate_card, audit_findings=audit_findings),
         _demand_shift_insight(result, rate_card),
     ]
     return sorted(
@@ -119,7 +120,12 @@ def build_insights_from(
     )
 
 
-def _top_waste_insight(result: LoadResult, rate_card: RateCard) -> Insight | None:
+def _top_waste_insight(
+    result: LoadResult,
+    rate_card: RateCard,
+    *,
+    audit_findings=None,
+) -> Insight | None:
     """Surface the single highest-impact :class:`~caliper.efficiency.Finding`
     as a home-screen insight so the dashboard headline reflects what is
     actually fixable in dollar terms."""
@@ -129,11 +135,14 @@ def _top_waste_insight(result: LoadResult, rate_card: RateCard) -> Insight | Non
         from caliper.efficiency import run_audit
     except ImportError:
         return None
-    try:
-        options = _synthetic_options(result)
-        findings = run_audit(result, options, rate_card)
-    except Exception:
-        return None
+    if audit_findings is None:
+        try:
+            options = _synthetic_options(result)
+            findings = run_audit(result, options, rate_card)
+        except Exception:
+            return None
+    else:
+        findings = audit_findings
     if not findings:
         return None
     top = findings[0]

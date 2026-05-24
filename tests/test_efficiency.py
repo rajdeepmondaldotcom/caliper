@@ -217,7 +217,11 @@ def test_model_overselection_recommends_sibling(tmp_path: Path):
     findings = find_model_overselection(_result(events), _options(tmp_path), _card())
     assert len(findings) == 1
     assert findings[0].code == CODE_MODEL_OVERSELECTION
-    assert "claude-sonnet-4.6" in findings[0].evidence_metrics["sibling"]
+    assert findings[0].evidence_metrics["sibling"] == "claude-sonnet-4.6"
+    alternatives = findings[0].evidence_metrics["alternatives"]
+    assert alternatives[0]["model"] == "claude-sonnet-4.6"
+    assert any(item["model"] == "gpt-5.4" for item in alternatives)
+    assert all("haiku" not in item["model"] for item in alternatives)
 
 
 def test_model_overselection_skips_non_trivial_turns(tmp_path: Path):

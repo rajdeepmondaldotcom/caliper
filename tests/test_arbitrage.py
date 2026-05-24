@@ -71,54 +71,59 @@ def test_recommendations_group_repeated_events_and_estimate_savings() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_recommendation_for_opus_picks_haiku_not_sonnet() -> None:
-    """``claude-opus-4.7`` should route to ``claude-haiku-4.5`` (cheapest
-    Anthropic sibling), not ``claude-sonnet-4.6`` (which the old hard-coded
-    table preferred). Sonnet is only ~1.7× cheaper — below our 3× gate —
-    while Haiku is 5× cheaper."""
+def test_recommendation_for_opus_ranks_active_alternatives() -> None:
+    """Model recommendations are ranked by active rate-card repricing."""
     rows = recommend(
         [_event(model="claude-opus-4.7", tier="standard")] * 2,
         RateCard.load(None, "model"),
     )
-    targets = {row.target_model for row in rows if row.target_model}
-    assert "claude-haiku-4.5" in targets
-    assert "claude-sonnet-4.6" not in targets
+    model_rows = [row for row in rows if row.target_model]
+    assert model_rows
+    top = model_rows[0]
+    assert top.target_model == "claude-sonnet-4.6"
+    assert top.alternatives
+    targets = [item.model for item in top.alternatives]
+    assert targets[0] == "claude-sonnet-4.6"
+    assert "gpt-5.4" in targets
+    assert "claude-haiku-4.5" not in targets
+    assert "claude-3-haiku" not in top.detail
+    assert "Test current alternatives:" in top.detail
 
 
-def test_recommendation_for_sonnet_also_picks_haiku() -> None:
-    """Sonnet 4.6 on short context should suggest Haiku 4.5 — the old
-    code never flagged Sonnet at all because Sonnet wasn't in the
-    hard-coded premium list."""
+def test_recommendation_for_sonnet_prefers_cheapest_ranked_model() -> None:
     rows = recommend(
         [_event(model="claude-sonnet-4.6", tier="standard")] * 2,
         RateCard.load(None, "model"),
     )
     targets = {row.target_model for row in rows if row.target_model}
-    assert "claude-haiku-4.5" in targets
+    assert "gpt-5.4" in targets
 
 
-def test_recommendation_skips_when_no_cheaper_sibling_exists() -> None:
-    """Haiku is already the cheapest in the Anthropic family; the advisor
-    shouldn't suggest swapping it for anything."""
+def test_recommendation_can_cross_vendors_from_haiku() -> None:
     rows = recommend(
         [_event(model="claude-haiku-4.5", tier="standard")] * 2,
         RateCard.load(None, "model"),
     )
-    # Any recommendation that fired must NOT propose a model swap; only
-    # tier-only suggestions (fast-tier-low-output) are valid here, and
-    # the standard tier event we passed wouldn't trigger that.
+    targets = {row.target_model for row in rows if row.target_model}
+    assert "gpt-5.4-mini" in targets
+
+
+def test_recommendation_skips_when_no_cheaper_priced_model_exists() -> None:
+    rows = recommend(
+        [_event(model="gpt-5.4-mini", tier="standard")] * 2,
+        RateCard.load(None, "model"),
+    )
     assert all(row.target_model == "" for row in rows)
 
 
-def test_recommendation_for_gpt55_picks_gpt54_mini() -> None:
-    """GPT-5.5 input is $5/1M; GPT-5.4 Mini at $0.75 is the cheapest
-    OpenAI sibling that's ≥3× cheaper."""
+def test_recommendation_for_gpt55_picks_gpt54_first() -> None:
+    """GPT-5.4 is the current cheaper capable alternative for this shape."""
     rows = recommend(
         [_event(model="gpt-5.5", tier="standard")] * 2,
         RateCard.load(None, "model"),
     )
     targets = {row.target_model for row in rows if row.target_model}
-    assert "gpt-5.4-mini" in targets
+    assert "gpt-5.4" in targets
 
 
 def test_advise_cli_json(tmp_path) -> None:

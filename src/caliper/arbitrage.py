@@ -7,12 +7,7 @@ from caliper.aggregation import event_cost
 from caliper.arbitrage_rules import HEURISTICS_VERSION, RULES
 from caliper.humanize import session_display_label
 from caliper.models import UsageEvent, decimal_string
-from caliper.pricing import MODELS_BY_NAME, RateCard, normalize_model
-
-# Threshold for "materially cheaper" sibling — input price ≤ 1/3 of the
-# source. Matches the spirit of the anomaly fold-change gate so the
-# advisor doesn't recommend a marginal swap that users will ignore.
-_CHEAPER_RATIO = 1.0 / 3.0
+from caliper.pricing import MODELS_BY_NAME, RateCard, model_vendor, normalize_model
 
 
 @dataclass(frozen=True)
@@ -23,6 +18,18 @@ class ArbitrageSuggestion:
 
     def to_record(self) -> dict[str, object]:
         return {"heuristics_version": HEURISTICS_VERSION, **asdict(self)}
+
+
+@dataclass(frozen=True)
+class ModelAlternative:
+    model: str
+    vendor: str
+    projected_cost_usd_exact: str
+    estimated_savings_usd_exact: str
+    events: int = 0
+
+    def to_record(self) -> dict[str, object]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -43,6 +50,7 @@ class ArbitrageRecommendation:
     estimated_savings_usd_exact: str = "0"
     estimated_savings_note: str = ""
     examples: tuple[dict[str, object], ...] = ()
+    alternatives: tuple[ModelAlternative, ...] = ()
 
     def to_record(self) -> dict[str, object]:
         return {"heuristics_version": HEURISTICS_VERSION, **asdict(self)}
@@ -61,6 +69,7 @@ class _RecommendationBucket:
     service_tiers: set[str] | None = None
     savings: Decimal = Decimal("0")
     examples: list[dict[str, object]] | None = None
+    model_alternatives: dict[str, _AlternativeTotals] | None = None
 
     def __post_init__(self) -> None:
         self.sessions = set()
@@ -68,6 +77,7 @@ class _RecommendationBucket:
         self.models = set()
         self.service_tiers = set()
         self.examples = []
+        self.model_alternatives = {}
 
     def add(
         self,
@@ -75,6 +85,7 @@ class _RecommendationBucket:
         event: UsageEvent,
         *,
         savings: Decimal,
+        alternatives: tuple[ModelAlternative, ...] = (),
     ) -> None:
         self.events += 1
         self.confidence_sum += suggestion.confidence
@@ -85,27 +96,46 @@ class _RecommendationBucket:
         self.service_tiers.add(event.service_tier or "unknown")
         if len(self.examples) < 5:
             self.examples.append(suggestion.evidence)
+        for alternative in alternatives:
+            priority = _alternative_priority(event.model, alternative.model)
+            total = self.model_alternatives.setdefault(
+                alternative.model,
+                _AlternativeTotals(
+                    model=alternative.model,
+                    vendor=alternative.vendor,
+                    priority=priority,
+                ),
+            )
+            total.priority = min(total.priority, priority)
+            total.projected += Decimal(alternative.projected_cost_usd_exact)
+            total.savings += Decimal(alternative.estimated_savings_usd_exact)
+            total.events += alternative.events
 
     def recommendation(self) -> ArbitrageRecommendation:
         rule = RULES[self.rule_id]
         confidence = self.confidence_sum / max(self.events, 1)
-        target = _target_phrase(self.target_model, self.target_service_tier)
+        alternatives = self.ranked_alternatives(limit=3)
+        target_model = alternatives[0].model if alternatives else self.target_model
+        savings = (
+            Decimal(alternatives[0].estimated_savings_usd_exact) if alternatives else self.savings
+        )
+        target = _target_phrase(target_model, self.target_service_tier, alternatives)
         savings_note = (
             "Estimated by re-pricing matching events."
-            if self.savings > 0
+            if savings > 0
             else _zero_savings_note(self.rule_id)
         )
         detail = f"{self.events:,} matching events across {len(self.sessions):,} sessions. {target}"
         next_command = _next_command_for(
             self.rule_id,
-            self.target_model,
+            target_model,
             self.target_service_tier,
         )
         return ArbitrageRecommendation(
             rule_id=self.rule_id,
             title=rule.title,
             detail=detail,
-            action=_action_for(self.rule_id, self.target_model, self.target_service_tier),
+            action=_action_for(self.rule_id, target_model, self.target_service_tier),
             next_command=next_command,
             confidence=round(confidence, 3),
             events=self.events,
@@ -113,11 +143,50 @@ class _RecommendationBucket:
             vendors=tuple(sorted(self.vendors)),
             models=tuple(sorted(self.models)),
             service_tiers=tuple(sorted(self.service_tiers)),
-            target_model=self.target_model,
+            target_model=target_model,
             target_service_tier=self.target_service_tier,
-            estimated_savings_usd_exact=decimal_string(self.savings),
+            estimated_savings_usd_exact=decimal_string(savings),
             estimated_savings_note=savings_note,
             examples=tuple(self.examples),
+            alternatives=alternatives,
+        )
+
+    def ranked_alternatives(self, *, limit: int = 3) -> tuple[ModelAlternative, ...]:
+        if not self.model_alternatives:
+            return ()
+        rows = [
+            total.to_alternative()
+            for total in self.model_alternatives.values()
+            if total.savings > 0
+        ]
+        rows.sort(
+            key=lambda item: (
+                self.model_alternatives[item.model].priority,
+                -Decimal(item.estimated_savings_usd_exact),
+                Decimal(item.projected_cost_usd_exact),
+                item.vendor,
+                item.model,
+            )
+        )
+        return tuple(rows[:limit])
+
+
+@dataclass
+class _AlternativeTotals:
+    model: str
+    vendor: str
+    projected: Decimal = Decimal("0")
+    savings: Decimal = Decimal("0")
+    events: int = 0
+    priority: int = 50
+
+    def to_alternative(self) -> ModelAlternative:
+        return ModelAlternative(
+            model=self.model,
+            vendor=self.vendor,
+            projected_cost_usd_exact=decimal_string(self.projected),
+            estimated_savings_usd_exact=decimal_string(self.savings),
+            events=self.events,
         )
 
 
@@ -132,8 +201,7 @@ def suggest(
     ``rate_card`` is optional so that legacy callers without a built
     catalog still work — when omitted, the function loads a default
     rate card. The default carries the built-in :data:`MODELS_BY_NAME`
-    table which is enough to know that Opus is more expensive than
-    Haiku.
+    table, which is enough to price ranked model alternatives offline.
     """
     card = rate_card if rate_card is not None else RateCard.load(None, "model")
     suggestions: list[ArbitrageSuggestion] = []
@@ -157,8 +225,20 @@ def recommend(
         for suggestion in _event_suggestions(event, rate_card):
             if suggestion.confidence < threshold:
                 continue
-            target_model, target_tier = _target_for(suggestion.rule_id, event, rate_card)
-            key = (suggestion.rule_id, target_model, target_tier)
+            alternatives: tuple[ModelAlternative, ...] = ()
+            target_model, target_tier = "", ""
+            if _rule_targets_model(suggestion.rule_id):
+                alternatives = model_alternatives_for_event(event, rate_card, limit=3)
+                if not alternatives:
+                    continue
+                target_model = alternatives[0].model
+            else:
+                target_tier = _target_tier_for(suggestion.rule_id)
+            key = (
+                suggestion.rule_id,
+                "" if alternatives else target_model,
+                target_tier,
+            )
             bucket = buckets.setdefault(
                 key,
                 _RecommendationBucket(
@@ -171,6 +251,7 @@ def recommend(
                 suggestion,
                 event,
                 savings=_estimated_savings(event, rate_card, target_model, target_tier),
+                alternatives=alternatives,
             )
     rows = [bucket.recommendation() for bucket in buckets.values()]
     return sorted(
@@ -199,15 +280,15 @@ def explain(rule_id: str) -> dict[str, str]:
 def _event_suggestions(event: UsageEvent, rate_card: RateCard) -> list[ArbitrageSuggestion]:
     """Yield raw heuristic flags for ``event``.
 
-    "Premium" is no longer a hard-coded list — a model is premium iff
-    the rate card holds a materially-cheaper sibling in the same
-    family. That means new top-tier models automatically flow into
-    these rules as soon as they show up in the catalog.
+    "Premium" is no longer a hard-coded list. A model is a candidate
+    when the active rate card can price a cheaper alternative for the
+    same token shape, including cross-vendor alternatives.
     """
     suggestions: list[ArbitrageSuggestion] = []
     model = event.model.lower()
-    cheaper = _cheapest_in_family(model, rate_card)
-    if cheaper and event.usage.input_tokens < 2_000:
+    alternatives = model_alternatives_for_event(event, rate_card, limit=1)
+    has_alternative = bool(alternatives)
+    if has_alternative and event.usage.input_tokens < 2_000:
         suggestions.append(
             ArbitrageSuggestion(
                 rule_id="premium-short-context",
@@ -223,7 +304,7 @@ def _event_suggestions(event: UsageEvent, rate_card: RateCard) -> list[Arbitrage
                 evidence=_evidence(event) | {"output_tokens": event.usage.output_tokens},
             )
         )
-    if "opus" in model and event.usage.reasoning_output_tokens == 0 and cheaper:
+    if "opus" in model and event.usage.reasoning_output_tokens == 0 and has_alternative:
         suggestions.append(
             ArbitrageSuggestion(
                 rule_id="opus-no-reasoning",
@@ -234,97 +315,133 @@ def _event_suggestions(event: UsageEvent, rate_card: RateCard) -> list[Arbitrage
     return suggestions
 
 
-def _model_family(name: str) -> str:
-    """Return the family slug of a canonical model name.
+def rank_model_alternatives(
+    events: list[UsageEvent],
+    rate_card: RateCard,
+    *,
+    limit: int = 3,
+) -> tuple[ModelAlternative, ...]:
+    totals: dict[str, _AlternativeTotals] = {}
+    for event in events:
+        for alternative in model_alternatives_for_event(event, rate_card, limit=0):
+            priority = _alternative_priority(event.model, alternative.model)
+            total = totals.setdefault(
+                alternative.model,
+                _AlternativeTotals(
+                    model=alternative.model,
+                    vendor=alternative.vendor,
+                    priority=priority,
+                ),
+            )
+            total.priority = min(total.priority, priority)
+            total.projected += Decimal(alternative.projected_cost_usd_exact)
+            total.savings += Decimal(alternative.estimated_savings_usd_exact)
+            total.events += alternative.events
+    rows = [total.to_alternative() for total in totals.values() if total.savings > 0]
+    rows.sort(
+        key=lambda item: (
+            totals[item.model].priority,
+            -Decimal(item.estimated_savings_usd_exact),
+            Decimal(item.projected_cost_usd_exact),
+            item.vendor,
+            item.model,
+        )
+    )
+    return tuple(rows[:limit])
 
-    ``claude-opus-4.7`` → ``"claude"``; ``gpt-5.5`` → ``"gpt"``;
-    ``gemini-2.5-flash`` → ``"gemini"``. Empty string for unknown
-    names so callers can short-circuit.
-    """
-    if not name:
-        return ""
-    head, _, _ = name.partition("-")
-    return head
+
+def model_alternatives_for_event(
+    event: UsageEvent,
+    rate_card: RateCard,
+    *,
+    limit: int = 3,
+) -> tuple[ModelAlternative, ...]:
+    actual, _, _ = event_cost(rate_card, event)
+    if actual.cost_usd <= 0:
+        return ()
+    source = normalize_model(event.model)
+    rows: list[ModelAlternative] = []
+    for candidate in _candidate_model_names(rate_card):
+        if candidate == source:
+            continue
+        if not _is_recommendable_replacement(candidate):
+            continue
+        projected, _, unknown_model = rate_card.cost_for(
+            event.usage,
+            candidate,
+            event.service_tier,
+        )
+        if unknown_model or projected.unpriced_events or projected.cost_usd <= 0:
+            continue
+        savings = actual.cost_usd - projected.cost_usd
+        if savings <= 0:
+            continue
+        rows.append(
+            ModelAlternative(
+                model=candidate,
+                vendor=model_vendor(candidate) or "unknown",
+                projected_cost_usd_exact=decimal_string(projected.cost_usd),
+                estimated_savings_usd_exact=decimal_string(savings),
+                events=1,
+            )
+        )
+    rows.sort(
+        key=lambda item: (
+            _alternative_priority(event.model, item.model),
+            -Decimal(item.estimated_savings_usd_exact),
+            Decimal(item.projected_cost_usd_exact),
+            item.vendor,
+            item.model,
+        )
+    )
+    return tuple(rows if limit <= 0 else rows[:limit])
 
 
-def _input_rate(model: str, rate_card: RateCard) -> float | None:
-    """Lookup the per-1M-token *input* price for a model.
-
-    Reads the runtime rate card first (which picks up local overrides
-    and the Portkey/LiteLLM catalog) and falls back to the built-in
-    :data:`pricing.MODELS_BY_NAME` table so the function still works
-    when callers pass a default-loaded :class:`RateCard`.
-    """
-    canonical = normalize_model(model)
-    if not canonical:
-        return None
-    card = rate_card.catalog_cards.get(canonical) or MODELS_BY_NAME.get(canonical)
-    if card is None or card.api_rates is None:
-        return None
-    rate = card.api_rates.input
-    if rate is None:
-        return None
-    try:
-        return float(rate)
-    except (TypeError, ValueError):
-        return None
-
-
-def _cheapest_in_family(model: str, rate_card: RateCard) -> str:
-    """Find the cheapest catalog sibling that's materially cheaper.
-
-    Two siblings are in the same family iff
-    :func:`_model_family` returns the same slug. "Materially cheaper"
-    means the candidate's input rate is ≤ ``_CHEAPER_RATIO`` of the
-    source's (≈ 3× cheaper). Returns the canonical name of the winner,
-    or ``""`` when no qualifying alternative exists.
-
-    This is the heart of the "recommend the latest cheap model"
-    behaviour — when Anthropic ships Claude Haiku 4.5 (or anything
-    cheaper), it lands in the catalog and starts being recommended
-    automatically.
-    """
-    src = normalize_model(model)
-    if not src:
-        return ""
-    family = _model_family(src)
-    if not family:
-        return ""
-    src_rate = _input_rate(src, rate_card)
-    if src_rate is None or src_rate <= 0:
-        return ""
-    threshold = src_rate * _CHEAPER_RATIO
-    candidates: list[tuple[float, str]] = []
-    # Walk both the runtime catalog (Portkey/LiteLLM data) and the
-    # built-in MODELS_BY_NAME table — neither alone is authoritative.
+def _candidate_model_names(rate_card: RateCard) -> tuple[str, ...]:
     seen: set[str] = set()
-    for name in list(rate_card.catalog_cards) + list(MODELS_BY_NAME):
-        if name == src or name in seen:
+    names: list[str] = []
+    for raw in list(rate_card.catalog_cards) + list(MODELS_BY_NAME):
+        name = normalize_model(raw)
+        if not name or name in seen:
+            continue
+        card = rate_card.catalog_cards.get(name) or MODELS_BY_NAME.get(name)
+        if card is None or card.api_rates is None:
             continue
         seen.add(name)
-        if _model_family(name) != family:
-            continue
-        rate = _input_rate(name, rate_card)
-        if rate is None or rate <= 0 or rate > threshold:
-            continue
-        candidates.append((rate, name))
-    if not candidates:
-        return ""
-    candidates.sort()  # cheapest first; tie-break by name for stability
-    return candidates[0][1]
+        names.append(name)
+    return tuple(names)
 
 
-def _target_for(rule_id: str, event: UsageEvent, rate_card: RateCard) -> tuple[str, str]:
-    """Resolve the ``(target_model, target_tier)`` for a suggestion.
+def _is_recommendable_replacement(candidate: str) -> bool:
+    # Haiku remains priced for what-if aliases and historical logs, but the
+    # dashboard should not present it as the modern replacement path.
+    return "haiku" not in candidate
 
-    Model targets come from the live rate card, never a hard-coded list.
-    That keeps recommendations current as cheaper models ship without
-    touching this file.
-    """
-    if rule_id == "fast-tier-low-output":
-        return "", "standard"
-    cheaper = _cheapest_in_family(event.model, rate_card)
-    return cheaper, ""
+
+def _alternative_priority(source_model: str, candidate: str) -> int:
+    source_vendor = model_vendor(source_model)
+    candidate_vendor = model_vendor(candidate)
+    if source_vendor == "anthropic" and candidate == "claude-sonnet-4.6":
+        return 0
+    if source_vendor == "openai" and candidate == "gpt-5.4":
+        return 0
+    if source_vendor == candidate_vendor:
+        return 10
+    if candidate == "gpt-5.4":
+        return 20
+    if candidate == "gpt-5.4-mini":
+        return 30
+    if candidate == "gpt-5.5":
+        return 40
+    return 50
+
+
+def _rule_targets_model(rule_id: str) -> bool:
+    return rule_id != "fast-tier-low-output"
+
+
+def _target_tier_for(rule_id: str) -> str:
+    return "standard" if rule_id == "fast-tier-low-output" else ""
 
 
 def _estimated_savings(
@@ -346,7 +463,18 @@ def _estimated_savings(
     return max(Decimal("0"), actual.cost_usd - projected.cost_usd)
 
 
-def _target_phrase(model: str, tier: str) -> str:
+def _target_phrase(
+    model: str,
+    tier: str,
+    alternatives: tuple[ModelAlternative, ...] = (),
+) -> str:
+    if alternatives:
+        choices = ", ".join(
+            f"{item.model} ({item.vendor}, saves "
+            f"{_format_money_exact(item.estimated_savings_usd_exact)})"
+            for item in alternatives
+        )
+        return f"Test current alternatives: {choices}."
     if model and tier:
         return f"Test model={model} and tier={tier}."
     if model:
@@ -368,6 +496,15 @@ def _next_command_for(rule_id: str, model: str, tier: str) -> str:
     if tier:
         parts.extend(["--hypothetical-service-tier", tier])
     return " ".join(parts) if len(parts) > 2 else "caliper advise --strict"
+
+
+def _format_money_exact(value: str) -> str:
+    amount = Decimal(value or "0")
+    if amount == 0:
+        return "$0"
+    if abs(amount) < Decimal("0.01"):
+        return f"${amount:,.4f}"
+    return f"${amount:,.2f}"
 
 
 def _zero_savings_note(rule_id: str) -> str:

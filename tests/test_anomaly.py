@@ -63,8 +63,7 @@ def test_detect_session_anomalies_under_min_samples_returns_empty():
 def test_detect_session_anomalies_flags_spike():
     base = dt.datetime(2026, 5, 12, 10, 0, tzinfo=dt.UTC)
     events = [
-        _event(session=f"s{i}", ts=base + dt.timedelta(days=i), input_tokens=100)
-        for i in range(8)
+        _event(session=f"s{i}", ts=base + dt.timedelta(days=i), input_tokens=100) for i in range(8)
     ]
     events.append(
         _event(
@@ -125,8 +124,7 @@ def test_detect_session_anomalies_ignores_broad_baseline_without_matching_cohort
 def test_detect_actionable_anomalies_collapses_same_single_session_incident():
     base = dt.datetime(2026, 5, 1, 10, 0, tzinfo=dt.UTC)
     events = [
-        _event(session=f"s{i}", ts=base + dt.timedelta(days=i), input_tokens=100)
-        for i in range(8)
+        _event(session=f"s{i}", ts=base + dt.timedelta(days=i), input_tokens=100) for i in range(8)
     ]
     events.append(
         _event(

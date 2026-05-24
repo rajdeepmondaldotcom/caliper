@@ -47,6 +47,9 @@ def build_inefficiency_findings(
     rate_card: RateCard,
     *,
     budget_config: dict[str, Any] | None = None,
+    audit_findings: list[Finding] | None = None,
+    agents: list[Any] | None = None,
+    skills: list[Any] | None = None,
 ) -> list[Finding]:
     """Return ranked, evidence-labelled inefficiency findings.
 
@@ -54,10 +57,12 @@ def build_inefficiency_findings(
     be quantified, or their evidence would be unsupported.
     """
     findings: list[Finding] = []
-    findings.extend(run_audit(result, options, rate_card))
+    findings.extend(
+        audit_findings if audit_findings is not None else run_audit(result, options, rate_card)
+    )
 
-    agents = build_agent_attributions(result, rate_card)
-    skills = build_skill_attributions(result, rate_card)
+    agents = agents if agents is not None else build_agent_attributions(result, rate_card)
+    skills = skills if skills is not None else build_skill_attributions(result, rate_card)
     findings.extend(attribution_findings(agents, skills, options))
     findings.extend(_rework_loop_findings(result, options, rate_card))
     findings.extend(_commit_efficiency_findings(result, options, rate_card))
