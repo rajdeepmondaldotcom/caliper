@@ -2,6 +2,43 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.52 - 2026-05-25
+
+### Fixed
+
+- **`--output` to a missing directory no longer stack-traces.** Commands
+  that write a report to a path whose parent directory doesn't exist (e.g.
+  `caliper overview --output ~/reports/new/o.json`) previously raised a raw
+  `FileNotFoundError`. Output now creates missing parent directories and
+  surfaces a one-line error on unwritable paths, via a shared
+  `_write_output_file` helper in `cli.py` (and the same mkdir behaviour in
+  `render.write_output`). Covers ~20 CLI write sites plus the shared
+  table/JSON/CSV/markdown renderer.
+
+### Hardened
+
+- **Billboard CTA never links to a missing section.** The tidy-fallback
+  billboard now only offers its "Open evidence" CTA when the evidence
+  section will actually render; otherwise it shows the headline without a
+  dangling anchor.
+
+### Added (tests / QA)
+
+- **Edge-case regression suite** (`tests/test_dashboard_edge_cases.py`):
+  builds + renders the dashboard across zero/single/huge-value/tiny/unknown-
+  model/unicode/1200-project/2000-event inputs × every theme × rhythm ×
+  interactivity, asserting no crash and that HTML in project/model names is
+  escaped (XSS gate).
+- **Full CLI smoke suite** (`tests/test_cli_smoke.py`): introspects the
+  Typer app and asserts every command + sub-command responds cleanly to
+  `--help`, and that the data commands run against a seeded session without
+  an unhandled traceback. New commands are covered automatically.
+- **Guardrails**: a test asserts every section in `_SECTION_ORDER` declares
+  an explicit tier (so a forgotten tier mapping fails CI, not production),
+  plus the billboard-CTA fallback test above.
+
+Test count: 900 → 1031.
+
 ## 0.0.51 - 2026-05-25
 
 ### Fixed
