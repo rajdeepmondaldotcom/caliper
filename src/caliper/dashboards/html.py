@@ -681,12 +681,16 @@ section[id] { scroll-margin-top: 36px; }
 }
 .cal-section-head.receipt .cal-section-num {
   font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0;
+  /* Size matches the section title so the "1." reads as a paired
+     numeral, not an afterthought. Slightly muted colour + 600 weight
+     keeps the title as the dominant element. */
+  font-size: 17px;
+  letter-spacing: -0.005em;
   color: var(--mute);
   font-weight: 600;
-  /* Fixed column so titles align vertically across sections. */
-  min-width: 22px;
+  /* Fixed column so titles align vertically across sections. The width
+     fits "10." comfortably at 17px mono. */
+  min-width: 30px;
   display: inline-block;
 }
 
@@ -2956,12 +2960,19 @@ def _small_table(
             + "".join(_td(cell, align="right" if i else "left") for i, cell in enumerate(row))
             + "</tr>"
         )
+    # Letting the table size to its natural content (min-width:max-content
+    # on the inner table; overflow-x:auto on the scroll wrapper) means
+    # short labels like "estimated" / "Delta" no longer get truncated when
+    # the table sits inside a narrow grid column. The scroll wrapper
+    # surfaces the missing content via a horizontal scroll bar rather than
+    # silently clipping.
     return (
         '<div class="cal-table-panel" style="background:var(--panel);'
         "border:1px solid var(--border);border-radius:var(--r-md);"
-        'overflow:hidden;min-width:0">'
-        '<div class="cal-table-scroll" style="overflow-x:auto;max-width:100%">'
-        '<table class="cal-table" style="width:100%;min-width:100%;'
+        'min-width:0">'
+        '<div class="cal-table-scroll" style="overflow-x:auto;max-width:100%;'
+        'border-radius:var(--r-md)">'
+        '<table class="cal-table" style="width:100%;min-width:max-content;'
         'border-collapse:collapse;font-size:13px">'
         + head
         + "<tbody>"
@@ -3395,10 +3406,15 @@ def _section_attribution(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             for row in d.cohort_deltas
         ]
         panels.append(_small_table(["Cohort", "Current", "Previous", "Delta"], rows))
+    # Each attribution table has 3–4 columns. At 300px the tables were
+    # squeezed and the Evidence / Delta columns clipped. 380px gives every
+    # column room to breathe; the grid still fits two-up at ~800px main
+    # width, and three-up only when the dashboard has the full 1100px+
+    # receipt column available.
     body = (
         '<div class="cal-attribution-grid" style="display:grid;'
-        "grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));"
-        'gap:12px;min-width:0">' + "".join(panels) + "</div>"
+        "grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));"
+        'gap:16px;min-width:0">' + "".join(panels) + "</div>"
     )
     meta = f"{len(d.agents)} sources · {len(d.skills)} skills/workflows"
     return _section_wrap("attribution", rhythm=rhythm, body=body, meta=meta)

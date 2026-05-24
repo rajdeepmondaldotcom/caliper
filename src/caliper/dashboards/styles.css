@@ -604,12 +604,16 @@ section[id] { scroll-margin-top: 36px; }
 }
 .cal-section-head.receipt .cal-section-num {
   font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0;
+  /* Size matches the section title so the "1." reads as a paired
+     numeral, not an afterthought. Slightly muted colour + 600 weight
+     keeps the title as the dominant element. */
+  font-size: 17px;
+  letter-spacing: -0.005em;
   color: var(--mute);
   font-weight: 600;
-  /* Fixed column so titles align vertically across sections. */
-  min-width: 22px;
+  /* Fixed column so titles align vertically across sections. The width
+     fits "10." comfortably at 17px mono. */
+  min-width: 30px;
   display: inline-block;
 }
 
