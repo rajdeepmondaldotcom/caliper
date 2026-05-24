@@ -509,7 +509,13 @@ def _project_paths(events) -> set[str]:
 
 def write_output(text: str, output: Path | None) -> None:
     if output:
-        output.expanduser().write_text(text)
+        path = output.expanduser()
+        # Create missing parent dirs so `--output some/new/dir/file.json`
+        # works instead of raising FileNotFoundError. Mirrors the CLI's
+        # _write_output_file helper.
+        if path.parent and not path.parent.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
         return
     import contextlib
 

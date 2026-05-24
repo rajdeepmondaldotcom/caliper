@@ -605,6 +605,23 @@ def _validate_format(output_format: str) -> None:
         raise _exit_error(f"--output-format must be one of: {', '.join(OUTPUT_FORMATS)}")
 
 
+def _write_output_file(output: Path, text: str, *, encoding: str = "utf-8") -> None:
+    """Write CLI ``--output`` text, creating parent dirs and failing cleanly.
+
+    Mirrors the dashboard command's existing mkdir behaviour so every
+    ``--output`` target behaves the same: a missing parent directory is
+    created, and an unwritable path surfaces a one-line error instead of a
+    raw traceback. ``~`` is expanded for the caller.
+    """
+    path = output.expanduser()
+    try:
+        if path.parent and not path.parent.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding=encoding)
+    except OSError as exc:
+        raise _exit_error(f"could not write {path}: {exc.strerror or exc}") from exc
+
+
 # Root-level options whose CLI type is a path. Click's callback context can
 # hand them back as plain strings; downstream code expects pathlib.Path. The
 # coercion below makes the boundary deterministic regardless of how Click
@@ -805,7 +822,7 @@ def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
             text = _compat_json(name, rows, result, options)
             progress.stage_done("render")
             if values["output"]:
-                values["output"].expanduser().write_text(text)
+                _write_output_file(values["output"], text)
             else:
                 typer.echo(text, nl=False)
             return
@@ -820,7 +837,7 @@ def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
             )
             progress.stage_done("render", summary=f"{len(text):,} bytes")
             if values["output"]:
-                values["output"].expanduser().write_text(text, encoding="utf-8")
+                _write_output_file(values["output"], text)
             else:
                 typer.echo(text, nl=False)
             return
@@ -889,7 +906,7 @@ def _run_session_id(values: dict, session_id: str) -> None:
     else:
         text = render_json_text(scoped, options, rows, "session", values["output_format"])
     if values["output"]:
-        values["output"].expanduser().write_text(text)
+        _write_output_file(values["output"], text)
     else:
         typer.echo(text, nl=False)
 
@@ -1148,7 +1165,7 @@ def _run_overview(values: dict) -> None:
             share_safe=bool(values.get("share_safe", True)),
         )
         if values["output"]:
-            values["output"].expanduser().write_text(text, encoding="utf-8")
+            _write_output_file(values["output"], text)
         else:
             typer.echo(text, nl=False)
         return
@@ -1583,7 +1600,7 @@ def blocks(
     else:
         text = _blocks_table(payload["blocks"], options)
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text, nl=False)
 
@@ -1765,7 +1782,7 @@ def evidence(
     }
     text = _evidence_text(output_format, payload, rows, options)
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text, nl=False)
 
@@ -1855,7 +1872,7 @@ def limits(
 
             text = render_command_html(result, options, command="limits", share_safe=share_safe)
             if output:
-                output.expanduser().write_text(text, encoding="utf-8")
+                _write_output_file(output, text)
             else:
                 typer.echo(text, nl=False)
         else:
@@ -1925,7 +1942,7 @@ def insights(
             text = _render_insights_table(items)
         prog.stage_done("render")
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text, nl=False)
 
@@ -1996,7 +2013,7 @@ def shape(
     else:
         text = _render_shape_table(report)
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text, nl=False)
 
@@ -2620,7 +2637,7 @@ def tail(
             text = _tail_table(rows, by, options)
         prog.stage_done("render")
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text, nl=False)
 
@@ -2969,7 +2986,7 @@ def schema_export(
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text, nl=False)
 
@@ -3516,7 +3533,7 @@ def forecast(
 
         text = render_command_html(result, options, command="forecast", share_safe=share_safe)
         if output:
-            output.expanduser().write_text(text, encoding="utf-8")
+            _write_output_file(output, text)
         else:
             typer.echo(text, nl=False)
         return
@@ -3732,7 +3749,7 @@ def compare(
 
         text = render_command_html(result, options, command="compare", share_safe=share_safe)
         if output:
-            output.expanduser().write_text(text, encoding="utf-8")
+            _write_output_file(output, text)
         else:
             typer.echo(text, nl=False)
         return
@@ -4373,7 +4390,7 @@ def whatif(
 
         text = render_command_html(result, options, command="whatif", share_safe=share_safe)
         if output:
-            output.expanduser().write_text(text, encoding="utf-8")
+            _write_output_file(output, text)
         else:
             typer.echo(text, nl=False)
         return
@@ -4842,7 +4859,7 @@ def inefficiencies(
 def _write_or_echo(text: str, output: Path | None, output_format: str) -> None:
     if output:
         encoding = "utf-8" if output_format == "html" else None
-        output.expanduser().write_text(text, encoding=encoding)
+        _write_output_file(output, text, encoding=encoding)
     else:
         typer.echo(text, nl=False)
 
@@ -5006,7 +5023,7 @@ def export_grafana(
     """Print a Grafana dashboard JSON wired to the Prometheus exporter metric names."""
     text = render_grafana_dashboard(title=title)
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text)
 
@@ -5115,7 +5132,7 @@ def export_receipt(
 
         text = render_command_html(scoped, options, command="monthly", share_safe=share_safe)
         if output:
-            output.expanduser().write_text(text, encoding="utf-8")
+            _write_output_file(output, text)
         else:
             typer.echo(text)
         return
@@ -5161,7 +5178,7 @@ def export_receipt(
     )
     text = render_receipt_markdown(payload)
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text)
 
@@ -5378,7 +5395,7 @@ def statusline(
             vendors=vendors,
         )
         if output:
-            output.expanduser().write_text(text)
+            _write_output_file(output, text)
         else:
             typer.echo(text, nl=False)
         ticks += 1
@@ -5680,7 +5697,7 @@ def predict(
     }
     text = _render_predict(payload, output_format)
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text, nl=False)
 
@@ -5883,7 +5900,7 @@ def audit(
     }
     text = _render_audit(payload, output_format)
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text, nl=False)
     if strict and float(total_saving) > waste_threshold_usd:
@@ -6036,7 +6053,7 @@ def recommend(
     }
     text = _render_recommend(payload, output_format)
     if output:
-        output.expanduser().write_text(text)
+        _write_output_file(output, text)
     else:
         typer.echo(text, nl=False)
 
