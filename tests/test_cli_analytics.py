@@ -208,6 +208,37 @@ def test_exec_alias_renders_executive_summary(tmp_path: Path):
     assert "Caliper executive summary" in result.stdout or "No actionable" in result.stdout
 
 
+def test_recommend_top_flag_limits_recommendations(tmp_path: Path):
+    sessions, state, config = _setup(tmp_path)
+    result = runner.invoke(
+        app, ["recommend", "--top", "1", "--format", "json", *_common(sessions, state, config)]
+    )
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    # Regression: `--top` silently bound to the grouped-row limit and was
+    # ignored, so the rec list always returned up to its default of 5.
+    assert len(payload["recommendations"]) <= 1
+
+
+def test_exec_supports_json_format(tmp_path: Path):
+    sessions, state, config = _setup(tmp_path)
+    # Regression: `exec` hard-coded markdown and rejected `--format` entirely.
+    result = runner.invoke(app, ["exec", "--format", "json", *_common(sessions, state, config)])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert "recommendations" in payload
+
+
+def test_cache_status_and_clear(tmp_path: Path):
+    env = {"CALIPER_CACHE_DIR": str(tmp_path)}
+    status = runner.invoke(app, ["cache", "status"], env=env)
+    assert status.exit_code == 0, status.stdout
+    assert "Parse cache" in status.stdout
+    clear = runner.invoke(app, ["cache", "clear"], env=env)
+    assert clear.exit_code == 0, clear.stdout
+    assert "Cleared" in clear.stdout
+
+
 def test_audit_csv_format(tmp_path: Path):
     sessions, state, config = _setup(tmp_path)
     result = runner.invoke(

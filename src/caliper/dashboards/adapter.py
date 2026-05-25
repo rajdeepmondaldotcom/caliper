@@ -128,6 +128,7 @@ from caliper.predict import (
     total_outlook,
 )
 from caliper.pricing import MODELS_BY_NAME, RateCard, load_rate_card, model_vendor, normalize_model
+from caliper.subscriptions import subscription_cost_caveat
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -452,6 +453,7 @@ def build_handoff_dashboard(
         show_paths=options.show_paths,
         seasonality=seasonality,
         tier_provenance=tier_provenance,
+        cost_note=subscription_cost_caveat(result.plan_types) or "",
         outlook=outlook,
         model_forecasts=model_forecasts,
         cache_leverage=cache_leverage,

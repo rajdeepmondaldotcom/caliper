@@ -224,6 +224,46 @@ def test_model_overselection_recommends_sibling(tmp_path: Path):
     assert all("haiku" not in item["model"] for item in alternatives)
 
 
+def test_model_overselection_picks_highest_savings_cohort(tmp_path: Path):
+    # Haiku dominates by COUNT (50 vs 20) but opus dominates by SAVINGS.
+    # The finding must describe the savings-driving cohort, not the most
+    # frequent model — the old code conflated the two and recommended
+    # routing the cheap-model turns to a pricier model "to save money".
+    events = [
+        _event(session=f"h{i}", model="claude-haiku-4.5", input_tokens=1_000, output_tokens=100)
+        for i in range(50)
+    ] + [
+        _event(session=f"o{i}", model="claude-opus-4.7", input_tokens=1_000, output_tokens=100)
+        for i in range(20)
+    ]
+    findings = find_model_overselection(_result(events), _options(tmp_path), _card())
+    assert len(findings) == 1
+    metrics = findings[0].evidence_metrics
+    # The named model, its turn count, and the recommended sibling all
+    # describe the same (opus) cohort, and the sibling is cheaper than it.
+    assert metrics["top_model"] == "claude-opus-4.7"
+    assert metrics["sibling"] == "claude-sonnet-4.6"
+    assert metrics["events"] == 20
+    assert findings[0].impact_usd_exact > Decimal("0")
+    assert "claude-opus-4.7" in findings[0].title
+
+
+def test_model_overselection_never_recommends_a_pricier_model(tmp_path: Path):
+    # Haiku is the cheapest tier: it must never be told to "upgrade" to a
+    # pricier model (sonnet/opus) to save money. Its only cheaper option is
+    # a cross-vendor one (gpt-5.4-mini), so any finding must name that.
+    events = [
+        _event(session=f"h{i}", model="claude-haiku-4.5", input_tokens=1_000, output_tokens=100)
+        for i in range(8)
+    ]
+    findings = find_model_overselection(_result(events), _options(tmp_path), _card())
+    if findings:
+        models = {item["model"] for item in findings[0].evidence_metrics["alternatives"]}
+        assert "claude-sonnet-4.6" not in models
+        assert "claude-opus-4.7" not in models
+        assert findings[0].evidence_metrics["sibling"] != "claude-sonnet-4.6"
+
+
 def test_model_overselection_skips_non_trivial_turns(tmp_path: Path):
     events = [_event(output_tokens=5_000, tool_use_count=5, model="claude-opus-4.7")]
     assert find_model_overselection(_result(events), _options(tmp_path), _card()) == []

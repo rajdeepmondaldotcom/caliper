@@ -118,3 +118,23 @@ def subscription_warnings(plan_types: set[str]) -> list[str]:
             "remain on a legacy rate card; confirm workspace migration if exact cost matters."
         )
     return warnings
+
+
+def subscription_cost_caveat(plan_types: set[str]) -> str | None:
+    """A one-line caveat to show when a known ChatGPT subscription is detected.
+
+    Codex usage under a flat subscription is rate-limited, not billed per token,
+    so the rate-card total is the **API-equivalent value** of that usage rather
+    than an amount actually billed. Returns ``None`` when no recognized plan is
+    present (e.g. metered API use), where the per-token total *is* the real bill.
+    Pricing itself is never altered — this only labels what the number means.
+    """
+    known = [item for item in subscription_plan_payload(plan_types) if item["known"]]
+    if not known:
+        return None
+    labels = ", ".join(sorted({str(item["label"]) for item in known}))
+    return (
+        f"Plan detected: {labels}. Costs shown are the API-equivalent value of this "
+        "usage — Codex on a ChatGPT subscription is covered by the flat plan fee, not "
+        "billed per token. Read the total as usage value, not your invoice."
+    )

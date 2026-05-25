@@ -227,7 +227,7 @@ def test_verdict_demoted_when_billboard_present() -> None:
     assert d.billboard is not None  # the sample exercises the billboard path
     block = _verdict_block(d, "receipt")
     assert "cal-secondary-verdict" in block
-    assert "More signals" in block
+    assert "Review findings" in block
 
 
 def test_verdict_inline_without_billboard() -> None:

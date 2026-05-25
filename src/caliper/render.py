@@ -35,7 +35,11 @@ from caliper.models import (
     decimal_value,
 )
 from caliper.pricing import PRICING_SOURCES, RateCard, load_rate_card, pricing_catalog_status
-from caliper.subscriptions import subscription_plan_payload, subscription_warnings
+from caliper.subscriptions import (
+    subscription_cost_caveat,
+    subscription_plan_payload,
+    subscription_warnings,
+)
 from caliper.timeutil import iso_z, window_label
 
 __all__ = ["format_int", "redact", "render", "render_limits"]
@@ -252,6 +256,44 @@ def pricing_warnings(item: Aggregate) -> list[str]:
     return warnings
 
 
+def pricing_is_material(item: Aggregate) -> bool:
+    """True when the unpriced gap is large enough (> 5% of events) to merit a
+    warning rather than a calm note. A handful of unpriced events out of tens
+    of thousands should not read like a data emergency."""
+    events = item.totals.events or 0
+    if not events:
+        return bool(item.costs.unpriced_events)
+    return item.costs.unpriced_events / events > 0.05
+
+
+def pricing_summary_line(item: Aggregate) -> str | None:
+    """One concise evidence caveat in place of a stack of per-category
+    warnings. The per-category detail still ships in the JSON envelope and is
+    available via ``caliper evidence`` / ``caliper doctor``; the header only
+    needs to tell a reader how complete the totals are and where to look."""
+    if not pricing_warnings(item):
+        return None
+    status = pricing_status(item)
+    events = item.totals.events or 0
+    unpriced = item.costs.unpriced_events
+    if unpriced and events:
+        pct = unpriced / events
+        return (
+            f"Cost evidence is {status} — {unpriced:,} of {events:,} events "
+            f"({pct:.1%}) are unpriced, so cost totals are ~{1 - pct:.1%} complete. "
+            "Run `caliper evidence` for the breakdown."
+        )
+    estimated = pricing_estimated_events(item)
+    if estimated and events:
+        pct = estimated / events
+        return (
+            f"Cost evidence is {status} — {estimated:,} of {events:,} events "
+            f"({pct:.1%}) use estimated or inferred pricing. "
+            "Run `caliper evidence` for the breakdown."
+        )
+    return f"Cost evidence is {status}. Run `caliper evidence` for the breakdown."
+
+
 def rate_limit_sample_to_dict(sample) -> dict:
     item = asdict(sample)
     item["path"] = str(sample.path)
@@ -378,6 +420,7 @@ def report_payload(
     projects = sorted(project_rows, key=budget_impact_sort_key)
     model_mode = sorted(model_mode_rows, key=budget_impact_sort_key)
     samples = _report_rate_limit_samples(result.rate_limit_samples, options)
+    _subscription_caveat = subscription_cost_caveat(total.plan_types)
     payload = {
         "caliper": {
             "version": __version__,
@@ -408,6 +451,8 @@ def report_payload(
         "subscription": {
             "plans": subscription_plan_payload(total.plan_types),
             "warnings": subscription_warnings(total.plan_types),
+            "cost_basis": "api-equivalent" if _subscription_caveat else "billed",
+            "cost_caveat": _subscription_caveat,
         },
         "metadata": {
             "session_root": str(options.session_root),
@@ -623,12 +668,15 @@ def _print_report_header(
                 "[yellow]Note:[/yellow] Some sources have limited token coverage. "
                 "Run `caliper doctor` for details."
             )
-    for warning in pricing_warnings(total):
-        console.print(
-            f"[yellow]Warning:[/yellow] {warning} Reported costs are {pricing_status(total)}."
-        )
+    summary = pricing_summary_line(total)
+    if summary:
+        label = "Warning" if pricing_is_material(total) else "Note"
+        console.print(f"[yellow]{label}:[/yellow] {summary}")
     for warning in subscription_warnings(total.plan_types):
         console.print(f"[yellow]Subscription:[/yellow] {warning}")
+    caveat = subscription_cost_caveat(total.plan_types)
+    if caveat:
+        console.print(f"[yellow]Subscription:[/yellow] {caveat}")
     console.print()
 
 
@@ -670,32 +718,34 @@ def _usage_table(rows: list[Aggregate], total: Aggregate, options: RuntimeOption
     table.add_column("Output", justify="right")
     table.add_column("Total", justify="right")
     table.add_column("Cost $", justify="right")
-    table.add_column("Reported $", justify="right")
-    table.add_column("Calc $", justify="right")
+    # "Reported $" (vendor-stated) and "Calc $" (independently computed) only
+    # carry information when some events actually ship a vendor cost. For
+    # log-only sources (Claude Code, Codex) they are always "-" and identical
+    # to "Cost $", so collapse to a single column rather than show two dead ones.
+    show_split = total.costs.vendor_reported_events > 0
+    if show_split:
+        table.add_column("Reported $", justify="right")
+        table.add_column("Calc $", justify="right")
+
+    def _row_cells(item: Aggregate, label: str) -> list[str]:
+        cells = [
+            label,
+            compact_models(item),
+            _table_int(item.totals.input_tokens, options),
+            _table_int(item.totals.cached_input_tokens, options),
+            _table_int(item.totals.output_tokens, options),
+            _table_int(item.totals.total_tokens, options),
+            _cost_cell(item.costs, options),
+        ]
+        if show_split:
+            cells.append(_reported_cost(item.costs, options))
+            cells.append(_calculated_cost(item.costs, options))
+        return cells
+
     for row in rows:
-        table.add_row(
-            short_table_label(redact(row.label, options.show_prompts)),
-            compact_models(row),
-            _table_int(row.totals.input_tokens, options),
-            _table_int(row.totals.cached_input_tokens, options),
-            _table_int(row.totals.output_tokens, options),
-            _table_int(row.totals.total_tokens, options),
-            _cost_cell(row.costs, options),
-            _reported_cost(row.costs, options),
-            _calculated_cost(row.costs, options),
-        )
+        table.add_row(*_row_cells(row, short_table_label(redact(row.label, options.show_prompts))))
     table.add_section()
-    table.add_row(
-        "Total",
-        compact_models(total),
-        _table_int(total.totals.input_tokens, options),
-        _table_int(total.totals.cached_input_tokens, options),
-        _table_int(total.totals.output_tokens, options),
-        _table_int(total.totals.total_tokens, options),
-        _cost_cell(total.costs, options),
-        _reported_cost(total.costs, options),
-        _calculated_cost(total.costs, options),
-    )
+    table.add_row(*_row_cells(total, "Total"))
     return table
 
 
@@ -833,6 +883,8 @@ def _print_report_footer(console: Console, result: LoadResult, total: Aggregate)
     events_text = format_int(total.totals.events)
     duplicates_text = format_int(result.duplicates)
     line = f"Events: {events_text} | Duplicates skipped: {duplicates_text}"
+    if result.duplicates:
+        line += " (same event in multiple log files, counted once)"
     if result.rate_limit_sample_duplicates:
         line += (
             f" | Rate-limit duplicates skipped: {format_int(result.rate_limit_sample_duplicates)}"
@@ -846,7 +898,10 @@ def _print_report_footer(console: Console, result: LoadResult, total: Aggregate)
             f"${total.costs.reported_calculated_delta_usd:+,.2f} delta"
         )
     if total.cache_savings.cost_usd:
-        console.print(f"Cache savings: ${total.cache_savings.cost_usd:,.2f}")
+        console.print(
+            f"Cache savings: ${total.cache_savings.cost_usd:,.2f} "
+            "(vs paying the full input rate for every cached token)"
+        )
     if result.tier_sources:
         sources = ", ".join(
             f"{key}={format_int(value)}" for key, value in sorted(result.tier_sources.items())

@@ -302,7 +302,7 @@ def test_table_warns_when_model_has_unpriced_costs(tmp_path) -> None:
         ]
     )
     assert result.exit_code == 0, result.output
-    assert "no USD rate" in result.output
+    assert "unpriced" in result.output
     assert "partial" in result.output
 
 

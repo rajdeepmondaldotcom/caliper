@@ -281,12 +281,23 @@ def aggregate_monthly(
 def aggregate_sessions(
     result: LoadResult, options: RuntimeOptions, rate_card: RateCard | None = None
 ) -> list[Aggregate]:
+    # The session label is fixed by the first event seen for each session
+    # (aggregate_many groups on key[0] and only reads the label on setdefault),
+    # so format it once per session instead of per event. Iterating
+    # ``result.events`` in order reproduces the exact first-seen event
+    # aggregate_many would pick, keeping output byte-identical while dropping
+    # ~one strftime per event on large datasets.
+    labels: dict[str, str] = {}
+    for event in result.events:
+        if event.session_id not in labels:
+            labels[event.session_id] = session_display_label(
+                event,
+                options.timezone,
+                include_title=options.show_prompts,
+            )
+
     def key(event: UsageEvent) -> tuple[str, str]:
-        return event.session_id, session_display_label(
-            event,
-            options.timezone,
-            include_title=options.show_prompts,
-        )
+        return event.session_id, labels[event.session_id]
 
     return sorted(
         aggregate_events(result.events, key, options, rate_card=rate_card),

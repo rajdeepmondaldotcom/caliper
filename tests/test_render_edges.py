@@ -148,7 +148,10 @@ def test_human_table_marks_unsupported_pricing_as_na(tmp_path: Path) -> None:
     )
 
     assert "n/a" in text
-    assert "events have no USD rate" in text
+    # The per-category warning wall is collapsed into one materiality-aware
+    # evidence line; the per-category detail still ships in the JSON envelope.
+    assert "unpriced" in text
+    assert "partial" in text
 
 
 def test_human_table_preserves_true_zero_cost(tmp_path: Path) -> None:

@@ -268,10 +268,7 @@ def evidence_rows(result: LoadResult, total: Aggregate) -> list[dict[str, Any]]:
             "name": record["vendor"],
             "grade": record["confidence"],
             "events": record["event_count"],
-            "reason": (
-                f"{record['files_with_events']}/{record['discovered_files']} files with events; "
-                f"{record['unsupported_files']} unsupported"
-            ),
+            "reason": _vendor_reason(record),
         }
         for record in vendor_coverage_records(result)
     )
@@ -295,6 +292,22 @@ def overall_evidence_grade(dimensions: list[EvidenceDimension]) -> str:
 
 def _coverage(discovered: int, with_events: int) -> float:
     return with_events / discovered if discovered else 0.0
+
+
+def _vendor_reason(record: dict) -> str:
+    """Explain a vendor's coverage so an 'exact' grade doesn't read as
+    self-contradictory next to a low files-with-events ratio. Files that
+    parsed cleanly but carried no billable events are empty or transcript-only
+    sessions (common for Claude Code), not lost data — name them so a reader
+    can tell that gap apart from unsupported (failed-to-parse) files."""
+    discovered = record["discovered_files"]
+    with_events = record["files_with_events"]
+    unsupported = record["unsupported_files"]
+    empty = max(0, discovered - with_events - unsupported)
+    reason = f"{with_events}/{discovered} files carried billable events; {unsupported} unsupported"
+    if empty:
+        reason += f"; {empty:,} empty or transcript-only"
+    return reason
 
 
 def _vendor_confidence(stats: VendorParseStats, warning_count: int) -> str:

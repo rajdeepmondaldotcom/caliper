@@ -176,10 +176,10 @@ The privacy invariant is enforced in CI. The generated HTML contains zero
 external resources, zero `<script src>`, zero `fetch`/`XMLHttpRequest`/`import()`.
 Interactive dashboards use one inline UI script and one JSON data block; pass
 `--no-interactive` for script-free HTML.
-You can verify it on your own file:
+You can verify it on the file Caliper wrote (default location shown):
 
 ```bash
-grep -E "://|<script src|fetch\(|XMLHttpRequest|import\(" ~/caliper.html
+grep -E "://|<link|<script src|fetch\(|XMLHttpRequest|import\(" ~/Downloads/caliper-dashboard-*.html
 # no matches
 ```
 

@@ -767,6 +767,11 @@ class Dashboard:
     seasonality: SeasonalitySection | None = None
     tier_provenance: TierProvenance | None = None
 
+    # API-equivalent caveat when usage runs under a flat subscription (e.g.
+    # Codex on a ChatGPT plan), so the above-the-fold cost reads as usage value
+    # rather than an invoice. Empty when usage is genuinely metered.
+    cost_note: str = ""
+
     # Phase 2 power-ups: per-model forecast strip + portfolio 30/90d outlook.
     model_forecasts: list[ModelForecastRow] = field(default_factory=list)
     outlook: Outlook | None = None

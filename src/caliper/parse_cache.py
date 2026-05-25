@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 import os
@@ -45,6 +46,14 @@ class ParseCache:
         self.misses = 0
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.path)
+        # WAL lets concurrent readers run alongside one writer, so two Caliper
+        # processes (e.g. `dashboard` + `live`) sharing the cache don't deadlock;
+        # busy_timeout turns immediate "database is locked" errors into a short
+        # wait. Both are safe per connection.
+        with contextlib.suppress(sqlite3.DatabaseError):
+            self._conn.execute("pragma journal_mode=WAL")
+            self._conn.execute("pragma busy_timeout=10000")
+            self._conn.execute("pragma synchronous=NORMAL")
         self._closed = False
         with self._conn:
             self._conn.execute(
@@ -538,9 +547,9 @@ class ParseCache:
     def clear(self) -> int:
         """Drop every cached row across all tables and vacuum the file.
 
-        Returns the number of rows removed. Used by the doctor "Rebuild
-        parse cache" action in the Textual TUI and by users who want to
-        force a re-parse without removing the cache file by hand.
+        Returns the number of rows removed. Exposed as `caliper cache clear`
+        for users who want to force a re-parse or reclaim disk without
+        removing the cache file by hand.
         """
         tables = (
             "parsed_sessions",

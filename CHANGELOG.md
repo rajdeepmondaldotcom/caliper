@@ -2,6 +2,82 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.57 - 2026-05-25
+
+A deep critical-user polish pass: a fleet of reviewer personas (HN skeptic, WCAG
+auditor, designer, non-technical finance, self-hosted/CLI, performance) exercised
+the dashboard and CLI against real data. The three biggest numbers in the product
+now read correctly.
+
+### Fixed
+
+- **The advisor no longer recommends moving cheap-model turns to a pricier
+  model.** `recommend`/`exec`/`insights` grouped short, tool-free turns and
+  conflated the most-frequent model with savings aggregated over a different
+  cohort — surfacing "route claude-haiku-4.5 turns to claude-sonnet-4.6 to save
+  $X" even though Sonnet costs 3× more. Findings now name a single cohort whose
+  recommended target is genuinely cheaper for that cohort's own turns, and note
+  the lowest-cost option when an in-family swap is preferred.
+- **`recommend --top N` now limits the recommendation count.** `--top` collided
+  with the grouped-row limit and was silently ignored. `exec` gained `--format`,
+  and its docstring alias is now accurate.
+- **`exec` no longer mislabels savings as spend.** "Monthly projection" →
+  "Projected monthly savings"; "Quantified waste" → "Estimated recoverable
+  waste (confidence: medium)".
+- **Projections are labeled by horizon.** `forecast` reads "Rest-of-month";
+  `predict` reads "Next 30 days (run-rate)"; each cross-references the other so a
+  rest-of-month figure and a forward-30-day figure no longer look contradictory.
+  The forecast ±1σ band notes its iid assumption.
+- **The four-line pricing-warning wall is now one evidence line** with the actual
+  completeness percentage; full per-category detail stays in the JSON envelope,
+  `caliper evidence`, and `caliper doctor`.
+- **Redundant cost columns collapse.** "Reported $" / "Calc $" appear only when a
+  vendor actually reports USD; otherwise a single "Cost $" column.
+- **`schema validate` errors print to stderr**, `audit` documents its exit codes,
+  and `--w` is now the conventional `-w`.
+
+### Added
+
+- **Subscription-aware cost labeling.** When a flat ChatGPT plan is detected, CLI
+  reports and the dashboard frame the total as the API-equivalent value of the
+  usage — not a per-token bill — so a Codex-on-subscription total no longer reads
+  as an invoice. Pricing itself is unchanged; this only labels what the number
+  means.
+- **Total window spend above the fold** on the dashboard, beside the evidence and
+  window badges, so the baseline is legible without scrolling past the billboard.
+- **`caliper cache status` and `caliper cache clear`** to inspect and reclaim the
+  local parse cache (previously unbounded with no CLI control).
+- Cache-savings now reads "vs paying the full input rate for every cached token",
+  and "Duplicates skipped" explains that the same event appears in multiple logs.
+
+### Hardened
+
+- **The parse cache uses WAL + a busy timeout**, so `dashboard` and `live` can
+  share it without "database is locked" deadlocks.
+- **`doctor` no longer fails CI on a structural Cursor gap.** Missing Cursor
+  per-event token counts read as "ok" when other sources contribute usable
+  events; it stays a warning only when Cursor is the sole source.
+- **Evidence "exact" is now self-consistent.** Vendor coverage explains empty /
+  transcript-only files instead of reading as "exact" next to a low
+  files-with-events ratio.
+
+### Accessibility
+
+- "Show the math" disclosures regain a visible keyboard focus ring; anomaly
+  severity is conveyed in text (not colour alone); JS smooth-scroll honours
+  `prefers-reduced-motion`.
+
+### Performance
+
+- Session labels are formatted once per session instead of once per event.
+
+### Deferred
+
+- An O(M²·logM) → O(M²) optimization of anomaly scoring on very large
+  single-project cohorts. Output is correct today; the byte-identical rewrite of
+  the robust-scale internals warrants dedicated equivalence validation before it
+  ships.
+
 ## 0.0.56 - 2026-05-25
 
 Release of the 0.0.55 critical-user polish branch, with the final release

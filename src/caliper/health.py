@@ -310,16 +310,24 @@ def check_cursor_token_coverage(
         if issue.vendor == VENDOR_CURSOR and issue.kind == "unsupported:no_token_usage"
     )
     missing = sum(1 for event in events if event.vendor == VENDOR_CURSOR and event.usage.is_zero())
+    # Older Cursor data legitimately lacks per-event token counts; that's a
+    # structural gap, not an actionable failure. When other sources contribute
+    # usable events, don't flip `doctor` (and CI's exit code) to WARN over it —
+    # keep it informational. Warn only when Cursor is effectively the sole source.
+    other_usable = any(
+        event.vendor != VENDOR_CURSOR and not event.usage.is_zero() for event in events
+    )
+    gap_status = "ok" if other_usable else "warn"
     if unsupported:
         noun = "file" if unsupported == 1 else "files"
         detail = f"{unsupported:,} Cursor {noun} have no per-event token counts."
         if missing:
             detail = f"{detail} {missing:,} parsed Cursor events also have zero token counts."
-        return doctor_check("Cursor token coverage", "warn", detail)
+        return doctor_check("Cursor token coverage", gap_status, detail)
     if missing:
         return doctor_check(
             "Cursor token coverage",
-            "warn",
+            gap_status,
             f"{missing:,} Cursor events have no per-event token counts.",
         )
     return doctor_check("Cursor token coverage", "ok", "no Cursor token gaps found")

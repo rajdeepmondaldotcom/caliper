@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from caliper.subscriptions import (
     normalize_subscription_plan,
+    subscription_cost_caveat,
     subscription_plan_payload,
     subscription_warnings,
 )
@@ -33,3 +34,13 @@ def test_subscription_warnings_surface_only_real_ambiguity() -> None:
     assert any("Free/Go" in warning for warning in warnings)
     assert any("legacy rate card" in warning for warning in warnings)
     assert any("Unknown Codex subscription plan" in warning for warning in warnings)
+
+
+def test_subscription_cost_caveat_labels_known_plans_as_api_equivalent() -> None:
+    caveat = subscription_cost_caveat({"pro"})
+    assert caveat is not None
+    assert "ChatGPT Pro" in caveat
+    assert "API-equivalent" in caveat
+    # No recognized plan (metered API use, or nothing) → the total is the bill.
+    assert subscription_cost_caveat(set()) is None
+    assert subscription_cost_caveat({"totally-unknown-plan"}) is None

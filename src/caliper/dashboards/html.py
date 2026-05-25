@@ -2642,7 +2642,7 @@ def _stat_card(
             '<summary style="cursor:pointer;list-style:none;font-family:var(--mono);'
             "font-size:10px;letter-spacing:0;color:var(--ghost);"
             "user-select:none;display:inline-flex;align-items:center;gap:4px;"
-            'outline:none" aria-label="Show the formula for this KPI">'
+            '" aria-label="Show the formula for this KPI">'
             '<span class="cal-card-chev" aria-hidden="true">▸</span>'
             '<span aria-hidden="true" style="display:inline-block;width:11px;height:11px;'
             "border:1px solid var(--border-strong);border-radius:50%;text-align:center;"
@@ -3113,7 +3113,7 @@ def _verdict_block(d: Dashboard, rhythm: str, *, margin: str = "margin-top:18px"
     return (
         f'<details class="cal-secondary-verdict" style="{margin}">'
         '<summary class="cal-secondary-verdict-summary">'
-        f"More signals ({shown})"
+        f"Review findings ({shown})"
         '<span class="cal-secondary-verdict-chev" aria-hidden="true">▸</span>'
         "</summary>"
         f'<div style="margin-top:12px">{strip}</div>'
@@ -4350,7 +4350,7 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             f"align-items:start;padding:{pad};border-left:2px solid {tone_color};"
             f'border-top:{top}">'
             f'<span class="cal-anomaly-label" style="padding-top:2px">'
-            f"{_severity_token(a.tone, 'Spend spike')}</span>"
+            f"{_severity_token(a.tone, f'{_anomaly_tone_word(a.tone)} · Spend spike')}</span>"
             '<div class="cal-anomaly-main">'
             f'<div style="color:var(--ink);font-size:13px;font-weight:500">'
             f'{_esc(a.kind)} · <span style="font-family:var(--mono);color:var(--ink-2)">{_private_text(a.label, pm)}</span></div>'
@@ -5094,6 +5094,15 @@ def _severity_token(level: str, label: str | None = None) -> str:
     )
 
 
+_ANOMALY_TONE_WORDS = {"critical": "Critical", "warn": "Warning", "good": "OK"}
+
+
+def _anomaly_tone_word(tone: str) -> str:
+    """Plain severity word so anomaly chips convey level by text, not only
+    colour (the severity glyph is decorative / aria-hidden)."""
+    return _ANOMALY_TONE_WORDS.get(str(tone).lower(), "Notice")
+
+
 # ----------------------------------------------------------------------------
 # Billboard — single above-the-fold "biggest fix" peak (Peak-End Rule)
 # ----------------------------------------------------------------------------
@@ -5311,6 +5320,15 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         f'<span style="color:var(--ghost);font-family:var(--mono);font-size:11px">'
         f"{vendor_count}/{vendor_total}</span>" + "".join(chips) + "</div>"
     )
+    cost_note_html = ""
+    if d.cost_note:
+        _note = _esc(d.cost_note)
+        cost_note_html = (
+            f' <span title="{_note}" aria-label="{_note}" '
+            'style="color:var(--mute);font-weight:400;font-size:10px;font-family:var(--font);'
+            "border:1px solid var(--border);border-radius:999px;padding:1px 7px;cursor:help;"
+            'white-space:nowrap">API-equivalent</span>'
+        )
     masthead = (
         '<header role="banner" style="display:grid;grid-template-columns:1fr auto;gap:16px;'
         'align-items:start;padding-bottom:18px;border-bottom:1px solid var(--border)">'
@@ -5324,6 +5342,12 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         "Cost layer for AI-assisted development · offline, auditable, no login</div></div>"
         '<div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end;min-width:0">'
         f'<div style="display:flex;gap:8px;align-items:center">{evidence_badge}{_window_badge(d.window)}</div>'
+        # Baseline spend, above the fold: the billboard leads on a saving, so the
+        # total this window needs to be legible without scrolling to §Overview.
+        '<div style="font-size:15px;color:var(--ink);font-weight:600;font-family:var(--mono)">'
+        f"{fmt_money(d.totals.cost_usd)} "
+        '<span style="color:var(--mute);font-weight:400;font-size:11px;font-family:var(--font)">'
+        f"this window</span>{cost_note_html}</div>"
         f"{sources_row}"
         '<div style="font-size:11px;color:var(--mute);font-family:var(--mono);display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:flex-end">'
         f"{_status_dot('good', 'offline')}<span>Generated {_esc(gen_line)}</span></div>"
@@ -5835,7 +5859,11 @@ _INTERACTIVE_SCRIPT = """
     if (!anchor) return;
     openAppendixIfTargets('#' + anchor);
     var el = document.getElementById(anchor);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (el) {
+      var reduceMotion = window.matchMedia
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    }
     history.replaceState(null, '', '#' + anchor);
   }
   function paletteCommit() {

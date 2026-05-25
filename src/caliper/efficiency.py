@@ -15,7 +15,7 @@ from collections.abc import Callable
 from decimal import Decimal
 
 from caliper.aggregation import event_cost
-from caliper.arbitrage import rank_model_alternatives
+from caliper.arbitrage import ModelAlternative, rank_model_alternatives
 from caliper.humanize import session_label_lookup
 from caliper.models import (
     Finding,
@@ -372,44 +372,73 @@ def find_model_overselection(
     options: RuntimeOptions,
     card: RateCard,
 ) -> list[Finding]:
-    """Premium-model events whose trivial shape has cheaper priced alternatives."""
-    flagged: list[UsageEvent] = []
+    """Short, tool-free turns whose *current* model has a cheaper priced
+    equivalent for the same token shape.
+
+    Flagged turns are grouped by their current model, and each cohort is
+    priced against *its own* turns, so the headline model, turn count, and
+    savings all describe the same population — a finding can never recommend
+    routing a model's turns to something that is pricier for those turns
+    (the old code conflated the most-frequent model with savings aggregated
+    over a different, mixed pool). The cohort with the largest savings is
+    surfaced.
+    """
+    trivial_by_model: dict[str, list[UsageEvent]] = {}
     for event in result.events:
         if not is_trivial_turn(event):
             continue
-        if not rank_model_alternatives([event], card, limit=1):
+        trivial_by_model.setdefault(event.model, []).append(event)
+    if not trivial_by_model:
+        return []
+
+    best: tuple[Decimal, str, list[UsageEvent], tuple[ModelAlternative, ...]] | None = None
+    for model, events in trivial_by_model.items():
+        # Alternatives are filtered to cheaper-than-`model` for *these* turns
+        # by `_compute_alternatives` (savings = actual − projected, kept only
+        # when > 0), so every listed option genuinely saves for this cohort.
+        alternatives = rank_model_alternatives(events, card, limit=3)
+        if not alternatives:
             continue
-        flagged.append(event)
-    if not flagged:
+        top_saving = Decimal(alternatives[0].estimated_savings_usd_exact)
+        if best is None or top_saving > best[0]:
+            best = (top_saving, model, events, alternatives)
+    if best is None:
         return []
-    by_model: dict[str, int] = {}
-    for event in flagged:
-        by_model[event.model] = by_model.get(event.model, 0) + 1
-    top_model = max(by_model, key=by_model.get)
-    alternatives = rank_model_alternatives(flagged, card, limit=3)
-    if not alternatives:
-        return []
+
+    total_saving, top_model, flagged, alternatives = best
     top_alternative = alternatives[0]
-    total_saving = Decimal(top_alternative.estimated_savings_usd_exact)
+    # The in-family pin (`_alternative_priority`) can rank a same-vendor swap
+    # ahead of a cheaper cross-vendor one; name that honestly instead of
+    # quoting the top pick while a bigger saver sits on the same line.
+    best_by_savings = max(alternatives, key=lambda item: Decimal(item.estimated_savings_usd_exact))
     choices = ", ".join(
         f"{item.model} ({item.vendor}, saves "
         f"{_format_money_exact(item.estimated_savings_usd_exact)})"
         for item in alternatives
     )
+    detail = (
+        f"{len(flagged):,} short, tool-free turns on {top_model} would price cheaper "
+        f"on another model for the same token shape: {choices}."
+    )
+    if best_by_savings.model != top_alternative.model and (
+        Decimal(best_by_savings.estimated_savings_usd_exact) > total_saving
+    ):
+        detail += (
+            f" {top_alternative.model} is the lower-risk pick here; "
+            f"{best_by_savings.model} saves the most "
+            f"({_format_money_exact(best_by_savings.estimated_savings_usd_exact)})."
+        )
     return [
         Finding(
             code=CODE_MODEL_OVERSELECTION,
             severity=SEV_WARN,
-            title=f"{len(flagged)} trivial turns ran on premium models",
-            detail=(
-                f"{len(flagged)} turns with no tool use and short output ran on "
-                f"{top_model}. Current alternatives for the same token shape: {choices}."
-            ),
+            title=f"{len(flagged):,} short, tool-free {top_model} turns could run cheaper",
+            detail=detail,
             action=(
-                f"Route trivial turns to {top_alternative.model} or another ranked "
-                "small-model alternative."
+                f"Route these {top_model} turns to {top_alternative.model} or another "
+                "ranked cheaper alternative."
             ),
-            payback_action=f"Route trivial turns to {top_alternative.model}.",
+            payback_action=f"Route short {top_model} turns to {top_alternative.model}.",
             scope="models",
             impact_usd_exact=total_saving,
             monthly_projected_savings_usd=_scale_to_monthly(total_saving, options),

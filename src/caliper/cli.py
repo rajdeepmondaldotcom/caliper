@@ -361,7 +361,7 @@ CompactOpt = Annotated[
 WidthOpt = Annotated[
     int | None,
     typer.Option(
-        "--w", "--width", "--table-width", help="Force column width. Default follows terminal."
+        "-w", "--width", "--table-width", help="Force column width. Default follows terminal."
     ),
 ]
 TopThreadsOpt = Annotated[
@@ -3066,6 +3066,53 @@ schema_app = typer.Typer(
 )
 app.add_typer(schema_app, name="schema")
 
+cache_app = typer.Typer(
+    help="Inspect or clear the local parse cache.",
+    context_settings=_HELP_OPTION_NAMES,
+)
+app.add_typer(cache_app, name="cache")
+
+
+@cache_app.command("status")
+def cache_status() -> None:
+    """Show the parse cache location, size, and indexed totals."""
+    from caliper.parse_cache import ParseCache
+
+    cache = ParseCache.default()
+    try:
+        stats = cache.indexed_stats()
+        size_mib = (cache.path.stat().st_size if cache.path.exists() else 0) / (1024 * 1024)
+    finally:
+        cache.close()
+    console.print("[bold]Caliper - Parse cache[/bold]")
+    console.print(f"Path: {cache.path}")
+    console.print(
+        f"Size: {size_mib:,.1f} MiB · {stats['files']:,} files · "
+        f"{stats['events']:,} events · {stats['samples']:,} samples"
+    )
+    console.print(
+        "Speeds up repeat runs; safe to clear anytime with `caliper cache clear`. "
+        "Set CALIPER_CACHE_DIR to relocate it."
+    )
+
+
+@cache_app.command("clear")
+def cache_clear() -> None:
+    """Drop every cached row and reclaim the space (forces a fresh re-parse)."""
+    from caliper.parse_cache import ParseCache
+
+    cache = ParseCache.default()
+    try:
+        before = cache.path.stat().st_size if cache.path.exists() else 0
+        removed = cache.clear()
+        after = cache.path.stat().st_size if cache.path.exists() else 0
+    finally:
+        cache.close()
+    reclaimed = max(0, before - after) / (1024 * 1024)
+    console.print(
+        f"[green]Cleared[/green] {removed:,} cached rows; reclaimed {reclaimed:,.1f} MiB."
+    )
+
 
 @schema_app.command("export")
 def schema_export(
@@ -3107,7 +3154,7 @@ def schema_validate(
         raise _exit_error(str(exc)) from exc
     if errors:
         for error in errors:
-            console.print(f"[red]error:[/red] {error}")
+            error_console.print(f"[red]error:[/red] {error}")
         raise typer.Exit(2)
     console.print("[green]valid[/green]")
 
@@ -3731,17 +3778,25 @@ def forecast(
     table.add_column()
     table.add_row("Daily mean", f"${projection.daily_mean:,.2f}")
     table.add_row("Daily σ", f"${projection.daily_stdev:,.2f}")
-    table.add_row("Linear projection", f"${projection.linear_total:,.2f}")
+    table.add_row("Rest-of-month (linear)", f"${projection.linear_total:,.2f}")
     table.add_row(
         "  ±1σ band",
         f"${projection.linear_low:,.2f} - ${projection.linear_high:,.2f}",
     )
-    table.add_row("EWMA projection", f"${projection.ewma_total:,.2f}")
+    table.add_row("Rest-of-month (EWMA)", f"${projection.ewma_total:,.2f}")
     table.add_row("Trend", sparkline or "no usage")
     if projection.cap is not None and projection.days_to_cap is not None:
         table.add_row("Plan cap", f"${projection.cap:,.2f}")
         table.add_row("Days to depletion at mean rate", f"{projection.days_to_cap:,.1f}")
     console.print(table)
+    console.print(
+        f"Projects spend for the {projection.days_remaining} day(s) left in this month at the "
+        "trailing daily rate. For a forward 30-day run rate, run `caliper predict`."
+    )
+    console.print(
+        "[dim]±1σ band assumes day-to-day spend is independent; real usage is autocorrelated, "
+        "so read the band as indicative.[/dim]"
+    )
 
 
 def _safe_receipt_rows(
@@ -5934,9 +5989,10 @@ def _predict_markdown(payload: dict[str, Any]) -> str:
         lines.append("_No per-model data in this window._")
     lines.append("")
     lines.append(
-        f"**30d outlook**: ${payload['cost_outlook']['30d']['linear_total']:,.2f} "
+        f"**Next 30 days** (run-rate): ${payload['cost_outlook']['30d']['linear_total']:,.2f} "
         f"(EWMA ${payload['cost_outlook']['30d']['ewma_total']:,.2f}). "
-        f"**90d outlook**: ${payload['cost_outlook']['90d']['linear_total']:,.2f}."
+        f"**Next 90 days**: ${payload['cost_outlook']['90d']['linear_total']:,.2f}. "
+        "Forward run-rate from recent demand — not this month's bill (see `caliper forecast`)."
     )
     if payload["anomalies"]:
         lines.append("")
@@ -5956,9 +6012,9 @@ def _predict_table(payload: dict[str, Any]) -> str:
     local_console = Console(file=buffer, width=140, _environ={})
     local_console.print("[bold]Caliper - Predictive analytics[/bold]")
     local_console.print(
-        f"Horizon: {payload['horizon_days']} days. "
-        f"30d outlook: ${payload['cost_outlook']['30d']['linear_total']:,.2f}, "
-        f"90d outlook: ${payload['cost_outlook']['90d']['linear_total']:,.2f}."
+        "Forward run-rate from recent demand (not this month's bill — see `caliper forecast`). "
+        f"Next 30 days: ${payload['cost_outlook']['30d']['linear_total']:,.2f}, "
+        f"next 90 days: ${payload['cost_outlook']['90d']['linear_total']:,.2f}."
     )
     if payload["per_model"]:
         table = Table(title="Per-model demand", show_lines=False, expand=False)
@@ -6060,7 +6116,13 @@ def audit(
         ),
     ] = 10.0,
 ) -> None:
-    """Quantified inefficiency audit. Every finding quotes a dollar saving."""
+    """Quantified inefficiency audit. Every finding quotes a dollar saving.
+
+    Exit codes: 0 = no findings; 1 = findings present; 2 = a fail-severity
+    finding, or (with --strict) total waste over --waste-threshold-usd. The
+    exit-1-on-findings gate makes `caliper audit && deploy` fail when there is
+    fixable waste; use `caliper recommend` for the same findings without it.
+    """
     from decimal import Decimal as _Decimal
 
     from caliper.efficiency import (
@@ -6131,9 +6193,9 @@ def _audit_markdown(payload: dict[str, Any]) -> str:
         "",
         f"**Sum of retained finding impacts**: ${float(payload['total_savings_usd']):,.2f} "
         f"({payload['waste_share_of_spend']:.0%} of spend). "
-        f"**Monthly projection**: ${float(payload['monthly_projected_savings_usd']):,.2f}.",
+        f"**Projected monthly savings**: ${float(payload['monthly_projected_savings_usd']):,.2f}.",
         "",
-        "| Code | Severity | Title | Impact | Monthly | Confidence | Action |",
+        "| Code | Severity | Title | Impact | Monthly save | Confidence | Action |",
         "| --- | --- | --- | ---: | ---: | --- | --- |",
     ]
     for item in payload["findings"]:
@@ -6155,7 +6217,7 @@ def _audit_table(payload: dict[str, Any]) -> str:
     local_console.print(
         f"Retained finding impacts: [bold]${float(payload['total_savings_usd']):,.2f}[/bold] "
         f"({payload['waste_share_of_spend']:.0%} of spend). "
-        f"Monthly projection: ${float(payload['monthly_projected_savings_usd']):,.2f}."
+        f"Projected monthly savings: ${float(payload['monthly_projected_savings_usd']):,.2f}."
     )
     if not payload["findings"]:
         local_console.print("[green]No quantified waste detected.[/green]")
@@ -6164,7 +6226,7 @@ def _audit_table(payload: dict[str, Any]) -> str:
     table.add_column("Code")
     table.add_column("Severity")
     table.add_column("Impact", justify="right")
-    table.add_column("Monthly", justify="right")
+    table.add_column("Monthly save", justify="right")
     table.add_column("Action")
     for item in payload["findings"]:
         table.add_row(
@@ -6203,7 +6265,6 @@ def recommend(
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
-    top_threads: TopThreadsOpt = 0,
     rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
     include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
     project: ProjectOpt = None,
@@ -6211,6 +6272,7 @@ def recommend(
     top: Annotated[
         int,
         typer.Option(
+            "--top",
             "--top-recommendations",
             "--top-n",
             "-n",
@@ -6281,8 +6343,8 @@ def _recommend_markdown(payload: dict[str, Any]) -> str:
         lines.append("# Caliper executive summary")
         lines.append("")
         lines.append(
-            f"**Window spend**: ${spend:,.2f} • **Quantified waste**: ${total:,.2f} "
-            f"({share:.0%}) • **Monthly projection**: ${monthly:,.2f}."
+            f"**Window spend**: ${spend:,.2f} • **Estimated recoverable waste**: ${total:,.2f} "
+            f"({share:.0%}) • **Projected monthly savings**: ${monthly:,.2f}."
         )
         lines.append("")
         lines.append("## Top actions")
@@ -6309,7 +6371,7 @@ def _recommend_table(payload: dict[str, Any]) -> str:
     monthly = float(payload["monthly_projected_savings_usd"])
     local_console.print("[bold]Caliper - Recommendations[/bold]")
     local_console.print(
-        f"Window saving available: [bold]${total:,.2f}[/bold]. Monthly projection: ${monthly:,.2f}."
+        f"Window savings: [bold]${total:,.2f}[/bold]. Projected monthly savings: ${monthly:,.2f}."
     )
     if not payload["recommendations"]:
         local_console.print("[green]No actionable savings in this window.[/green]")
@@ -6318,7 +6380,7 @@ def _recommend_table(payload: dict[str, Any]) -> str:
     table.add_column("#", justify="right")
     table.add_column("Action")
     table.add_column("Saving", justify="right")
-    table.add_column("Monthly", justify="right")
+    table.add_column("Monthly save", justify="right")
     table.add_column("Confidence")
     for rec in payload["recommendations"]:
         table.add_row(
@@ -6355,11 +6417,11 @@ def exec_command(
     offline: OfflineOpt = True,
     compact: CompactOpt = False,
     width: WidthOpt = None,
-    top_threads: TopThreadsOpt = 0,
     rate_limit_sample_limit: RateLimitSampleLimitOpt = 100,
     include_all_rate_limit_samples: IncludeAllRateLimitSamplesOpt = False,
     project: ProjectOpt = None,
     vendors: VendorOpt = None,
+    output_format: FormatOpt = "markdown",
     output: OutputOpt = None,
 ) -> None:
     """One-pager executive summary. Alias for ``recommend --summary --top 5``."""
@@ -6368,7 +6430,7 @@ def exec_command(
         until=until,
         days=days,
         timezone=timezone,
-        output_format="markdown",
+        output_format=output_format,
         output=output,
         session_root=session_root,
         state_db=state_db,
@@ -6387,7 +6449,6 @@ def exec_command(
         offline=offline,
         compact=compact,
         width=width,
-        top_threads=top_threads,
         rate_limit_sample_limit=rate_limit_sample_limit,
         include_all_rate_limit_samples=include_all_rate_limit_samples,
         project=project,
