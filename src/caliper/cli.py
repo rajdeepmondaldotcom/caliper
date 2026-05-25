@@ -1838,7 +1838,7 @@ def _evidence_text(
     options: RuntimeOptions,
 ) -> str:
     if output_format == "json":
-        return json_dumps_enveloped(payload) + "\n"
+        return json_dumps_enveloped(_redact_evidence_payload(payload, options)) + "\n"
     if output_format == "csv":
         return records_to_csv(rows)
     if output_format == "markdown":
@@ -1864,6 +1864,17 @@ def _evidence_text(
         )
     local_console.print(table)
     return buffer.getvalue()
+
+
+def _redact_evidence_payload(payload: dict[str, Any], options: RuntimeOptions) -> dict[str, Any]:
+    redacted = _redact_paths(payload, options)
+    if options.show_paths:
+        return redacted
+    issues = ((redacted.get("evidence") or {}).get("parser_issues") or [])
+    for issue in issues:
+        if isinstance(issue, dict) and issue.get("examples"):
+            issue["examples"] = ["<redacted-path>" for _ in issue.get("examples", [])]
+    return redacted
 
 
 @app.command()
@@ -2330,8 +2341,8 @@ def dashboard(
         typer.Option(
             "--interactive/--no-interactive",
             help=(
-                "Embed a floating toggle panel + a Save Snapshot button "
-                "so the recipient can flip between Dark/Light/Safe Share "
+                "Embed a floating toggle panel + a Save Copy button "
+                "so the recipient can flip between Dark/Light/Redacted "
                 "without re-running the CLI. Defaults to dashboard.interactive (default: on)."
             ),
         ),
@@ -2382,6 +2393,7 @@ def dashboard(
     from caliper.cli_progress import cli_report_progress
     from caliper.config import (
         derive_dashboard_output_path,
+        legacy_dashboard_privacy_off_path,
         load_dashboard_config,
         write_dashboard_defaults,
     )
@@ -2452,6 +2464,16 @@ def dashboard(
     privacy = privacy if privacy is not None else dash_cfg.privacy
     if share_safe_set:
         privacy = "always" if share_safe else "off"
+    elif privacy == "off":
+        legacy_path = legacy_dashboard_privacy_off_path(config)
+        if legacy_path is not None:
+            privacy = "always"
+            if not quiet and not stdout_html and output is not None:
+                typer.echo(
+                    f"ℹ Ignoring generated legacy dashboard privacy=off in {legacy_path}; "
+                    "use --no-share-safe or edit privacy = \"off\" again for local-only output.",
+                    err=True,
+                )
     interactive_effective = interactive if interactive is not None else dash_cfg.interactive
 
     if theme not in {"dark", "light", "print"}:
@@ -2474,6 +2496,8 @@ def dashboard(
     import sys as _sys
 
     auto_progress = not quiet and not stdout_html and _sys.stderr.isatty()
+    if not demo and not quiet and not stdout_html and output is not None and not auto_progress:
+        typer.echo("Building dashboard: parsing local AI logs...", err=True)
     with cli_report_progress(
         output_format="table",  # neutral: progress=True below makes the call.
         output=None,
@@ -2632,7 +2656,7 @@ def dashboard(
     if interactive_effective and not quiet:
         # Tail message: tell the user about the playground. One short line.
         typer.echo(
-            "  Toggle Receipt/Terminal · Dark/Light/Safe Share in the floating panel.",
+            "  Floating panel: Dark/Light/Redacted · Save redacted copy.",
             err=True,
         )
 
@@ -3093,6 +3117,9 @@ def cache_status() -> None:
     console.print(
         "Speeds up repeat runs; safe to clear anytime with `caliper cache clear`. "
         "Set CALIPER_CACHE_DIR to relocate it."
+    )
+    console.print(
+        "Local SQLite only; may contain local paths and session metadata from parsed logs."
     )
 
 
@@ -5855,7 +5882,7 @@ def tui(
         raise _exit_error(str(exc)) from exc
     from caliper.config import TuiConfig, load_config, load_tui_config
 
-    tui_config = load_tui_config(load_config(options.config_path))
+    tui_config = load_tui_config(load_config(options.caliper_config_path))
     if no_watchdog:
         tui_config = TuiConfig(
             theme=tui_config.theme,

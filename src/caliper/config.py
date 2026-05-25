@@ -127,8 +127,8 @@ class DashboardConfig:
     open_after: bool = True
     default_days: int = 14
     # Interactive playground: when True the generated HTML embeds both
-    # rhythms + a floating toggle panel + a "Save snapshot" button so the
-    # recipient can flip between Receipt/Terminal and Dark/Light/Safe Share
+    # rhythms + a floating toggle panel + a "Save copy" button so the
+    # recipient can flip between Receipt/Terminal and Dark/Light/Redacted
     # without re-running the CLI.
     interactive: bool = True
 
@@ -167,6 +167,44 @@ def load_dashboard_config(loaded: dict) -> DashboardConfig:
         default_days=int(section.get("default_days", defaults.default_days)),
         interactive=bool(section.get("interactive", defaults.interactive)),
     )
+
+
+_LEGACY_DASHBOARD_PRIVACY_MARKERS = (
+    "# Privacy / redaction (opt-in)",
+    '# Default is "off".',
+    "Switch with the CLI flag --privacy <mode>",
+)
+
+
+def legacy_dashboard_privacy_off_path(explicit_path: Path | str | None = None) -> Path | None:
+    """Return the config path responsible for a generated legacy privacy=off default.
+
+    Caliper 0.0.53 briefly generated dashboard defaults with privacy opt-in.
+    Treat only that exact generated template as legacy; a hand-written
+    ``privacy = "off"`` remains an intentional local-only choice.
+    """
+    paths: list[Path] = [USER_CONFIG, LOCAL_CONFIG]
+    if explicit_path:
+        paths.append(explicit_path if isinstance(explicit_path, Path) else Path(explicit_path))
+    winner: Path | None = None
+    for path in paths:
+        expanded = path.expanduser()
+        if not expanded.exists():
+            continue
+        try:
+            text = expanded.read_text()
+            loaded = tomllib.loads(text)
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        section = loaded.get("dashboard")
+        if not isinstance(section, dict) or "privacy" not in section:
+            continue
+        value = _coerce_choice(section.get("privacy"), VALID_DASHBOARD_PRIVACY, "")
+        if value == "off" and any(marker in text for marker in _LEGACY_DASHBOARD_PRIVACY_MARKERS):
+            winner = expanded
+        else:
+            winner = None
+    return winner
 
 
 def derive_dashboard_output_path(
@@ -241,8 +279,8 @@ filename_template = "caliper-dashboard-{timestamp}{privacy_suffix}.html"
 timestamp_format = "%Y-%m-%d-%H-%M"
 open_after = true             # auto-open the generated file in a browser
 
-# Interactive playground: embed a floating toggle panel + a "Save snapshot"
-# button. The toggle lets the recipient flip between Dark/Light/Safe Share
+# Interactive playground: embed a floating toggle panel + a "Save copy"
+# button. The toggle lets the recipient flip between Dark/Light/Redacted
 # without re-running this CLI.
 interactive = true
 
@@ -477,6 +515,7 @@ def build_options(
         cost_mode=cost_mode_value,
         vendors=_vendors(loaded, vendors),
         parse_workers=parse_workers_value,
+        caliper_config_path=Path(config).expanduser() if config else None,
     )
 
 

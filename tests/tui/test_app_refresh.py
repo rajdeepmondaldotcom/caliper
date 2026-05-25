@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+from dataclasses import replace
 from pathlib import Path
 
 from caliper.config import TuiConfig, build_options
 from caliper.models import LoadResult
 from caliper.tui.app import CaliperApp
 from caliper.tui.manifest import TuiLoadManifest, build_load_manifest
-from caliper.tui.messages import LoadSucceeded
+from caliper.tui.messages import LoadCancelled, LoadSucceeded
 
 
 def _options(tmp_path: Path):
@@ -63,6 +64,20 @@ def test_stale_load_success_is_ignored(tmp_path):
     )
 
     assert app.snapshot.load_result is None
+
+
+def test_load_cancelled_marks_refresh_complete(tmp_path, monkeypatch):
+    app = CaliperApp(_options(tmp_path), tui_config=TuiConfig(no_watchdog=True))
+    now = dt.datetime.now(tz=dt.UTC)
+    app._load_generation = 1
+    app.snapshot = replace(app.snapshot, refresh_started_at=now, refresh_completed_at=None)
+    monkeypatch.setattr(app, "notify", lambda *_args, **_kwargs: None)
+
+    app.on_load_cancelled(LoadCancelled(generation=1))
+
+    assert app.snapshot.cancelled is True
+    assert app.snapshot.refresh_completed_at is not None
+    assert app.snapshot.is_loading() is False
 
 
 def test_watch_snapshot_forwards_to_active_screen(tmp_path):

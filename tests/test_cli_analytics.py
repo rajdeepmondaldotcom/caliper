@@ -234,6 +234,7 @@ def test_cache_status_and_clear(tmp_path: Path):
     status = runner.invoke(app, ["cache", "status"], env=env)
     assert status.exit_code == 0, status.stdout
     assert "Parse cache" in status.stdout
+    assert "Local SQLite only" in status.stdout
     clear = runner.invoke(app, ["cache", "clear"], env=env)
     assert clear.exit_code == 0, clear.stdout
     assert "Cleared" in clear.stdout

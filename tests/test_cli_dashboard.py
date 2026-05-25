@@ -64,6 +64,7 @@ def test_dashboard_overwrite_hint(monkeypatch, tmp_path) -> None:
 
     first = runner.invoke(app, ["dashboard", "--output", str(out), *_common_args(tmp_path)])
     assert first.exit_code == 0, first.output
+    assert "Building dashboard: parsing local AI logs..." in first.output
     assert "(overwritten)" not in first.output
     assert "Wrote" in first.output
 
@@ -94,6 +95,30 @@ def test_dashboard_safe_share_alias_writes_safe_file(tmp_path) -> None:
     assert "Project 1" in html
 
 
+def test_dashboard_ignores_generated_legacy_privacy_off(monkeypatch, tmp_path) -> None:
+    user_config = tmp_path / "config.toml"
+    user_config.write_text(
+        """\
+[dashboard]
+# Privacy / redaction (opt-in)
+# Default is "off". Switch with the CLI flag --privacy <mode> or by editing this line.
+privacy = "off"
+"""
+    )
+    monkeypatch.setattr("caliper.config.USER_CONFIG", user_config)
+    monkeypatch.setattr("caliper.config.LOCAL_CONFIG", tmp_path / "missing-local.toml")
+    out = tmp_path / "legacy.html"
+
+    result = runner.invoke(app, ["dashboard", "--demo", "--output", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert "Ignoring generated legacy dashboard privacy=off" in result.output
+    html = out.read_text(encoding="utf-8")
+    assert 'data-share-safe="true"' in html
+    assert 'data-privacy="always"' in html
+    assert "api-server" not in html
+
+
 def test_dashboard_no_share_safe_keeps_local_labels(tmp_path) -> None:
     out = tmp_path / "local.html"
 
@@ -105,6 +130,46 @@ def test_dashboard_no_share_safe_keeps_local_labels(tmp_path) -> None:
     assert 'data-share-safe="false"' in html
     assert 'data-privacy="off"' in html
     assert "api-server" in html
+
+
+def test_evidence_json_redacts_parser_issue_paths(monkeypatch, tmp_path) -> None:
+    root = tmp_path / "cursor"
+    project = root / "projects" / "project-alpha" / "session.jsonl"
+    project.parent.mkdir(parents=True)
+    project.write_text(
+        json.dumps({"role": "assistant", "message": {"content": ["no token counts here"]}}) + "\n"
+    )
+    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(root))
+
+    result = runner.invoke(
+        app,
+        [
+            "evidence",
+            "--format",
+            "json",
+            "--since",
+            "2026-05-12",
+            "--until",
+            "2026-05-13",
+            "--tz",
+            "UTC",
+            "--session-root",
+            str(tmp_path / "missing-codex"),
+            "--state-db",
+            str(tmp_path / "missing-state.sqlite"),
+            "--codex-config",
+            str(tmp_path / "missing-config.toml"),
+            "--include-vendor",
+            "cursor",
+            "--no-parse-cache",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert str(project) not in result.output
+    payload = json.loads(result.output)
+    issue = payload["evidence"]["parser_issues"][0]
+    assert issue["examples"] == ["<redacted-path>"]
 
 
 def test_dashboard_default_opens_browser_for_interactive_terminal(monkeypatch, tmp_path) -> None:

@@ -59,7 +59,7 @@ class BudgetsScreen(CaliperScreen):
     def _alerts(snap):
         if snap is None or snap.load_result is None or snap.rate_card is None:
             return []
-        raw = load_config().get("budgets") or {}
+        raw = load_config(snap.options.caliper_config_path).get("budgets") or {}
         budgets = parse_budgets_table(raw if isinstance(raw, dict) else {})
         if not budgets:
             return []

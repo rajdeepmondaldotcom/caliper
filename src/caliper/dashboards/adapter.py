@@ -3077,6 +3077,15 @@ def _build_decision_queue(
             anchor="metric-glossary",
             lens="executive",
         )
+        add(
+            "Explore demo data",
+            "Use Caliper's built-in sample data to inspect the dashboard before local logs exist.",
+            "Run caliper dashboard --demo --open.",
+            "0 events in selected window",
+            tone="neutral",
+            anchor="overview",
+            lens="executive",
+        )
 
     budget = next((card for card in impact_cards if card.label == "Budget risk"), None)
     if budget and budget.tone in {"critical", "warn"}:

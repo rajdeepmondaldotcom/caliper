@@ -161,6 +161,8 @@ def pricing_evidence(total: Aggregate) -> EvidenceDimension:
         reasons.append(
             f"{total.costs.ambiguous_reasoning_events:,} events had ambiguous reasoning tokens"
         )
+    if total.unknown_tier_events:
+        reasons.append(f"{total.unknown_tier_events:,} events used inferred service tiers")
     if events and priced_events == 0:
         grade = GRADE_UNSUPPORTED
     elif unsupported_events:
@@ -169,6 +171,7 @@ def pricing_evidence(total: Aggregate) -> EvidenceDimension:
         total.costs.estimated_events
         or total.costs.ambiguous_reasoning_events
         or total.costs.vendor_reported_events
+        or total.unknown_tier_events
     ):
         grade = GRADE_ESTIMATED
     else:

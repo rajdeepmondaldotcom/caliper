@@ -22,7 +22,7 @@ from caliper.parse_parallel import assert_accounted_paths, path_size, run_path_b
 from caliper.progress import NULL_PROGRESS, ParseProgress
 from caliper.vendors.cursor.chats import parse_chat_jsonl
 from caliper.vendors.cursor.projects import parse_project_jsonl
-from caliper.vendors.cursor.vscdb import parse_vscdb
+from caliper.vendors.cursor.vscdb import parse_vscdb_detailed
 
 PARSER_CACHE_SIGNATURE = json.dumps(
     {"vendor": VENDOR_CURSOR, "schema_version": "1", "parser": "cursor-v4"},
@@ -64,6 +64,7 @@ class CursorParser:
         warnings: list[str] = []
         paths = sorted(set(paths)) if paths is not None else sorted(set(self.discover(options)))
         unsupported_paths: list[Path] = []
+        parsed_issues: list[ParserIssue] = []
         files_with_events = 0
         try:
             paths_to_parse = paths
@@ -91,9 +92,10 @@ class CursorParser:
                 progress=progress,
                 cache=cache,
             )
-            for path, parsed, unsupported in parsed_paths:
+            for path, parsed, unsupported, issues_for_path in parsed_paths:
                 if unsupported:
                     unsupported_paths.append(path)
+                parsed_issues.extend(issues_for_path)
                 files_with_events += int(bool(parsed))
                 events.extend(parsed)
                 accounted_paths.append(path)
@@ -102,7 +104,7 @@ class CursorParser:
             if cache is not None:
                 cache.close()
         events.sort(key=lambda event: event.timestamp)
-        issues = _unsupported_issues(unsupported_paths)
+        issues = _unsupported_issues(unsupported_paths) + parsed_issues
         return LoadResult(
             events=events,
             duplicates=0,
@@ -139,8 +141,8 @@ def _parse_uncached_paths(
     end: dt.datetime,
     progress: ParseProgress,
     cache: ParseCache | None,
-) -> list[tuple[Path, list[UsageEvent], bool]]:
-    parsed: list[tuple[Path, list[UsageEvent], bool]] = []
+) -> list[tuple[Path, list[UsageEvent], bool, list[ParserIssue]]]:
+    parsed: list[tuple[Path, list[UsageEvent], bool, list[ParserIssue]]] = []
     cold_paths: list[Path] = []
     if cache is not None:
         legacy_by_path = _legacy_events_for_paths(cache, paths)
@@ -154,7 +156,9 @@ def _parse_uncached_paths(
                     vendor=VENDOR_CURSOR,
                     unsupported=not cached,
                 )
-                parsed.append((path, _events_in_window(cached, start=start, end=end), not cached))
+                parsed.append(
+                    (path, _events_in_window(cached, start=start, end=end), not cached, [])
+                )
                 progress.cache_hit(path)
             else:
                 cold_paths.append(path)
@@ -168,8 +172,8 @@ def _parse_uncached_paths(
         size_of=path_size,
         on_batch_done=lambda batch, _result: _report_path_batch_done(batch, progress),
     )
-    for path, events, unsupported in cold:
-        if cache is not None:
+    for path, events, unsupported, issues in cold:
+        if cache is not None and not issues:
             cache.put_indexed_events(
                 path,
                 PARSER_CACHE_SIGNATURE,
@@ -177,10 +181,10 @@ def _parse_uncached_paths(
                 vendor=VENDOR_CURSOR,
                 unsupported=unsupported,
             )
-        parsed.append((path, _events_in_window(events, start=start, end=end), unsupported))
+        parsed.append((path, _events_in_window(events, start=start, end=end), unsupported, issues))
     assert_accounted_paths(
         paths,
-        (path for path, _events, _unsupported in parsed),
+        (path for path, _events, _unsupported, _issues in parsed),
         label="Cursor parser",
     )
     return parsed
@@ -206,20 +210,37 @@ def _legacy_events_for_paths(
     return out
 
 
-def _parse_cursor_batch(paths: tuple[Path, ...]) -> list[tuple[Path, list[UsageEvent], bool]]:
-    out: list[tuple[Path, list[UsageEvent], bool]] = []
+def _parse_cursor_batch(
+    paths: tuple[Path, ...],
+) -> list[tuple[Path, list[UsageEvent], bool, list[ParserIssue]]]:
+    out: list[tuple[Path, list[UsageEvent], bool, list[ParserIssue]]] = []
     for path in paths:
-        events = _parse_path(path, progress=NULL_PROGRESS)
-        out.append((path, events, not events))
+        events, issues = _parse_path(path, progress=NULL_PROGRESS)
+        out.append((path, events, not events and not issues, issues))
     return out
 
 
-def _parse_path(path: Path, progress: ParseProgress = NULL_PROGRESS) -> list[UsageEvent]:
+def _parse_path(
+    path: Path, progress: ParseProgress = NULL_PROGRESS
+) -> tuple[list[UsageEvent], list[ParserIssue]]:
     if path.name == "state.vscdb":
-        return parse_vscdb(path)
+        parsed = parse_vscdb_detailed(path)
+        issues = []
+        if parsed.malformed_rows:
+            issues.append(
+                ParserIssue(
+                    vendor=VENDOR_CURSOR,
+                    kind="cursor:vscdb_malformed_row",
+                    message="Cursor state DB rows had invalid token counts",
+                    count=parsed.malformed_rows,
+                    examples=(str(path),),
+                    severity="warn",
+                )
+            )
+        return parsed.events, issues
     if "projects" in path.parts:
-        return parse_project_jsonl(path, progress=progress)
-    return parse_chat_jsonl(path, progress=progress)
+        return parse_project_jsonl(path, progress=progress), []
+    return parse_chat_jsonl(path, progress=progress), []
 
 
 def _events_in_window(

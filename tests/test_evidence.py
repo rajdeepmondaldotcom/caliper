@@ -129,6 +129,19 @@ def test_pricing_evidence_reports_mixed_priced_and_unsupported_counts() -> None:
     assert "5 priced, 1 unsupported" in dimensions["pricing"].reasons
 
 
+def test_pricing_evidence_marks_inferred_service_tiers_estimated() -> None:
+    result = _result(*[_event() for _ in range(2)])
+    total = Aggregate(key="total", label="Total")
+    total.totals.events = 2
+    total.costs = CostTotals(cost_usd="0.01")
+    total.unknown_tier_events = 2
+
+    dimensions = {row.name: row for row in evidence_dimensions(result, total)}
+
+    assert dimensions["pricing"].grade == "estimated"
+    assert "2 events used inferred service tiers" in dimensions["pricing"].reasons
+
+
 def test_overall_evidence_ignores_git_attribution_for_cost_confidence() -> None:
     result = _result(_event(git_sha=""))
     total = Aggregate(key="total", label="Total")

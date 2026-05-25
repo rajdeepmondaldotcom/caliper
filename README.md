@@ -21,7 +21,7 @@ caliper dashboard
 
 </div>
 
-![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/hero.png)
+![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/hero.png)
 
 <p align="center"><sub>Safe Share mode screenshot: paths, projects, and session labels are redacted while costs, evidence status, and recommendations stay visible.</sub></p>
 
@@ -69,7 +69,8 @@ rows show the source quality behind the number instead of forcing you to trust
 an unexplained total.
 
 Large first runs may spend a moment indexing local log history; later runs reuse
-the local parse cache.
+the local parse cache. Inspect it with `caliper cache status`, clear it with
+`caliper cache clear`, or relocate it with `CALIPER_CACHE_DIR`.
 
 ### Rate cards stay current — on your terms
 
@@ -98,15 +99,15 @@ show the real report layout without exposing local paths or session identities.
 
 | Next actions | Spend drivers |
 |---|---|
-| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/usage-mix.png"> |
+| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/usage-mix.png"> |
 
 | Anomalies | Savings opportunities |
 |---|---|
-| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/inefficiencies.png"> |
+| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/inefficiencies.png"> |
 
 | Session drilldown | Attribution and evidence |
 |---|---|
-| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/attribution.png"> |
+| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/attribution.png"> |
 
 ## How it's different
 
@@ -171,11 +172,16 @@ silently treated as exact.
 | GitHub PR lookup | explicit `--allow-network` |
 | Prompt output | redacted |
 | Absolute paths | redacted in machine-readable output |
+| Parse cache | local SQLite only; may contain local paths/session metadata |
 
 The privacy invariant is enforced in CI. The generated HTML contains zero
 external resources, zero `<script src>`, zero `fetch`/`XMLHttpRequest`/`import()`.
 Interactive dashboards use one inline UI script and one JSON data block; pass
 `--no-interactive` for script-free HTML.
+
+The parse cache is not telemetry and is never uploaded. It stores parsed usage
+events, source file fingerprints, and enough local metadata to avoid reparsing
+unchanged logs. Disable it per run with `--no-parse-cache`.
 You can verify it on the file Caliper wrote (default location shown):
 
 ```bash

@@ -400,6 +400,23 @@ def test_dashboard_css_has_real_mobile_breakpoint() -> None:
     assert ".cal-window-badge" in INLINE_STYLES
     assert "aside { display: none !important; }" not in INLINE_STYLES
     assert ".cal-tweaks-panel" in INLINE_STYLES
+    hidden_controls_rule = (
+        ".cal-tweaks-panel .cal-tweaks-section,\n  .cal-tweaks-panel .cal-tweaks-save"
+    )
+    assert hidden_controls_rule not in INLINE_STYLES
+    assert ".cal-palette-input:focus-visible" in INLINE_STYLES
+    assert "z-index: 11000" in INLINE_STYLES
+
+
+def test_dashboard_landmarks_and_tweaks_have_accessible_names() -> None:
+    html = render_dashboard(sample_dashboard(), interactive=True)
+
+    assert '<main id="cal-main" class="cal-receipt-main" tabindex="-1">' in html
+    assert '<section id="overview" aria-label=' in html
+    assert 'data-value="safe-share" role="radio" aria-checked=' in html
+    assert ">Redacted</button>" in html
+    assert "Save copy</button>" in html
+    assert "Safe Share" not in html
 
 
 def test_top_sessions_rows_have_meaningful_accessible_copy(monkeypatch, tmp_path) -> None:

@@ -52,6 +52,7 @@ class SessionsScreen(CaliperScreen):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._active_vendor: str = "all"
+        self._compact_table = False
 
     # ------------------------------------------------------------------ slots
     def top(self):
@@ -73,22 +74,34 @@ class SessionsScreen(CaliperScreen):
         )
         yield tabs
         table = DataTable(id="sessions-table", cursor_type="row", zebra_stripes=True)
-        table.add_column("When", width=32)
-        table.add_column("Vendor", width=13)
-        table.add_column("Model", width=20)
-        table.add_column("Tier", width=11)
-        table.add_column("Tokens", width=12)
-        table.add_column("Cost $", width=10)
-        rows = list(self._rows_for(snap.sessions if snap else (), vendor=self._active_vendor))
+        self._compact_table = self._is_compact_view()
+        if self._compact_table:
+            table.add_column("Session", width=24)
+            table.add_column("Model", width=16)
+            table.add_column("Cost $", width=10)
+        else:
+            table.add_column("When", width=32)
+            table.add_column("Vendor", width=13)
+            table.add_column("Model", width=20)
+            table.add_column("Tier", width=11)
+            table.add_column("Tokens", width=12)
+            table.add_column("Cost $", width=10)
+        rows = list(
+            self._rows_for(
+                snap.sessions if snap else (),
+                vendor=self._active_vendor,
+                compact=self._compact_table,
+            )
+        )
         if rows:
             for row in rows[:50]:
                 table.add_row(*row)
         else:
-            table.add_row("(no sessions)", "", "", "", "", "")
+            table.add_row(*self._empty_row())
         yield table
 
     def footer_pills(self) -> str:
-        return "[ r refresh ]  [ esc home ]"
+        return "[ ctrl+p palette ]  [ r refresh ]  [ esc home ]"
 
     # ------------------------------------------------------------------ hooks
     def on_tabs_tab_activated(self, event) -> None:
@@ -111,24 +124,43 @@ class SessionsScreen(CaliperScreen):
         except NoMatches:
             return
         table.clear()
-        rows = list(self._rows_for(snap.sessions if snap else (), vendor=self._active_vendor))
+        rows = list(
+            self._rows_for(
+                snap.sessions if snap else (),
+                vendor=self._active_vendor,
+                compact=self._compact_table,
+            )
+        )
         if rows:
             for row in rows[:50]:
                 table.add_row(*row)
         else:
-            table.add_row("(no sessions)", "", "", "", "", "")
+            table.add_row(*self._empty_row())
 
-    def _rows_for(self, sessions: Iterable, *, vendor: str):
+    def _rows_for(self, sessions: Iterable, *, vendor: str, compact: bool = False):
         for session in sessions:
             session_vendors = getattr(session, "vendors", set()) or set()
             if vendor != "all" and vendor not in session_vendors:
                 continue
-            label = (session.label or session.key or "")[:40]
+            label = (session.label or session.key or "")[: (28 if compact else 40)]
             model = self._dominant_model(session)
+            if compact:
+                yield label, model, format_cost_usd_cell(session)
+                continue
             tier = ", ".join(sorted(getattr(session, "service_tiers", set()) or {"-"}))[:14]
             tokens = getattr(session.totals, "total_tokens", 0)
             v = ", ".join(sorted(session_vendors)) or "-"
             yield label, v, model, tier, f"{tokens:,}", format_cost_usd_cell(session)
+
+    def _empty_row(self) -> tuple[str, ...]:
+        if self._compact_table:
+            return ("(no sessions)", "", "")
+        return ("(no sessions)", "", "", "", "", "")
+
+    def _is_compact_view(self) -> bool:
+        size = getattr(self.app, "size", None)
+        width = getattr(size, "width", 100) if size is not None else 100
+        return width < 72
 
     @staticmethod
     def _dominant_model(session) -> str:

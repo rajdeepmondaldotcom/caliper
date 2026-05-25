@@ -165,7 +165,7 @@
 .accent-mono   { --accent: #e8eaef; --accent-strong: #c4c9d3; --explore: #e8eaef; --accent-tint: rgba(232,234,239,0.06); --accent-tint-2: rgba(232,234,239,0.12); --card-rail-cost: var(--accent-tint-2); --card-rail-tokens: var(--accent-tint-2); }
 
 .theme-light.accent-blue   { --accent: #2563eb; --accent-strong: #1d4ed8; --explore: #2563eb; --accent-tint: rgba(37,99,235,0.08); --accent-tint-2: rgba(37,99,235,0.16); }
-.theme-light.accent-teal   { --accent: #0d9488; --accent-strong: #115e59; --explore: #0d9488; --accent-tint: rgba(13,148,136,0.08); --accent-tint-2: rgba(13,148,136,0.18); }
+.theme-light.accent-teal   { --accent: #04746f; --accent-strong: #0f4f4a; --explore: #04746f; --accent-tint: rgba(4,116,111,0.08); --accent-tint-2: rgba(4,116,111,0.18); }
 .theme-light.accent-purple { --accent: #7c3aed; --accent-strong: #5b21b6; --explore: #7c3aed; --accent-tint: rgba(124,58,237,0.08); --accent-tint-2: rgba(124,58,237,0.16); }
 .theme-light.accent-mono   { --accent: #0e1116; --accent-strong: #000;    --explore: #0e1116; --accent-tint: rgba(14,17,22,0.05);  --accent-tint-2: rgba(14,17,22,0.12); }
 
@@ -823,7 +823,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
   position: fixed;
   right: 20px;
   bottom: 20px;
-  z-index: 9999;
+  z-index: 8500;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -874,6 +874,11 @@ body[data-interactive="true"] .cal-terminal-main {
   transition: background 120ms ease-out, color 120ms ease-out;
 }
 .cal-tweaks-panel .cal-tweaks-btn:hover { color: var(--ink); background: var(--panel-hover); }
+.cal-tweaks-panel .cal-tweaks-btn:focus-visible,
+.cal-tweaks-panel .cal-tweaks-save:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .cal-tweaks-panel .cal-tweaks-btn.is-active {
   background: var(--accent-tint-2);
   color: var(--ink);
@@ -974,32 +979,41 @@ body[data-interactive="true"] .cal-terminal-main {
    "Investigate" is a 44px+ touch target. */
 @media (max-width: 720px) {
   .cal-tweaks-panel {
-    left: auto;
-    right: 10px;
-    bottom: 10px;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
     width: auto;
-    padding: 6px;
-    gap: 0;
+    padding: 8px;
+    gap: 8px;
     font-size: 11px;
-    flex-wrap: nowrap;
-    border-radius: 999px;
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: var(--r-md);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     background: color-mix(in srgb, var(--panel) 92%, transparent);
   }
-  .cal-tweaks-panel .cal-tweaks-section,
-  .cal-tweaks-panel .cal-tweaks-save,
-  .cal-tweaks-panel .cal-tweaks-divider { display: none; }
   .cal-tweaks-panel .cal-tweaks-label,
   .cal-tweaks-search-hint,
   .cal-tweaks-search-label { display: none; }
+  .cal-tweaks-panel .cal-tweaks-divider { display: none; }
+  .cal-tweaks-panel .cal-tweaks-section { flex: 1 1 100%; justify-content: center; }
+  .cal-tweaks-panel .cal-tweaks-group { width: 100%; justify-content: center; }
   .cal-tweaks-panel .cal-tweaks-search {
     padding: 7px 10px;
     min-width: 44px;
     min-height: 44px;
     justify-content: center;
   }
-  .cal-tweaks-panel .cal-tweaks-btn { padding: 6px 12px; min-height: 44px; }
+  .cal-tweaks-panel .cal-tweaks-btn {
+    flex: 1 1 0;
+    padding: 6px 10px;
+    min-height: 44px;
+  }
+  .cal-tweaks-panel .cal-tweaks-save {
+    padding: 7px 10px;
+    min-height: 44px;
+  }
   /* Reserve space at the bottom of the page so the floating panel never
      covers the trust footer. */
   .cal-receipt-root { padding-bottom: 72px !important; }
@@ -1422,7 +1436,7 @@ body[data-interactive="true"] .cal-terminal-main {
 .cal-palette {
   position: fixed;
   inset: 0;
-  z-index: 9000;
+  z-index: 11000;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -1455,6 +1469,10 @@ body[data-interactive="true"] .cal-terminal-main {
   background: var(--panel);
   color: var(--ink);
   outline: none;
+}
+.cal-palette-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .cal-palette-input::placeholder { color: var(--ghost); }
 .cal-palette-results {
@@ -1563,6 +1581,16 @@ body[data-interactive="true"] .cal-terminal-main {
 }
 @media (prefers-reduced-motion: reduce) {
   .cal-skip-link { transition: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 .cal-demo-ribbon {
   margin: 0;

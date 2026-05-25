@@ -48,7 +48,7 @@ class HomeScreen(Screen):
             Static("", id="insights"),
             Static("", id="recent"),
             Static(
-                "[ 0 receipt ] [ i insights ] [ ? help ] [ r refresh ] [ q quit ]",
+                "[ ctrl+p palette ] [ 0 receipt ] [ ? help ] [ r refresh ] [ q quit ]",
                 id="home-footer",
                 markup=False,
             ),
@@ -70,7 +70,8 @@ class HomeScreen(Screen):
             # will redraw after the layout settles.
             return
         cards.remove_children()
-        if not snapshot.overview_windows:
+        no_usage = self._has_no_usage(snapshot)
+        if no_usage or not snapshot.overview_windows:
             cards.mount(Static(self._empty_message(snapshot), classes="empty"))
         else:
             from caliper.render import vendor_chip
@@ -88,8 +89,16 @@ class HomeScreen(Screen):
 
         windows = self.query_one("#windows", Horizontal)
         windows.remove_children()
-        windows.mount(WindowPanel("Primary 5h", snapshot.primary_window))
-        windows.mount(WindowPanel("Secondary weekly", snapshot.secondary_window))
+        if no_usage:
+            windows.mount(
+                Static(
+                    "No rate-limit windows yet. Run `caliper doctor` to verify local setup.",
+                    classes="empty",
+                )
+            )
+        else:
+            windows.mount(WindowPanel("Primary 5h", snapshot.primary_window))
+            windows.mount(WindowPanel("Secondary weekly", snapshot.secondary_window))
 
         insights_panel = self.query_one("#insights", Static)
         if snapshot.insights:
@@ -107,9 +116,18 @@ class HomeScreen(Screen):
         if snapshot.is_loading():
             return "Reading sessions…"
         return (
-            "Nothing parsed yet.\n\n"
-            "Run a coding session in Codex, Claude Code, Cursor, or Aider —\n"
-            "or relaunch with `caliper tui --demo` to explore with sample data."
+            "No AI coding usage logs found.\n\n"
+            "Run `caliper doctor` to verify local setup.\n"
+            "Try `caliper tui --demo` or `caliper dashboard --demo --open` for sample data."
+        )
+
+    @staticmethod
+    def _has_no_usage(snapshot: AppSnapshot) -> bool:
+        return (
+            snapshot.load_result is not None
+            and not snapshot.load_result.events
+            and not snapshot.is_loading()
+            and snapshot.refresh_error is None
         )
 
     @staticmethod

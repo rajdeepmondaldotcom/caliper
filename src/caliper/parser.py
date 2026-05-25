@@ -18,6 +18,7 @@ from caliper.models import (
     VENDOR_OPENAI_CODEX,
     LoadResult,
     ParsedSessionRecord,
+    ParserIssue,
     RateLimitSample,
     RuntimeOptions,
     ThreadMeta,
@@ -689,7 +690,29 @@ def load_usage(
             total_files += len(paths)
     progress.starting(total_files)
     for vendor in vendors:
-        result = vendor.parse(options, progress=progress, paths=paths_by_vendor.get(vendor.id))
+        vendor_paths = paths_by_vendor.get(vendor.id) or []
+        try:
+            result = vendor.parse(options, progress=progress, paths=vendor_paths)
+        except Exception:  # pragma: no cover - specific parser regressions cover this branch.
+            if vendor.id == VENDOR_OPENAI_CODEX:
+                raise
+            parser_issues.append(
+                ParserIssue(
+                    vendor=vendor.id,
+                    kind="parser:error",
+                    message=f"{vendor.label} parser failed; skipped this source",
+                    count=max(len(vendor_paths), 1),
+                    examples=tuple(str(path) for path in vendor_paths[:3]),
+                    severity="warn",
+                )
+            )
+            vendor_stats[vendor.id] = VendorParseStats(
+                vendor=vendor.id,
+                discovered_files=len(vendor_paths),
+                unsupported_files=len(vendor_paths),
+                warning_count=1,
+            )
+            continue
         events.extend(result.events)
         duplicates += result.duplicates
         for key, value in result.tier_sources.items():

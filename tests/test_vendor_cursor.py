@@ -44,6 +44,64 @@ def test_cursor_vscdb_fixture_round_trip(monkeypatch, tmp_path) -> None:
     assert result.events[0].usage.total_tokens == 110
 
 
+def test_cursor_vscdb_malformed_usage_row_is_reported_and_skipped(monkeypatch, tmp_path) -> None:
+    root = tmp_path / "cursor"
+    db = root / "User" / "globalStorage" / "state.vscdb"
+    db.parent.mkdir(parents=True)
+    timestamp = dt.datetime(2026, 5, 12, tzinfo=dt.UTC).isoformat().replace("+00:00", "Z")
+    with closing(sqlite3.connect(db)) as conn, conn:
+        conn.execute(
+            """
+            create table cursor_usage (
+                timestamp text, session_id text, cwd text, model text, input_tokens text,
+                cached_input_tokens text, output_tokens text, total_tokens text
+            )
+            """
+        )
+        conn.execute(
+            "insert into cursor_usage values (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                timestamp,
+                "ok-session",
+                "/tmp/project-alpha",
+                "cursor-auto",
+                "100",
+                "20",
+                "10",
+                "110",
+            ),
+        )
+        conn.execute(
+            "insert into cursor_usage values (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                timestamp,
+                "bad-session",
+                "/tmp/project-alpha",
+                "cursor-auto",
+                "not-a-number",
+                "0",
+                "10",
+                "10",
+            ),
+        )
+    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(root))
+    options = build_options(
+        since="2026-05-12T00:00:00Z",
+        until="2026-05-13T00:00:00Z",
+        session_root=tmp_path / "missing-codex",
+        vendors=[VENDOR_CURSOR],
+    )
+
+    result = load_usage(options)
+
+    assert len(result.events) == 1
+    assert result.events[0].session_id == "ok-session"
+    assert result.parser_issues[0].kind == "cursor:vscdb_malformed_row"
+    assert result.parser_issues[0].count == 1
+    assert "Cursor state DB rows had invalid token counts" in result.warnings[0]
+    assert result.vendor_stats[VENDOR_CURSOR].warning_count == 1
+
+
 def test_cursor_vscdb_kv_usage_round_trip(monkeypatch, tmp_path) -> None:
     root = tmp_path / "cursor"
     db = root / "User" / "workspaceStorage" / "workspace-a" / "state.vscdb"
@@ -206,3 +264,40 @@ def test_cursor_out_of_window_file_does_not_create_parser_warning(monkeypatch, t
 
     assert result.events == []
     assert result.warnings == []
+
+
+def test_cursor_parser_failure_is_isolated_at_vendor_boundary(monkeypatch, tmp_path) -> None:
+    root = tmp_path / "cursor"
+    project = root / "projects" / "project-alpha" / "session.jsonl"
+    project.parent.mkdir(parents=True)
+    project.write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-05-12T00:00:00Z",
+                "sessionId": "cursor-json",
+                "cwd": "/tmp/project-alpha",
+                "model": "cursor-auto",
+                "usage": {"input_tokens": 50, "output_tokens": 5, "total_tokens": 55},
+            }
+        )
+        + "\n"
+    )
+    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(root))
+    monkeypatch.setattr(
+        "caliper.vendors.cursor.parse_project_jsonl",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    options = build_options(
+        since="2026-05-12T00:00:00Z",
+        until="2026-05-13T00:00:00Z",
+        session_root=tmp_path / "missing-codex",
+        vendors=[VENDOR_CURSOR],
+    )
+
+    result = load_usage(options)
+
+    assert result.events == []
+    assert result.parser_issues[0].kind == "parser:error"
+    assert result.parser_issues[0].examples == (str(project),)
+    assert "Cursor parser failed; skipped this source" in result.warnings[0]
+    assert result.vendor_stats[VENDOR_CURSOR].unsupported_files == 1

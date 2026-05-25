@@ -67,6 +67,7 @@ def materialize_demo(template: RuntimeOptions, seed: int = 0xCA11BE12) -> Runtim
         vendors=(VENDOR_OPENAI_CODEX,),
         tier_overrides=None,
         project=None,
+        caliper_config_path=config_path,
     )
 
 

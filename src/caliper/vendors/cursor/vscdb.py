@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import sqlite3
 from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,17 +14,38 @@ from caliper.normalize import normalize_model
 from caliper.timeutil import parse_event_timestamp
 
 
+@dataclass(frozen=True)
+class VscdbParseResult:
+    events: list[UsageEvent]
+    malformed_rows: int = 0
+
+
+class _MalformedCursorRow(ValueError):
+    pass
+
+
 def parse_vscdb(path: Path) -> list[UsageEvent]:
+    return parse_vscdb_detailed(path).events
+
+
+def parse_vscdb_detailed(path: Path) -> VscdbParseResult:
     if not path.exists():
-        return []
+        return VscdbParseResult([])
     try:
         with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
             rows = _cursor_usage_rows(conn) if _has_table(conn, "cursor_usage") else []
             if rows:
-                return [_event_from_row(row, path) for row in rows]
-            return _events_from_kv_tables(conn, path)
+                events: list[UsageEvent] = []
+                malformed_rows = 0
+                for row in rows:
+                    try:
+                        events.append(_event_from_row(row, path))
+                    except _MalformedCursorRow:
+                        malformed_rows += 1
+                return VscdbParseResult(events, malformed_rows)
+            return VscdbParseResult(_events_from_kv_tables(conn, path))
     except sqlite3.Error:
-        return []
+        return VscdbParseResult([])
 
 
 def _cursor_usage_rows(conn: sqlite3.Connection) -> list:
@@ -57,10 +79,10 @@ def _event_from_row(row, path: Path) -> UsageEvent:
         path=path,
         session_id=str(row[1] or path.stem),
         usage=Usage(
-            input_tokens=int(row[4] or 0),
-            cached_input_tokens=int(row[5] or 0),
-            output_tokens=int(row[6] or 0),
-            total_tokens=int(row[7] or 0),
+            input_tokens=_strict_int(row[4]),
+            cached_input_tokens=_strict_int(row[5]),
+            output_tokens=_strict_int(row[6]),
+            total_tokens=_strict_int(row[7]),
         ),
         model=model,
         service_tier="standard",
@@ -72,6 +94,13 @@ def _event_from_row(row, path: Path) -> UsageEvent:
         dedupe_key=f"{path}:{timestamp.isoformat()}:{row[1]}:{row[7]}",
         raw_model=raw_model,
     )
+
+
+def _strict_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError) as exc:
+        raise _MalformedCursorRow from exc
 
 
 def _events_from_kv_tables(conn: sqlite3.Connection, path: Path) -> list[UsageEvent]:

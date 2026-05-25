@@ -19,6 +19,9 @@ class HelpScreen(CaliperScreen):
         yield Static(
             "\n".join(
                 [
+                    "Start here: run caliper doctor if Home shows no usage.",
+                    "ctrl+p opens the command palette from any screen.",
+                    "",
                     "1 Home       2 Intervals   3 Sessions   4 Projects",
                     "5 Models     6 Limits      7 Live       8 Forecast",
                     "9 Doctor     0 Receipt     w What-If    b Budgets",
@@ -29,4 +32,4 @@ class HelpScreen(CaliperScreen):
         )
 
     def footer_pills(self) -> str:
-        return "[ esc back ]  [ r refresh ]  [ q quit ]"
+        return "[ ctrl+p palette ]  [ esc back ]  [ r refresh ]  [ q quit ]"

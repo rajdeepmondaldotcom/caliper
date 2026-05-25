@@ -235,6 +235,7 @@ class RuntimeOptions:
     cost_mode: str = "auto"
     vendors: tuple[str, ...] = ("all",)
     parse_workers: int = 1
+    caliper_config_path: Path | None = None
 
 
 @dataclass(frozen=True)

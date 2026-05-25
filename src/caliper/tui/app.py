@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import os
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -135,8 +136,10 @@ class CaliperApp(App):
         super().__init__()
         self._demo = demo
         self._tui_config = tui_config or TuiConfig()
+        self._demo_root: Path | None = None
         if demo:
             options = materialize_demo(options)
+            self._demo_root = options.session_root
         if not self._tui_config.redact:
             options = replace(options, show_prompts=True, show_paths=True)
         self.snapshot = AppSnapshot(
@@ -178,6 +181,7 @@ class CaliperApp(App):
 
     def on_unmount(self) -> None:
         self._stop_refresh_monitoring()
+        self._cleanup_demo_root()
 
     async def on_key(self, event) -> None:
         key = event.key
@@ -568,13 +572,19 @@ class CaliperApp(App):
             refresh_completed_at=dt.datetime.now(tz=local_timezone()),
             refresh_error=str(event.error),
         )
+        self.notify(f"Load failed: {event.error}", severity="error", timeout=10)
         self._hide_loading_overlay()
 
     def on_load_cancelled(self, event: LoadCancelled) -> None:
         if not self._is_current(event):
             return
         snap = self.snapshot
-        self.snapshot = replace(snap, cancelled=True, refresh_completed_at=None)
+        self.snapshot = replace(
+            snap,
+            cancelled=True,
+            refresh_completed_at=dt.datetime.now(tz=local_timezone()),
+        )
+        self.notify("Refresh cancelled", severity="warning", timeout=5)
         self._hide_loading_overlay()
 
     # ------------------------------------------------------------------ reactive
@@ -613,7 +623,10 @@ class CaliperApp(App):
         return overlay
 
     def _hide_loading_overlay(self) -> None:
-        for overlay in list(self.query(LoadingOverlay)):
+        overlays = []
+        with contextlib.suppress(Exception):
+            overlays = list(self.query(LoadingOverlay))
+        for overlay in overlays:
             overlay.remove()
 
     # ------------------------------------------------------------------ refresh monitoring
@@ -660,6 +673,13 @@ class CaliperApp(App):
             observer.join(timeout=1)
             self._watch_observer = None
 
+    def _cleanup_demo_root(self) -> None:
+        root = self._demo_root
+        if root is None or not root.name.startswith("caliper-demo-"):
+            return
+        shutil.rmtree(root, ignore_errors=True)
+        self._demo_root = None
+
     def _schedule_debounced_refresh(self) -> None:
         if self._refresh_timer is not None:
             self._refresh_timer.stop()
@@ -690,7 +710,7 @@ def run_tui(
     tui_config: TuiConfig | None = None,
 ) -> None:
     if tui_config is None:
-        tui_config = load_tui_config(load_config(options.config_path))
+        tui_config = load_tui_config(load_config(options.caliper_config_path))
     CaliperApp(options, demo=demo, tui_config=tui_config).run()
 
 

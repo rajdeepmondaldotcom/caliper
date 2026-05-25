@@ -61,6 +61,7 @@ class AppSnapshot:
             self.refresh_started_at is not None
             and self.refresh_completed_at is None
             and self.refresh_error is None
+            and not self.cancelled
         )
 
 

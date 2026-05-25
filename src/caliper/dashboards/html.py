@@ -242,7 +242,7 @@ INLINE_STYLES = """
 .accent-mono   { --accent: #e8eaef; --accent-strong: #c4c9d3; --explore: #e8eaef; --accent-tint: rgba(232,234,239,0.06); --accent-tint-2: rgba(232,234,239,0.12); --card-rail-cost: var(--accent-tint-2); --card-rail-tokens: var(--accent-tint-2); }
 
 .theme-light.accent-blue   { --accent: #2563eb; --accent-strong: #1d4ed8; --explore: #2563eb; --accent-tint: rgba(37,99,235,0.08); --accent-tint-2: rgba(37,99,235,0.16); }
-.theme-light.accent-teal   { --accent: #0d9488; --accent-strong: #115e59; --explore: #0d9488; --accent-tint: rgba(13,148,136,0.08); --accent-tint-2: rgba(13,148,136,0.18); }
+.theme-light.accent-teal   { --accent: #04746f; --accent-strong: #0f4f4a; --explore: #04746f; --accent-tint: rgba(4,116,111,0.08); --accent-tint-2: rgba(4,116,111,0.18); }
 .theme-light.accent-purple { --accent: #7c3aed; --accent-strong: #5b21b6; --explore: #7c3aed; --accent-tint: rgba(124,58,237,0.08); --accent-tint-2: rgba(124,58,237,0.16); }
 .theme-light.accent-mono   { --accent: #0e1116; --accent-strong: #000;    --explore: #0e1116; --accent-tint: rgba(14,17,22,0.05);  --accent-tint-2: rgba(14,17,22,0.12); }
 
@@ -900,7 +900,7 @@ p, h1, h2, h3 { text-wrap: pretty; }
   position: fixed;
   right: 20px;
   bottom: 20px;
-  z-index: 9999;
+  z-index: 8500;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -951,6 +951,11 @@ body[data-interactive="true"] .cal-terminal-main {
   transition: background 120ms ease-out, color 120ms ease-out;
 }
 .cal-tweaks-panel .cal-tweaks-btn:hover { color: var(--ink); background: var(--panel-hover); }
+.cal-tweaks-panel .cal-tweaks-btn:focus-visible,
+.cal-tweaks-panel .cal-tweaks-save:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .cal-tweaks-panel .cal-tweaks-btn.is-active {
   background: var(--accent-tint-2);
   color: var(--ink);
@@ -1051,32 +1056,41 @@ body[data-interactive="true"] .cal-terminal-main {
    "Investigate" is a 44px+ touch target. */
 @media (max-width: 720px) {
   .cal-tweaks-panel {
-    left: auto;
-    right: 10px;
-    bottom: 10px;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
     width: auto;
-    padding: 6px;
-    gap: 0;
+    padding: 8px;
+    gap: 8px;
     font-size: 11px;
-    flex-wrap: nowrap;
-    border-radius: 999px;
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: var(--r-md);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     background: color-mix(in srgb, var(--panel) 92%, transparent);
   }
-  .cal-tweaks-panel .cal-tweaks-section,
-  .cal-tweaks-panel .cal-tweaks-save,
-  .cal-tweaks-panel .cal-tweaks-divider { display: none; }
   .cal-tweaks-panel .cal-tweaks-label,
   .cal-tweaks-search-hint,
   .cal-tweaks-search-label { display: none; }
+  .cal-tweaks-panel .cal-tweaks-divider { display: none; }
+  .cal-tweaks-panel .cal-tweaks-section { flex: 1 1 100%; justify-content: center; }
+  .cal-tweaks-panel .cal-tweaks-group { width: 100%; justify-content: center; }
   .cal-tweaks-panel .cal-tweaks-search {
     padding: 7px 10px;
     min-width: 44px;
     min-height: 44px;
     justify-content: center;
   }
-  .cal-tweaks-panel .cal-tweaks-btn { padding: 6px 12px; min-height: 44px; }
+  .cal-tweaks-panel .cal-tweaks-btn {
+    flex: 1 1 0;
+    padding: 6px 10px;
+    min-height: 44px;
+  }
+  .cal-tweaks-panel .cal-tweaks-save {
+    padding: 7px 10px;
+    min-height: 44px;
+  }
   /* Reserve space at the bottom of the page so the floating panel never
      covers the trust footer. */
   .cal-receipt-root { padding-bottom: 72px !important; }
@@ -1499,7 +1513,7 @@ body[data-interactive="true"] .cal-terminal-main {
 .cal-palette {
   position: fixed;
   inset: 0;
-  z-index: 9000;
+  z-index: 11000;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -1532,6 +1546,10 @@ body[data-interactive="true"] .cal-terminal-main {
   background: var(--panel);
   color: var(--ink);
   outline: none;
+}
+.cal-palette-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .cal-palette-input::placeholder { color: var(--ghost); }
 .cal-palette-results {
@@ -1640,6 +1658,16 @@ body[data-interactive="true"] .cal-terminal-main {
 }
 @media (prefers-reduced-motion: reduce) {
   .cal-skip-link { transition: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 .cal-demo-ribbon {
   margin: 0;
@@ -3155,7 +3183,8 @@ def _section_wrap(section_id: str, *, rhythm: str, body: str, meta: str | None =
     num = _display_num(section_id)
     title = _SECTION_TITLES[section_id]
     return (
-        f'<section id="{section_id}" data-screen-label="{num} {_esc(title)}">'
+        f'<section id="{section_id}" aria-label="{num} {_esc(title)}" '
+        f'data-screen-label="{num} {_esc(title)}">'
         f"{_section_head(section_id, rhythm=rhythm, meta=meta)}"
         f"{body}"
         "</section>"
@@ -4912,7 +4941,7 @@ def _palette_index(d: Dashboard, pm: _PrivacyMap) -> str:
     Searches over: tier sections, top models, top projects, anomalies,
     advisor recommendations. The palette JS reads this as a `<script
     type="application/json">` block and filters on each keystroke. Labels are
-    run through `_redact_plain` so a Safe Share (``always``) file never embeds
+    run through `_redact_plain` so a Redacted (``always``) file never embeds
     real project/session names in this index.
     """
     import json
@@ -5412,12 +5441,12 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
     toc_html = _render_receipt_toc(d)
     body_html = (
         '<div class="cal-receipt-body">'
-        f'<main id="cal-main" class="cal-receipt-main">{main_html}</main>'
+        f'<main id="cal-main" class="cal-receipt-main" tabindex="-1">{main_html}</main>'
         f"{toc_html}"
         "</div>"
         if toc_html
         else (
-            '<main id="cal-main" class="cal-receipt-main" '
+            '<main id="cal-main" class="cal-receipt-main" tabindex="-1" '
             'style="margin-top:24px">'
             f"{main_html}</main>"
         )
@@ -5612,7 +5641,7 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         f"{ticker}"
         '<div class="cal-terminal-layout">'
         f"{_terminal_index(d)}"
-        '<main id="cal-main" class="cal-terminal-main">'
+        '<main id="cal-main" class="cal-terminal-main" tabindex="-1">'
         f"{banner_html}"
         f"{billboard_html}"
         f"{hero_html}"
@@ -5660,7 +5689,7 @@ _INTERACTIVE_SCRIPT = """
   var MODE_TABLE = {
     'dark':       { theme: 'dark',  privacy: 'off',    label: 'Dark' },
     'light':      { theme: 'light', privacy: 'off',    label: 'Light' },
-    'safe-share': { theme: 'print', privacy: 'always', label: 'Safe Share' }
+    'safe-share': { theme: 'print', privacy: 'always', label: 'Redacted' }
   };
   function setMode(mode) {
     var entry = MODE_TABLE[mode];
@@ -5816,11 +5845,14 @@ _INTERACTIVE_SCRIPT = """
   }
   function paletteUpdate(query) {
     var q = (query || '').toLowerCase().trim();
+    var qSingular = q.length > 3 && q.endsWith('s') ? q.slice(0, -1) : q;
+    function matches(value) {
+      var text = (value || '').toLowerCase();
+      return text.indexOf(q) !== -1 || (qSingular !== q && text.indexOf(qSingular) !== -1);
+    }
     paletteResults = paletteIndex.filter(function(it) {
       if (!q) return true;
-      return (it.label || '').toLowerCase().indexOf(q) !== -1
-          || (it.hint || '').toLowerCase().indexOf(q) !== -1
-          || (it.type || '').toLowerCase().indexOf(q) !== -1;
+      return matches(it.label) || matches(it.hint) || matches(it.type);
     }).slice(0, 30);
     paletteSelected = 0;
     paletteRender();
@@ -6049,13 +6081,13 @@ def _render_tweaks_panel(*, initial_rhythm: str, initial_mode: str) -> str:
         )
 
     del initial_rhythm  # Terminal mode is no longer surfaced in the UI; the
-    # tweaks panel only exposes Dark / Light / Safe Share now. The underlying
+    # tweaks panel only exposes Dark / Light / Redacted now. The underlying
     # render_dashboard(rhythm="terminal") CLI flag stays functional for
     # backwards compatibility but never appears as a visible toggle.
     mode_btns = (
         _btn("dark", "Dark", initial_mode == "dark")
         + _btn("light", "Light", initial_mode == "light")
-        + _btn("safe-share", "Safe Share", initial_mode == "safe-share")
+        + _btn("safe-share", "Redacted", initial_mode == "safe-share")
     )
     # Visible search affordance — opens the cmd+K palette. Touch / non-
     # keyboard users get a tappable surface; desktop users see the ⌘K hint.
@@ -6083,9 +6115,9 @@ def _render_tweaks_panel(*, initial_rhythm: str, initial_mode: str) -> str:
         "</div></div>"
         '<div class="cal-tweaks-divider" aria-hidden="true"></div>'
         '<button id="cal-save-snapshot" class="cal-tweaks-save" type="button" '
-        'aria-label="Save snapshot of the current view as a new HTML file">'
+        'aria-label="Save a redacted snapshot of the current view as a new HTML file">'
         '<span class="cal-tweaks-arrow" aria-hidden="true"></span>'
-        "Save snapshot</button></aside>"
+        "Save copy</button></aside>"
     )
 
 
@@ -6202,8 +6234,8 @@ def render_dashboard(
     interactive:
         When ``True``, embed *both* layout rhythms and a floating tweaks
         panel so the recipient can flip between Receipt / Terminal and
-        Dark / Light / Safe Share without re-running the CLI. The Safe
-        Share toggle forces ``data-privacy="always"`` on the body, so the
+        Dark / Light / Redacted without re-running the CLI. The Redacted
+        toggle forces ``data-privacy="always"`` on the body, so the
         renderer always emits the redacted span twin too (otherwise the
         toggle would have nothing to swap to). A small inline script
         powers the toggles and the snapshot-download button — it uses no
@@ -6225,7 +6257,7 @@ def render_dashboard(
     # the audit-anchor map's §00..§19 with disabled-section gaps.
     _RENDER_NUM_MAP.set(_compute_display_numbers(d))
     # Interactive mode needs BOTH spans in every sensitive cell so the
-    # Safe Share toggle can swap visibility in-browser. We hand the renderer
+    # Redacted toggle can swap visibility in-browser. We hand the renderer
     # a print-only privacy map regardless of the user's initial choice; the
     # actual visible mode is driven by the body's data-privacy attribute and
     # the CSS rules in INLINE_STYLES.

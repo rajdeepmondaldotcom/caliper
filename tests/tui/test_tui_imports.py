@@ -69,3 +69,20 @@ def test_apply_scope_returns_new_snapshot_and_clears_cache():
     assert new.options.project == "repo"
     assert new.scope.interval.label == "Last 30 days"
     assert new.daily == ()  # cache cleared
+
+
+def test_cancelled_snapshot_is_not_loading():
+    import datetime as dt
+
+    from caliper.config import build_options
+    from caliper.tui.state import AppSnapshot, default_scope
+
+    now = dt.datetime.now(tz=dt.UTC)
+    snap = AppSnapshot(
+        options=build_options(days=1),
+        scope=default_scope(now),
+        refresh_started_at=now,
+        cancelled=True,
+    )
+
+    assert snap.is_loading() is False

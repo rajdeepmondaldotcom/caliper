@@ -9,6 +9,7 @@ CaliperScreen so the layout invariant cannot regress.
 from __future__ import annotations
 
 import importlib
+from types import SimpleNamespace
 
 from caliper.tui.screens._base import CaliperScreen
 
@@ -81,10 +82,13 @@ def test_palette_provider_discovers_and_searches_new_screen_actions():
 
     class FakeApp:
         def __init__(self) -> None:
-            self.keys: list[str] = []
+            self.calls: list[tuple[str, str | None]] = []
 
-        async def simulate_key(self, key: str) -> None:
-            self.keys.append(key)
+        async def action_go(self, name: str) -> None:
+            self.calls.append(("go", name))
+
+        def action_refresh(self) -> None:
+            self.calls.append(("refresh", None))
 
     class FakeScreen:
         focused = None
@@ -97,13 +101,41 @@ def test_palette_provider_discovers_and_searches_new_screen_actions():
         discovered = [hit async for hit in provider.discover()]
         searched = [hit async for hit in provider.search("receipt")]
         await discovered[0].command()
-        return provider.screen.app.keys, discovered, searched
+        return provider.screen.app.calls, discovered, searched
 
-    keys, discovered, searched = asyncio.run(_collect())
+    calls, discovered, searched = asyncio.run(_collect())
 
-    assert keys == ["1"]
+    assert calls == [("go", "home")]
     assert {hit.text for hit in discovered} >= {"Go to Receipt", "Go to What-If", "Go to Help"}
     assert [hit.text for hit in searched] == ["Go to Receipt"]
+
+
+def test_budgets_screen_uses_runtime_config_path(monkeypatch, tmp_path):
+    from caliper.config import build_options
+    from caliper.models import LoadResult
+    from caliper.tui.screens.budgets import BudgetsScreen
+
+    config_path = tmp_path / "caliper.toml"
+    seen = []
+    monkeypatch.setattr(
+        "caliper.tui.screens.budgets.load_config",
+        lambda path=None: seen.append(path) or {},
+    )
+    snap = SimpleNamespace(
+        options=build_options(days=1, config=config_path),
+        load_result=LoadResult(
+            events=[],
+            duplicates=0,
+            tier_sources={},
+            plan_types=set(),
+            rate_limit_samples=[],
+            warnings=[],
+        ),
+        rate_card=object(),
+    )
+
+    assert BudgetsScreen._alerts(snap) == []
+    assert seen == [config_path]
 
 
 def test_welcome_state_helpers_round_trip(tmp_path, monkeypatch):

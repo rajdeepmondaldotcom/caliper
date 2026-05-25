@@ -386,6 +386,19 @@ def test_build_handoff_dashboard_adds_rolling_usage_windows(monkeypatch, tmp_pat
     assert by_label["Last 90 days"].events == 2
 
 
+def test_build_handoff_dashboard_empty_window_onboards_with_doctor_and_demo(tmp_path) -> None:
+    dashboard = build_handoff_dashboard(
+        _empty_load_result(),
+        _options(tmp_path),
+        with_deltas=False,
+        budget_config={},
+    )
+
+    actions = {item.title: item.action for item in dashboard.decision_queue}
+    assert actions["Connect usage data"] == "Run caliper doctor and verify vendor log locations."
+    assert actions["Explore demo data"] == "Run caliper dashboard --demo --open."
+
+
 def test_build_handoff_dashboard_adds_project_tracking_and_anomalies(monkeypatch, tmp_path) -> None:
     rows = []
     for offset in range(7):

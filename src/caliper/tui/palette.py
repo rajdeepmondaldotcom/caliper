@@ -6,6 +6,8 @@ yields a :class:`DiscoveryHit` whose help string reads in voice.
 
 from __future__ import annotations
 
+import inspect
+
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 
 
@@ -62,9 +64,40 @@ class CaliperCommands(Provider):
 
     def _make_runner(self, key: str):
         async def _run() -> None:
-            await self.app.simulate_key(key) if hasattr(self.app, "simulate_key") else None
-            handler = getattr(self.app, f"action_{key}", None)
-            if callable(handler):
-                handler()
+            app = self.app
+            result = None
+            nav = {
+                "1": "home",
+                "2": "intervals",
+                "3": "sessions",
+                "4": "projects",
+                "5": "models",
+                "6": "limits",
+                "7": "live",
+                "8": "forecast",
+                "9": "doctor",
+                "0": "receipt",
+                "w": "whatif",
+                "b": "budgets",
+                "i": "insights",
+            }
+            if key in nav and callable(getattr(app, "action_go", None)):
+                result = app.action_go(nav[key])
+            elif key == "question_mark" and callable(getattr(app, "action_show_help", None)):
+                result = app.action_show_help()
+            elif key == "r" and callable(getattr(app, "action_refresh", None)):
+                result = app.action_refresh()
+            elif key == "t" and callable(getattr(app, "action_cycle_theme", None)):
+                result = app.action_cycle_theme()
+            elif key == "p" and callable(getattr(app, "action_toggle_redact", None)):
+                result = app.action_toggle_redact()
+            elif key == "left_square_bracket" and callable(getattr(app, "action_step_back", None)):
+                result = app.action_step_back()
+            elif key == "right_square_bracket" and callable(
+                getattr(app, "action_step_forward", None)
+            ):
+                result = app.action_step_forward()
+            if inspect.isawaitable(result):
+                await result
 
         return _run
