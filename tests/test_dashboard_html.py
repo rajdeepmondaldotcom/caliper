@@ -129,6 +129,17 @@ def test_dashboard_does_not_leak_tool_use_input(monkeypatch, tmp_path) -> None:
     assert SECRET not in html
 
 
+def test_dashboard_a11y_landmarks_and_labels(monkeypatch, tmp_path) -> None:
+    """0.0.59 a11y: labelled tables, contentinfo footer, focus-visible charts."""
+    html = _render(monkeypatch, tmp_path)
+    assert 'role="contentinfo"' in html
+    assert 'aria-label="Cost by model"' in html
+    assert 'aria-label="Cost by project"' in html
+    # SVG bar groups must use :focus-visible (keyboard) not bare :focus (mouse).
+    assert "cal-bar-group:focus-visible" in html
+    assert ".cal-bar-group:focus " not in html
+
+
 def test_dashboard_renders_section_markers(monkeypatch, tmp_path) -> None:
     """Phase-3 polish: visible numbering is sequential 1, 2, 3 … in tier
     render order. Section anchor IDs are still stable, so links keep

@@ -13,6 +13,7 @@ from caliper.windows import compute_window_state
 def build_prometheus_snapshot(options: RuntimeOptions):
     """Construct a Prometheus MetricsSnapshot from a freshly loaded usage window."""
     from caliper.prom_export import MetricsSnapshot
+    from caliper.render import pricing_status
 
     result = load_usage(options)
     rate_card = load_rate_card(options)
@@ -41,6 +42,7 @@ def build_prometheus_snapshot(options: RuntimeOptions):
         events_total=totals.totals.events,
         long_context_events_total=totals.long_context_events,
         tokens_total=_token_totals(today_events),
+        pricing_status=pricing_status(totals),
     )
 
 

@@ -394,6 +394,55 @@ def total_outlook(
     }
 
 
+CACHE_DRIFT_PER_DAY = 0.005  # 0.5 percentage-point/day sustained = a real trend.
+
+
+def cache_efficiency_trend(daily: list[Aggregate]) -> dict[str, object]:
+    """Per-day cache-hit-ratio trend, so a slow erosion is caught early.
+
+    A static "99.3% cached" hides the thing that matters — whether reuse is
+    drifting down (e.g. prompts churning), which silently inflates spend.
+    Reuses :func:`linear_slope`; under-sampled windows report ``flat`` and
+    ``partial`` rather than inventing a trend.
+    """
+    points: list[tuple[float, float]] = []
+    ratios: list[float] = []
+    for i, row in enumerate(daily, start=1):
+        inp = row.totals.input_tokens
+        if inp <= 0:
+            continue  # ratio undefined for a day with no input tokens
+        ratio = row.totals.cached_input_tokens / inp
+        points.append((float(i), ratio))
+        ratios.append(ratio)
+    if not ratios:
+        return {
+            "current_ratio": 0.0,
+            "mean_ratio": 0.0,
+            "slope_per_day": 0.0,
+            "direction": "flat",
+            "days_analyzed": 0,
+            "evidence_status": "partial",
+        }
+    slope = linear_slope(points)
+    under_sampled = len(ratios) < MIN_OLS_POINTS
+    if under_sampled:
+        direction = "flat"
+    elif slope >= CACHE_DRIFT_PER_DAY:
+        direction = "rising"
+    elif slope <= -CACHE_DRIFT_PER_DAY:
+        direction = "declining"
+    else:
+        direction = "flat"
+    return {
+        "current_ratio": ratios[-1],
+        "mean_ratio": statistics.fmean(ratios),
+        "slope_per_day": slope,
+        "direction": direction,
+        "days_analyzed": len(ratios),
+        "evidence_status": "partial" if under_sampled else "exact",
+    }
+
+
 def safe_ratio(numerator: float, denominator: float) -> float:
     """Defensive divide. Returns 0.0 instead of raising or producing
     ``inf``/``nan``. Used to keep projection bands renderable."""
@@ -408,6 +457,7 @@ def safe_ratio(numerator: float, denominator: float) -> float:
 __all__ = [
     "DEFAULT_HORIZON_DAYS",
     "MIN_OLS_POINTS",
+    "cache_efficiency_trend",
     "decompose_seasonality",
     "forecast_per_model",
     "forecast_project_burn",

@@ -90,6 +90,12 @@ VALID_DASHBOARD_RHYTHMS = ("receipt", "terminal")
 VALID_DASHBOARD_DENSITIES = ("comfortable", "compact")
 VALID_DASHBOARD_PRIVACY = ("off", "print-only", "always")
 
+# The default rolling window (in days) when neither a flag nor config pins
+# one. Single source of truth: the CLI window fallback, the [dashboard]
+# section default, and the written config templates all read this, so every
+# surface agrees out of the box.
+DEFAULT_WINDOW_DAYS = 14
+
 
 @dataclass(frozen=True)
 class DashboardConfig:
@@ -125,7 +131,7 @@ class DashboardConfig:
     filename_template: str = "caliper-dashboard-{timestamp}{privacy_suffix}.html"
     timestamp_format: str = "%Y-%m-%d-%H-%M"
     open_after: bool = True
-    default_days: int = 14
+    default_days: int = DEFAULT_WINDOW_DAYS
     # Interactive playground: when True the generated HTML embeds both
     # rhythms + a floating toggle panel + a "Save copy" button so the
     # recipient can flip between Receipt/Terminal and Dark/Light/Redacted
@@ -154,6 +160,9 @@ def load_dashboard_config(loaded: dict) -> DashboardConfig:
     """
     section = loaded.get("dashboard") or {}
     defaults = DashboardConfig()
+    # When [dashboard] doesn't pin its own window, inherit the top-level
+    # default_days so the dashboard and the CLI commands agree on one knob.
+    top_level_days = loaded.get("default_days", defaults.default_days)
     return DashboardConfig(
         theme=_coerce_choice(section.get("theme"), VALID_DASHBOARD_THEMES, defaults.theme),
         rhythm=_coerce_choice(section.get("rhythm"), VALID_DASHBOARD_RHYTHMS, defaults.rhythm),
@@ -164,7 +173,7 @@ def load_dashboard_config(loaded: dict) -> DashboardConfig:
         filename_template=str(section.get("filename_template", defaults.filename_template)),
         timestamp_format=str(section.get("timestamp_format", defaults.timestamp_format)),
         open_after=bool(section.get("open_after", defaults.open_after)),
-        default_days=int(section.get("default_days", defaults.default_days)),
+        default_days=int(section.get("default_days", top_level_days)),
         interactive=bool(section.get("interactive", defaults.interactive)),
     )
 
@@ -558,7 +567,7 @@ def _start_time(
         if not math.isfinite(days) or days <= 0:
             raise ValueError("--lookback-days must be a finite number greater than 0")
         return end - dt.timedelta(days=days)
-    default_days = float(loaded.get("default_days", 30))
+    default_days = float(loaded.get("default_days", DEFAULT_WINDOW_DAYS))
     if default_days <= 0:
         raise ValueError("default_days must be greater than 0")
     return end - dt.timedelta(days=default_days)

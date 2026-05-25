@@ -418,7 +418,7 @@ def test_daily_table_includes_totals_and_window(tmp_path) -> None:
     assert "gpt-5.5" in result.output
     assert "1,100" in result.output
     assert "Total" in result.output
-    assert "Cache savings:" in result.output
+    assert "Cache discount:" in result.output
 
 
 def test_daily_table_width_option_prevents_truncation(tmp_path) -> None:

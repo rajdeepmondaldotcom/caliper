@@ -30,6 +30,9 @@ class MetricsSnapshot:
     events_total: int
     long_context_events_total: int
     tokens_total: dict[tuple[str, str, str], int] = field(default_factory=dict)
+    # Pricing confidence for the window: exact | partial | estimated | unsupported.
+    # Exposed as a label so a dashboard can tell trustworthy cost from estimated.
+    pricing_status: str = "exact"
 
 
 def build_metrics_text(snapshot: MetricsSnapshot) -> bytes:
@@ -80,6 +83,18 @@ def build_metrics_text(snapshot: MetricsSnapshot) -> bytes:
         registry=registry,
     )
     long_ctx.set(snapshot.long_context_events_total)
+
+    # Carry the pricing caveat into monitoring: cost above may be estimated.
+    # Info-style gauge (always 1) whose `status` label names the confidence,
+    # so an alert can fire when status != "exact".
+    pricing_status = Gauge(
+        "caliper_pricing_status",
+        "Pricing confidence for caliper_cost_usd (status label: "
+        "exact|partial|estimated|unsupported). Always 1; read the label.",
+        ["status"],
+        registry=registry,
+    )
+    pricing_status.labels(status=snapshot.pricing_status).set(1)
 
     return generate_latest(registry)
 

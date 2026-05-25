@@ -568,9 +568,9 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             ),
             ImpactCard("Budget risk", "78%", "monthly cost: $1,754 of $2,250", "warn"),
             ImpactCard(
-                "Estimated cache savings",
+                "Cache discount",
                 "$612.40",
-                "72.4% cached-input share.",
+                "72.4% cached-input share, vs. the full input rate.",
                 "good",
             ),
             ImpactCard(

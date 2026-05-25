@@ -113,7 +113,7 @@ def render_receipt_markdown(payload: ReceiptInputs) -> str:
     lines.append("| Metric | Value |")
     lines.append("| --- | ---: |")
     lines.append(f"| Cost $ | {_format_money(payload.totals.costs.cost_usd)} |")
-    lines.append(f"| Cache savings $ | {_format_money(payload.totals.cache_savings.cost_usd)} |")
+    lines.append(f"| Cache discount $ | {_format_money(payload.totals.cache_savings.cost_usd)} |")
     lines.append(f"| Events | {_format_int(payload.totals.totals.events)} |")
     lines.append(f"| Tokens | {_format_int(payload.totals.totals.total_tokens)} |")
     lines.append(
@@ -186,7 +186,7 @@ def render_receipt_html(payload: ReceiptInputs) -> str:
             for name, value in (
                 ("Cost $", _format_money(payload.totals.costs.cost_usd)),
                 (
-                    "Cache savings $",
+                    "Cache discount $",
                     _format_money(payload.totals.cache_savings.cost_usd),
                 ),
                 ("Events", _format_int(payload.totals.totals.events)),

@@ -410,7 +410,7 @@ def _cache_reuse_insight(result: LoadResult, total, card: RateCard) -> Insight |
         title="High cache reuse" if cache_ratio >= 0.5 else "Low cache reuse",
         detail=(
             f"{cache_ratio:.1%} of input tokens were recorded as cached input. "
-            f"Estimated cache savings: ${savings.cost_usd:,.2f}."
+            f"Cache discount vs. the full input rate: ${savings.cost_usd:,.2f}."
         ),
         action="Stable prompts keep that working.",
         scope=SCOPE_HOME,
@@ -419,7 +419,7 @@ def _cache_reuse_insight(result: LoadResult, total, card: RateCard) -> Insight |
         priority=70 if cache_ratio < 0.5 else 55,
         confidence="high",
         impact_usd_exact=decimal_string(savings.cost_usd),
-        impact_label=f"est. ${savings.cost_usd:,.2f} cache savings",
+        impact_label=f"est. ${savings.cost_usd:,.2f} cache discount",
         evidence_metrics={
             "cache_hit_ratio": cache_ratio,
             "input_tokens": total.totals.input_tokens,

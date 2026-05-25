@@ -134,7 +134,7 @@ def subscription_cost_caveat(plan_types: set[str]) -> str | None:
         return None
     labels = ", ".join(sorted({str(item["label"]) for item in known}))
     return (
-        f"Plan detected: {labels}. Costs shown are the API-equivalent value of this "
-        "usage — Codex on a ChatGPT subscription is covered by the flat plan fee, not "
-        "billed per token. Read the total as usage value, not your invoice."
+        f"Usage value, not your bill — {labels} is a flat-rate plan, so this total is the "
+        "API-equivalent value of your metered usage, not an invoiced amount. "
+        "Pricing is unchanged; only the label is."
     )

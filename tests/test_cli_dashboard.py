@@ -112,7 +112,7 @@ privacy = "off"
     result = runner.invoke(app, ["dashboard", "--demo", "--output", str(out)])
 
     assert result.exit_code == 0, result.output
-    assert "Ignoring generated legacy dashboard privacy=off" in result.output
+    assert 'ignoring privacy="off" from the auto-generated config' in result.output
     html = out.read_text(encoding="utf-8")
     assert 'data-share-safe="true"' in html
     assert 'data-privacy="always"' in html

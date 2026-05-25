@@ -2,6 +2,47 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.59 - 2026-05-26
+
+A trust-and-depth polish pass from a second round of critical-user testing.
+
+- **One number everywhere.** `recommend`, `exec`, and the dashboard verdict now
+  draw from a single recommendation selector (`caliper.recommendations`), so the
+  named "top fix" and the "Fixable $X across N" total reconcile across surfaces
+  instead of disagreeing. The default rolling window is unified to
+  `DEFAULT_WINDOW_DAYS` (14) — the CLI fallback, the `[dashboard]` section, and a
+  fresh `caliper init` now agree, and the dashboard inherits the top-level
+  `default_days` when it doesn't pin its own. **Behaviour change:** `advise` and
+  `inefficiencies` no longer hardcode a 7-day window; they follow the config
+  window like every other command. Every surface prints an explicit
+  `Window: <start> to <end> (N days)`, and the dashboard verdict points at
+  `caliper recommend --days N`, which reproduces its number exactly. `advise`
+  stays the arbitrage sweep, now labelled as the complementary lens it is.
+- **Honest headlines.** `recommend`/`exec` headline the sum of the rows actually
+  shown (with a "Full audit: $X across N findings" reference), not a larger total
+  that didn't reconcile. A `Caveat:`/`Note:`/`Warning:` prefix convention makes
+  estimated-cost and subscription notes scannable, and the subscription caveat now
+  leads with "Usage value, not your bill."
+- **Anomaly engine: same numbers, faster, clearer.** `_score_observations` keeps
+  its expanding window pre-sorted (incremental median/IQR + an O(n) MAD), dropping
+  the per-cohort cost from O(n²·log n) to O(n²) — ~2.7x faster on a 3k-row cohort —
+  with **byte-identical output proven** by a golden corpus + Hypothesis equivalence
+  suite (`tests/test_anomaly_equivalence.py`). σ now carries a plain-English gloss
+  ("≈20x your typical spend … extreme") in `predict` and the dashboard.
+- **Closer to peak analysis.** `caliper pr` / `caliper commit` now state how much of
+  window spend actually carries a git SHA ("Covers 43% of window spend; the rest has
+  no recorded git SHA") instead of silently pricing a slice. `caliper predict` adds a
+  cache-efficiency trend with a drift signal. The "$38k cache savings" headline is
+  relabelled "cache discount vs. the full input rate" across CLI, exporters, and
+  dashboard.
+- **Machine surfaces + a11y.** Prometheus export carries a `caliper_pricing_status`
+  label so monitoring can tell estimated cost from exact; markdown reports now carry
+  the same `**Caveats**` block as JSON. Dashboard a11y: labelled tables, a
+  `contentinfo` footer, and `:focus-visible` (not bare `:focus`) on the SVG charts.
+- Confusing copy fixed: the legacy `privacy="off"` note is now parseable, and bare
+  `caliper rates|cache|export|budgets` print help instead of "Missing command."
+  Auto-open is suppressed in non-interactive shells.
+
 ## 0.0.58 - 2026-05-25
 
 An end-to-end critical-user polish pass over the dashboard, parser boundary,
