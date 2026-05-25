@@ -167,7 +167,7 @@ INLINE_STYLES = """
   --ink: #0e1116;
   --ink-2: #353a44;
   --mute: #5a626e;
-  --ghost: #6d7585;
+  --ghost: #5f6775;
 
   --accent: #2563eb;
   --accent-strong: #1d4ed8;
@@ -175,8 +175,8 @@ INLINE_STYLES = """
   --accent-tint: rgba(37,99,235,0.08);
   --accent-tint-2: rgba(37,99,235,0.16);
 
-  --ok: #16a34a;
-  --warn: #b45309;
+  --ok: #0f7a37;
+  --warn: #a84d07;
   --bad: #b91c1c;
   --ok-tint: rgba(22,163,74,0.08);
   --warn-tint: rgba(180,83,9,0.08);
@@ -445,8 +445,6 @@ section[id] { scroll-margin-top: 36px; }
 [data-viewport="mobile"] .cal-shape-grid,
 [data-viewport="mobile"] .cal-forecast-grid { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] .cal-table { font-size: 12px !important; }
-[data-viewport="mobile"] table th:nth-child(n+5),
-[data-viewport="mobile"] table td:nth-child(n+5) { display: none; }
 [data-viewport="mobile"] aside { display: none !important; }
 [data-viewport="mobile"] header { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] header > div:last-child { text-align: left !important; align-items: flex-start !important; }
@@ -501,7 +499,7 @@ section[id] { scroll-margin-top: 36px; }
     flex: 1 1 calc(50% - 4px) !important;
     padding: 6px 9px !important;
   }
-  .cal-metric-label { font-size: 9px !important; }
+  .cal-metric-label { font-size: 11px !important; }
   .cal-metric-value { font-size: 12px !important; }
   .cal-insight-row {
     grid-template-columns: 1fr !important;
@@ -510,8 +508,9 @@ section[id] { scroll-margin-top: 36px; }
   .cal-metric-chip {
     flex: 1 1 132px;
   }
-  table th:nth-child(n+5),
-  table td:nth-child(n+5) { display: none; }
+  /* Don't hide columns on mobile — the .cal-table-scroll wrapper provides
+     horizontal scroll, so Cost/Tokens/Events stay reachable instead of being
+     silently dropped. */
   aside { display: none !important; }
   header {
     grid-template-columns: 1fr !important;
@@ -976,16 +975,21 @@ p, h1, h2, h3 { text-wrap: pretty; }
   .cal-tweaks-search-label { display: none; }
   .cal-tweaks-panel .cal-tweaks-search {
     padding: 7px 10px;
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 44px;
+    min-height: 44px;
     justify-content: center;
   }
-  .cal-tweaks-panel .cal-tweaks-btn { padding: 6px 10px; min-height: 34px; }
-  .cal-tweaks-panel .cal-tweaks-save { padding: 7px 12px; min-height: 36px; }
+  .cal-tweaks-panel .cal-tweaks-btn { padding: 6px 12px; min-height: 44px; }
+  .cal-tweaks-panel .cal-tweaks-save { padding: 7px 14px; min-height: 44px; }
   .cal-tweaks-panel .cal-tweaks-divider { display: none; }
   /* Reserve space at the bottom of the page so the floating panel never
      covers the trust footer. */
   .cal-receipt-root { padding-bottom: 96px !important; }
+
+  /* Heatmap: scroll horizontally with legible (>=13px) cells instead of
+     squishing 24 hour columns into unreadable slivers. */
+  .cal-heatmap-scroll { overflow-x: auto; }
+  .cal-heatmap-cols { grid-template-columns: repeat(24, 13px) !important; }
 
   /* Palette dialog — bigger input, taller rows for thumbs. */
   .cal-palette { padding-top: 8vh; }
@@ -1473,6 +1477,23 @@ p, h1, h2, h3 { text-wrap: pretty; }
 @media (prefers-reduced-motion: reduce) {
   .cal-skip-link { transition: none; }
 }
+.cal-demo-ribbon {
+  margin: 0;
+  padding: 9px 16px;
+  background: var(--warn-tint);
+  border-bottom: 2px solid var(--warn);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+.cal-demo-ribbon code {
+  font-family: var(--mono);
+  background: var(--warn-tint);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+}
 
 """
 
@@ -1507,7 +1528,7 @@ SECTION_NUMBERS: dict[str, str] = {
 }
 
 _SECTION_TITLES: dict[str, str] = {
-    "action-center": "Operator brief",
+    "action-center": "Next actions",
     "overview": "Overview",
     "cost": "Cost over time",
     "shape": "Session shape",
@@ -1516,7 +1537,7 @@ _SECTION_TITLES: dict[str, str] = {
     "insights": "Insights",
     "anomalies": "Anomalies",
     "budgets": "Budget burn",
-    "forecast": "Forward look",
+    "forecast": "Forecast",
     "advisor": "Advisor",
     "rate-limits": "Rate-limit pressure",
     "heatmap": "Activity heatmap",
@@ -1862,6 +1883,42 @@ def _private_text(text: str | None, pm: _PrivacyMap) -> str:
     return "".join(out)
 
 
+def _redact_plain(text: str | None, pm: _PrivacyMap) -> str:
+    """Plain-text (no HTML span) redaction for data embedded as JSON.
+
+    The command-palette search index is encoded as a JSON ``<script>`` block,
+    so it can't use the dual-span ``_private`` mechanism. In ``always`` mode the
+    file must never embed real labels, so swap any known project/session/path
+    substring for its redacted form. In other modes the local viewer keeps real
+    labels (the file is for the user's own machine), so this is a no-op.
+    """
+    raw = "" if text is None else str(text)
+    if not raw or pm.mode != "always":
+        return raw
+    replacements: dict[str, str] = {}
+    replacements.update(pm.paths)
+    replacements.update(pm.projects)
+    replacements.update(pm.sessions)
+    keys = sorted((key for key in replacements if key), key=len, reverse=True)
+    if not keys:
+        return raw
+    out: list[str] = []
+    pos = 0
+    while pos < len(raw):
+        match = next((key for key in keys if raw.startswith(key, pos)), None)
+        if match is None:
+            next_pos = min(
+                [idx for key in keys if (idx := raw.find(key, pos + 1)) != -1],
+                default=len(raw),
+            )
+            out.append(raw[pos:next_pos])
+            pos = next_pos
+            continue
+        out.append(replacements[match])
+        pos += len(match)
+    return "".join(out)
+
+
 def _agent_display_label(
     agent_id: str,
     index: int,
@@ -2161,10 +2218,12 @@ def _bar_chart(
         if tip_y < 4:
             tip_y = y + 8
         tip_y = min(max(4.0, tip_y), height - tip_h - 4)
-        parts.append(
-            f'<g class="cal-bar-group" tabindex="0" role="listitem" '
-            f'aria-label="{_esc(aria_label)}">'
-        )
+        # The whole chart is one labelled image (role="img" on the <svg>), so
+        # the bars are presentational rather than focusable list items — this
+        # avoids the invalid role="listitem"-without-list-parent. Per-day values
+        # remain available in the §02 summary and the cost-over-time table; the
+        # <title> still gives a native hover tooltip.
+        parts.append(f'<g class="cal-bar-group" aria-hidden="true">')
         parts.append(f"<title>{_esc(aria_label)}</title>")
         parts.append(
             f'<rect x="{x:.1f}" y="{pad_t}" width="{bw:.1f}" height="{inner_h:.1f}" '
@@ -2227,8 +2286,22 @@ def _heatmap_7x24(recap: Recap) -> str:
     mx = max(flat, default=0) or 1
     cell_size = 14
     gap = 2
+    # Screen readers can't read opacity; give the grid a role + summary so it
+    # isn't silent. (WCAG 1.1.1 / 1.4.1 — value is otherwise colour-only.)
+    peak_v = peak_d = peak_h = 0
+    for dd in range(7):
+        for hh in range(24):
+            if grid[dd][hh] > peak_v:
+                peak_v, peak_d, peak_h = grid[dd][hh], dd, hh
+    heatmap_summary = (
+        f"Activity heatmap by day of week and hour. Busiest: "
+        f"{day_labels[peak_d]} {peak_h:02d}:00 with {peak_v} calls."
+        if peak_v
+        else "Activity heatmap by day of week and hour."
+    )
     parts = [
-        '<div style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start">',
+        f'<div role="img" aria-label="{_esc(heatmap_summary)}" '
+        'style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start">',
         f'<div style="display:grid;grid-template-rows:repeat(7,{cell_size}px);'
         f'gap:{gap}px;font-size:10px;color:var(--mute);padding-top:14px">',
     ]
@@ -2237,9 +2310,12 @@ def _heatmap_7x24(recap: Recap) -> str:
             f'<span style="line-height:{cell_size}px;text-align:right;padding-right:4px">{label}</span>'
         )
     parts.append("</div>")
-    parts.append("<div>")
+    # cal-heatmap-scroll lets the grid scroll horizontally on phones (CSS pins
+    # cal-heatmap-cols to a fixed cell size there) instead of squishing the
+    # 24 hour columns into unreadable slivers.
+    parts.append('<div class="cal-heatmap-scroll">')
     parts.append(
-        f'<div style="display:grid;grid-template-columns:repeat(24,1fr);column-gap:{gap}px;'
+        f'<div class="cal-heatmap-cols" style="display:grid;grid-template-columns:repeat(24,1fr);column-gap:{gap}px;'
         f'margin-bottom:4px;font-size:10px;color:var(--mute)">'
     )
     for h in range(24):
@@ -2250,7 +2326,7 @@ def _heatmap_7x24(recap: Recap) -> str:
         f'<div style="display:grid;grid-template-rows:repeat(7,{cell_size}px);gap:{gap}px">'
     )
     for d in range(7):
-        parts.append(f'<div style="display:grid;grid-template-columns:repeat(24,1fr);gap:{gap}px">')
+        parts.append(f'<div class="cal-heatmap-cols" style="display:grid;grid-template-columns:repeat(24,1fr);gap:{gap}px">')
         for h in range(24):
             v = grid[d][h]
             if v == 0:
@@ -2970,7 +3046,9 @@ def _small_table(
         '<div class="cal-table-panel" style="background:var(--panel);'
         "border:1px solid var(--border);border-radius:var(--r-md);"
         'min-width:0">'
-        '<div class="cal-table-scroll" style="overflow-x:auto;max-width:100%;'
+        # tabindex=0 so keyboard-only users can scroll to clipped columns
+        # (WCAG 2.1.1 / axe scrollable-region-focusable).
+        '<div class="cal-table-scroll" tabindex="0" style="overflow-x:auto;max-width:100%;'
         'border-radius:var(--r-md)">'
         '<table class="cal-table" style="width:100%;min-width:max-content;'
         'border-collapse:collapse;font-size:13px">'
@@ -2996,14 +3074,15 @@ def _section_action_center(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str
     )
 
     if queue_rows:
+        # The section heading is already "Next actions", so no redundant inner
+        # sub-header. Meta reads as a distinct fact ("ranked by impact") rather
+        # than a second "priority …" count that competes with the verdict strip.
         body = (
             '<div style="background:var(--panel);border:1px solid var(--border);'
             'border-radius:var(--r-md);overflow:hidden">'
-            '<div style="padding:10px 13px;background:var(--panel-2);font-size:12px;'
-            'color:var(--ink-2);font-weight:600">Next actions</div>'
             f"{queue_rows}</div>"
         )
-        meta = f"{len(priority_items)} priority actions"
+        meta = f"{len(priority_items)} ranked by impact"
         return _section_wrap("action-center", rhythm=rhythm, body=body, meta=meta)
 
     cards = [card for card in d.command_center if _command_card_is_useful(card)][:4]
@@ -3434,7 +3513,7 @@ def _th(
     # cells from breaking "65%" across two visual lines.
     num_attr = ' data-num="true"' if numeric else ""
     return (
-        f"<th{sort_attr}{num_attr} "
+        f'<th scope="col"{sort_attr}{num_attr} '
         f'style="text-align:{align};padding:10px 14px;font-size:11px;'
         f"font-weight:500;color:var(--mute);text-transform:uppercase;letter-spacing:0;"
         f'border-bottom:1px solid var(--border)">{content}</th>'
@@ -3727,8 +3806,10 @@ def render_models(rows: Sequence[ModelRow], *, total_cost: float | None = None) 
             + "</tr>"
         )
     return (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);overflow:hidden">'
+        # overflow-x:auto + tabindex so wide sortable tables scroll (and are
+        # keyboard-scrollable) on narrow screens instead of clipping columns.
+        '<div tabindex="0" style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow-x:auto">'
         '<table class="cal-table data data-sortable" '
         'style="width:100%;border-collapse:collapse;font-size:13px">'
         + head
@@ -3843,8 +3924,10 @@ def render_projects(
             + "</tr>"
         )
     return (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);overflow:hidden">'
+        # overflow-x:auto + tabindex so wide sortable tables scroll (and are
+        # keyboard-scrollable) on narrow screens instead of clipping columns.
+        '<div tabindex="0" style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow-x:auto">'
         '<table class="cal-table data data-sortable" '
         'style="width:100%;border-collapse:collapse;font-size:13px">'
         + head
@@ -3979,13 +4062,15 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
         impact = fmt_money(a.impact_usd)
         sigma_label = _fmt_sigma(a.z_score)
         action = _anomaly_action(a.kind)
-        impact_pct = f"+{a.impact_percent:.0f}%" if a.impact_percent is not None else "n/a"
         anomaly_metrics = [
             ("Actual spend", observed),
             ("Expected spend", baseline),
             ("Cost impact", f"+{impact}"),
-            ("Impact %", impact_pct),
         ]
+        # Only show the percentage when we actually have one — "n/a" next to a
+        # labelled metric reads as a half-broken finding.
+        if a.impact_percent is not None:
+            anomaly_metrics.append(("Impact %", f"+{a.impact_percent:.0f}%"))
         metrics_html = (
             '<div class="cal-metric-strip">'
             + "".join(
@@ -4370,8 +4455,8 @@ def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             + "</tr>"
         )
     body = (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);overflow:hidden">'
+        '<div tabindex="0" style="background:var(--panel);border:1px solid var(--border);'
+        'border-radius:var(--r-md);overflow-x:auto">'
         '<table class="cal-table" style="width:100%;border-collapse:collapse;'
         'font-size:13px;table-layout:fixed">'
         '<colgroup><col style="width:16%"><col style="width:12%"><col style="width:14%">'
@@ -4472,7 +4557,9 @@ _SECTION_TIER: dict[str, str] = {
     "shape": "appendix",
     "sessions": "appendix",
     "heatmap": "appendix",
-    "usage-windows": "appendix",
+    # 7/30/90-day rolling spend is the headline trend (the CLI's "start with
+    # caliper overview"), not buried supporting material — keep it visible.
+    "usage-windows": "trajectory",
     "attribution": "appendix",
     "evidence": "trust",
     # Disabled (never rendered) — bucket assignment is irrelevant.
@@ -4546,12 +4633,14 @@ _TIER_LABEL: dict[str, str] = {
 }
 
 
-def _palette_index(d: Dashboard) -> str:
+def _palette_index(d: Dashboard, pm: _PrivacyMap) -> str:
     """Build a JSON search index for the cmd+K palette (Phase 3).
 
     Searches over: tier sections, top models, top projects, anomalies,
     advisor recommendations. The palette JS reads this as a `<script
-    type="application/json">` block and filters on each keystroke.
+    type="application/json">` block and filters on each keystroke. Labels are
+    run through `_redact_plain` so a Safe Share (``always``) file never embeds
+    real project/session names in this index.
     """
     import json
 
@@ -4579,7 +4668,7 @@ def _palette_index(d: Dashboard) -> str:
         items.append(
             {
                 "type": "project",
-                "label": p.name,
+                "label": _redact_plain(p.name, pm),
                 "anchor": "projects",
                 "hint": fmt_money(p.cost_usd),
             }
@@ -4588,7 +4677,7 @@ def _palette_index(d: Dashboard) -> str:
         items.append(
             {
                 "type": "anomaly",
-                "label": f"{a.kind} · {a.timestamp}",
+                "label": _redact_plain(f"{a.kind} · {a.timestamp}", pm),
                 "anchor": "anomalies",
                 "hint": fmt_money(a.impact_usd),
             }
@@ -4597,7 +4686,7 @@ def _palette_index(d: Dashboard) -> str:
         items.append(
             {
                 "type": "fix",
-                "label": r.title,
+                "label": _redact_plain(r.title, pm),
                 "anchor": "inefficiencies",
                 "hint": fmt_money(r.savings_usd),
             }
@@ -4697,8 +4786,11 @@ def _severity_token(level: str, label: str | None = None) -> str:
         lvl = "info"
     text = _esc(label or lvl)
     glyph = _SEV_GLYPH[lvl]
+    # No role="status": these are static styled labels, not live regions.
+    # The colour-coded glyph is decorative (aria-hidden); the text label
+    # carries the meaning for assistive tech.
     return (
-        f'<span class="sev sev-{lvl}" role="status">'
+        f'<span class="sev sev-{lvl}">'
         f'<span class="sev-glyph" aria-hidden="true">{glyph}</span>'
         f"<span>{text}</span></span>"
     )
@@ -4960,6 +5052,15 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         if d.executive_brief and d.executive_brief.findings
         else ""
     )
+    # The above-the-fold banner/billboard/verdict carry the primary CTA and
+    # verdict, so they must sit inside a landmark (otherwise screen-reader
+    # landmark navigation skips the most important content).
+    summary_inner = banner_html + billboard_html + hero_html + verdict_html
+    summary_band = (
+        f'<section class="cal-summary-band" aria-label="Summary">{summary_inner}</section>'
+        if summary_inner
+        else ""
+    )
     tiered = _sections_by_tier(d)
     decisions_html = "".join(
         _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["decisions"]
@@ -5004,10 +5105,7 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
     return (
         '<div class="cal-dashboard-root cal-receipt-root">'
         f"{masthead}"
-        f"{banner_html}"
-        f"{billboard_html}"
-        f"{hero_html}"
-        f"{verdict_html}"
+        f"{summary_band}"
         f"{body_html}"
         f"{_caliper_footer(d)}"
         "</div>"
@@ -5354,6 +5452,7 @@ _INTERACTIVE_SCRIPT = """
   }
   var paletteSelected = 0;
   var paletteResults = [];
+  var paletteLastFocus = null;
 
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"]/g, function(c) {
@@ -5391,14 +5490,28 @@ _INTERACTIVE_SCRIPT = """
   }
   function paletteOpen() {
     if (!palette) return;
+    // Remember where focus was so we can return it when the dialog closes
+    // (WCAG 2.4.3). Don't capture if the palette is already open.
+    if (palette.hidden) paletteLastFocus = document.activeElement;
     palette.hidden = false;
     paletteInput.value = '';
     paletteUpdate('');
     paletteInput.focus();
   }
   function paletteClose() {
-    if (!palette) return;
+    if (!palette || palette.hidden) return;
     palette.hidden = true;
+    // Restore focus so keyboard users aren't dropped at the top of the
+    // document. Prefer where focus was; if that was the body (e.g. opened via
+    // ⌘K), land on the palette trigger button instead.
+    var target = paletteLastFocus;
+    if (!target || target === document.body || !target.focus) {
+      target = document.getElementById('cal-open-palette');
+    }
+    if (target && target.focus) {
+      try { target.focus(); } catch (err) {}
+    }
+    paletteLastFocus = null;
   }
   function jumpToAnchor(anchor) {
     if (!anchor) return;
@@ -5439,6 +5552,11 @@ _INTERACTIVE_SCRIPT = """
       } else if (e.key === 'Escape') {
         e.preventDefault();
         paletteClose();
+      } else if (e.key === 'Tab') {
+        // Trap focus inside the dialog: the input is the only focusable
+        // control (results are arrow-key navigated), so keep focus here.
+        e.preventDefault();
+        paletteInput.focus();
       }
     });
     paletteList.addEventListener('click', function(e) {
@@ -5462,6 +5580,13 @@ _INTERACTIVE_SCRIPT = """
     return t.matches('input, textarea, [contenteditable], [contenteditable="true"]');
   }
   document.addEventListener('keydown', function(e) {
+    // Escape always closes an open palette, wherever focus is (defence in
+    // depth alongside the input's own Escape handler).
+    if (e.key === 'Escape' && palette && !palette.hidden) {
+      e.preventDefault();
+      paletteClose();
+      return;
+    }
     if (inEditableTarget(e.target)) return;
     if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault();
@@ -5569,8 +5694,10 @@ def _render_tweaks_panel(*, initial_rhythm: str, initial_mode: str) -> str:
         "</button>"
     )
     return (
-        '<aside class="cal-tweaks-panel" role="toolbar" '
-        'aria-label="Dashboard view controls">'
+        # Keep <aside> as a complementary landmark (role="toolbar" both removed
+        # the landmark and was a disallowed role override). The inner
+        # role="radiogroup" already groups the mode/rhythm controls.
+        '<aside class="cal-tweaks-panel" aria-label="Dashboard view controls">'
         f"{search_btn}"
         '<div class="cal-tweaks-divider" aria-hidden="true"></div>'
         '<div class="cal-tweaks-section">'
@@ -5618,6 +5745,7 @@ def _wrap_document(
     mode: str,
     interactive: bool,
     title: str = "Caliper Dashboard",
+    demo: bool = False,
 ) -> str:
     classes = [f"theme-{theme}"]
     if density == "compact":
@@ -5629,6 +5757,16 @@ def _wrap_document(
     # jump past the masthead/TOC straight into the main content. Visible
     # only when focused (CSS) so it doesn't disrupt sighted users.
     skip_link = '<a class="cal-skip-link" href="#cal-main">Skip to main content</a>'
+    # Demo renders carry synthetic numbers; mark the file so a screenshot can
+    # never be mistaken for real usage.
+    demo_ribbon = (
+        '<div class="cal-demo-ribbon" role="note">'
+        "DEMO DATA — synthetic sample, not your usage. "
+        "Run <code>caliper dashboard</code> on your own logs for real numbers."
+        "</div>"
+        if demo
+        else ""
+    )
     return (
         "<!doctype html>"
         '<html lang="en">'
@@ -5640,8 +5778,10 @@ def _wrap_document(
         "</head>"
         f'<body class="{class_attr}" data-theme="{theme}" data-density="{density}" '
         f'data-share-safe="{share}" data-privacy="{privacy}" data-rhythm="{rhythm}" '
-        f'data-mode="{mode}" data-interactive="{"true" if interactive else "false"}">'
+        f'data-mode="{mode}" data-interactive="{"true" if interactive else "false"}"'
+        f'{" data-demo=\"true\"" if demo else ""}>'
         f"{skip_link}"
+        f"{demo_ribbon}"
         f"{body}"
         f"{script}"
         "</body></html>"
@@ -5657,6 +5797,7 @@ def render_dashboard(
     privacy: str = "off",
     share_safe: bool = False,
     interactive: bool = False,
+    demo: bool = False,
 ) -> str:
     """Render the dashboard as a single offline HTML string.
 
@@ -5711,7 +5852,16 @@ def render_dashboard(
     # a print-only privacy map regardless of the user's initial choice; the
     # actual visible mode is driven by the body's data-privacy attribute and
     # the CSS rules in INLINE_STYLES.
-    render_privacy = "print-only" if interactive else privacy
+    #
+    # Exception: a caller who explicitly asked for `always` wants a file that
+    # is SAFE TO SHARE — the real values must never be embedded, not merely
+    # CSS-hidden. So `always` is honoured verbatim even when interactive; the
+    # renderer emits redacted text only (no `cal-real` spans), and the theme
+    # toggles simply restyle that already-redacted text.
+    if privacy == "always":
+        render_privacy = "always"
+    else:
+        render_privacy = "print-only" if interactive else privacy
     pm = _build_privacy_map(d, render_privacy)
     if interactive:
         # Phase 3 polish: the Terminal rhythm is no longer surfaced as a
@@ -5725,7 +5875,7 @@ def render_dashboard(
             rendered = _render_receipt(d, dense=dense, pm=pm)
             wrapper_class = "cal-rhythm-receipt"
         mode = _mode_from_state(theme, privacy)
-        palette_index = _palette_index(d)
+        palette_index = _palette_index(d, pm)
         palette_data = (
             '<script type="application/json" id="cal-palette-index">'
             f"{palette_index}</script>"
@@ -5752,4 +5902,5 @@ def render_dashboard(
         rhythm=rhythm,
         mode=mode,
         interactive=interactive,
+        demo=demo,
     )

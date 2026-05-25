@@ -2243,9 +2243,11 @@ def dashboard(
         typer.Option(
             "--privacy",
             help=(
-                "Privacy mode: off (always show real names), print-only "
-                "(real on screen, redacted on print), or always (redacted everywhere). "
-                "Falls back to [dashboard].privacy (default: off)."
+                "Privacy mode: off (show real names), print-only (real names "
+                "in the file but hidden on print/screen-share — NOT safe to "
+                "send the file), or always (real names stripped from the file "
+                "entirely — safe to share). Falls back to [dashboard].privacy "
+                "(default: off)."
             ),
         ),
     ] = None,
@@ -2498,6 +2500,7 @@ def dashboard(
             privacy=privacy,
             share_safe=effective_share_safe,
             interactive=interactive_effective,
+            demo=demo,
         )
         # Compact "265 KB" style for the spinner summary.
         size_kb = max(1, len(text.encode("utf-8")) // 1024)
@@ -5366,7 +5369,12 @@ def statusline(
         typer.Option("--watch-max-ticks", "--max-ticks", help="Stop watch mode after N snapshots."),
     ] = None,
 ) -> None:
-    """Print a one-line cost snapshot. Good for shell prompts and CI hooks."""
+    """Print a one-line cost snapshot. For CI hooks and watch-mode status bars.
+
+    Parses your logs on each call, so it is not instant on large histories —
+    use --watch for a periodically-refreshed bar rather than a per-keystroke
+    shell prompt.
+    """
     if output_format not in {"text", "json"}:
         raise _exit_error("--output-format must be one of: text, json")
     ticks = 0
@@ -5520,6 +5528,14 @@ def live(
     ] = None,
 ) -> None:
     """Open a live TUI. Today's usage, 5-hour and weekly window countdowns, burn rate."""
+    # A live loop in a pipe/cron/CI blocks forever with no output. Mirror the
+    # `tui` guard. `--max-ticks` is the bounded, scriptable path, so let it
+    # through for CI.
+    if not sys.stdout.isatty() and max_ticks is None:
+        raise _exit_error(
+            "caliper live requires an interactive terminal. "
+            "Use --max-ticks N for a bounded, non-interactive run."
+        )
     try:
         options = build_options(
             days=7,
@@ -5572,7 +5588,10 @@ def tui(
     ] = False,
 ) -> None:
     """Open the immersive Textual workspace."""
-    if not sys.stdout.isatty() and not demo:
+    # A Textual app rendered into a pipe emits raw alt-screen escape codes.
+    # Require a real terminal even in --demo mode (a pty still satisfies this,
+    # so screenshot tooling keeps working).
+    if not sys.stdout.isatty():
         raise _exit_error("caliper tui requires an interactive terminal.")
     from caliper import tui as caliper_tui
 

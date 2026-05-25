@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 
 # Canonical labels for the entity that makes a model. Distinct from
 # the tool vendor that wrote the log.
@@ -48,8 +49,14 @@ _MODEL_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
 )
 
 
+@lru_cache(maxsize=4096)
 def model_vendor(model: str | None) -> str:
-    """Return the canonical vendor label for a model id."""
+    """Return the canonical vendor label for a model id.
+
+    Pure and called once per event per aggregation pass (millions of times on
+    large logs), so the result is memoised on the model id. Sibling
+    ``normalize_model`` is cached the same way.
+    """
     if not model:
         return VENDOR_UNKNOWN
     lowered = str(model).strip().lower()

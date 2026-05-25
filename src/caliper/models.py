@@ -18,6 +18,11 @@ def _safe_int(value: Any) -> int:
 def decimal_value(value: object) -> Decimal:
     if isinstance(value, Decimal):
         return value
+    # Token counts are ints; Decimal(int) is exact and skips the costly str()
+    # round-trip (this is one of the hottest leaves on large logs). The str()
+    # path is only needed for floats, where it avoids binary-float imprecision.
+    if isinstance(value, int):
+        return Decimal(value)
     return Decimal(str(value))
 
 

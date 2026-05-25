@@ -3245,20 +3245,17 @@ def _build_executive_brief(
     top_tone = min((item.tone for item in decision_queue), key=_tone_rank, default="neutral")
     warn_count = sum(1 for item in decision_queue if item.tone in {"critical", "warn"})
     good_count = sum(1 for item in decision_queue if item.tone == "good")
-    seven = next((window for window in usage_windows if window.days == 7), None)
-    seven_text = (
-        f"Last 7 days {_format_money(seven.cost_usd)}"
-        if seven is not None
-        else "7-day trend unavailable"
-    )
+    # Keep the subtitle to a single scope (the selected window). The 7-day
+    # velocity is its own decision-queue item, so blending it in here read as a
+    # contradiction ("$1,243 … Last 7 days $799").
     subtitle = (
         f"{_format_money(totals.cost_usd)} selected-window cost · "
-        f"{totals.events:,} deduped events · {totals.sessions:,} sessions · {seven_text}"
+        f"{totals.events:,} deduped events · {totals.sessions:,} sessions"
     )
     if warn_count:
         title = "AI usage needs review"
         verdict = (
-            f"{warn_count} priority item{'s' if warn_count != 1 else ''} "
+            f"{warn_count} item{'s' if warn_count != 1 else ''} to review "
             "before sharing or acting on this report."
         )
     elif good_count:

@@ -629,9 +629,9 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
         ],
         executive_brief=ExecutiveBrief(
             title="AI usage needs review",
-            verdict="4 priority items before sharing or acting on this report.",
+            verdict="4 items to review before sharing or acting on this report.",
             subtitle=(
-                "$1,243 selected-window cost · 480 deduped events · 32 sessions · Last 7 days $799"
+                "$1,243 selected-window cost · 480 deduped events · 32 sessions"
             ),
             tone="warn",
             findings=[
@@ -1154,8 +1154,8 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             headline="BIGGEST FIX",
             value="$612/mo saveable",
             rationale=(
-                "320 short-context Opus events would run cheaper on Sonnet 4.6 "
-                "with no measurable capability loss."
+                "320 short-context Opus events would price cheaper on Sonnet 4.6. "
+                "Validate quality before switching — Caliper measures cost, not output quality."
             ),
             cta_label="Investigate",
             cta_anchor="inefficiencies",

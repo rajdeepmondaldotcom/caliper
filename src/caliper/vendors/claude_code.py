@@ -162,10 +162,30 @@ def _parse_uncached_paths(
 ) -> list[tuple[Path, list[UsageEvent], str]]:
     signature = _parser_cache_signature(options)
     parsed: list[tuple[Path, list[UsageEvent], str]] = []
+    # Window pre-filter: a file whose last modification predates the window
+    # start cannot contain in-window events (an event can't be written before
+    # it happens), so skip reading it entirely. Bounds both parse time and
+    # peak memory when querying a recent window over a long history. We still
+    # account for the path (empty events) to satisfy assert_accounted_paths.
+    # A 1-day margin guards against clock skew / restored-backup mtimes that
+    # could lag a file's newest event timestamp.
+    start_epoch = start.timestamp() - 86400.0
+    fresh_paths: list[Path] = []
+    for path in paths:
+        try:
+            if path.stat().st_mtime < start_epoch:
+                parsed.append((path, [], ""))
+                progress.cache_hit(path)
+                continue
+        except OSError:
+            pass
+        fresh_paths.append(path)
+    # NB: keep the original `paths` intact — assert_accounted_paths checks the
+    # full discovered set, and `parsed` already includes the stale skips above.
     cold_paths: list[Path] = []
     if cache is not None:
-        legacy_by_path = _legacy_events_for_paths(cache, paths, signature)
-        for path in paths:
+        legacy_by_path = _legacy_events_for_paths(cache, fresh_paths, signature)
+        for path in fresh_paths:
             legacy = legacy_by_path.get(path)
             if legacy is not None:
                 cache.put_indexed_events(path, signature, legacy, vendor=VENDOR_CLAUDE_CODE)
@@ -174,7 +194,7 @@ def _parse_uncached_paths(
             else:
                 cold_paths.append(path)
     else:
-        cold_paths = list(paths)
+        cold_paths = list(fresh_paths)
 
     cold = run_path_batches(
         cold_paths,

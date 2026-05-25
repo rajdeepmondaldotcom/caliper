@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import os
 import tomllib
 from dataclasses import dataclass, replace
@@ -431,6 +432,10 @@ def build_options(
         "--rate-limit-sample-limit",
     )
     width_value = _positive_optional_int(cfg(loaded, "width", width, None), "--width")
+    # Floor the column width so a tiny value (e.g. --width 1) can't render one
+    # character per line. Rich needs a usable minimum to lay out tables.
+    if width_value is not None and width_value < 40:
+        width_value = 40
     no_parse_cache_value = cfg_bool(loaded, "no_parse_cache", no_parse_cache, False)
     project_raw = cfg(loaded, "project", project, None)
     project_value = str(project_raw).strip() if project_raw else None
@@ -491,6 +496,13 @@ def _time_window(
         end += dt.timedelta(days=1)
     start = _start_time(loaded, since=since, days=days, end=end, timezone=timezone)
     if start >= end:
+        # A lone future --since (with --until defaulting to now) is the common
+        # case; point at the real problem instead of an --until the user never
+        # set.
+        if since and until is None and start > default_end:
+            raise ValueError(
+                f"--window-start {since} is in the future; there is no data after now"
+            )
         raise ValueError("--window-start must be before --window-end")
     return start, end
 
@@ -506,8 +518,10 @@ def _start_time(
     if since:
         return _parse_since(since, end=end, timezone=timezone)
     if days is not None:
-        if days <= 0:
-            raise ValueError("--lookback-days must be greater than 0")
+        # `nan`/`inf` slip past a bare `<= 0` check and raise OverflowError or
+        # ValueError deep in timedelta; reject them up front with a clean error.
+        if not math.isfinite(days) or days <= 0:
+            raise ValueError("--lookback-days must be a finite number greater than 0")
         return end - dt.timedelta(days=days)
     default_days = float(loaded.get("default_days", 30))
     if default_days <= 0:

@@ -2,6 +2,71 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.53 - 2026-05-25
+
+A critical-user polish pass: correctness, privacy, performance, accessibility,
+mobile, and dashboard clarity.
+
+### Fixed
+
+- **`caliper live` no longer hangs in a non-interactive shell.** A piped/cron/CI
+  invocation now errors cleanly (exit 2) like `caliper tui`, instead of blocking
+  forever with no output. `--max-ticks N` remains the bounded, scriptable path.
+  `tui --demo` likewise now requires a real terminal (a pty still works).
+- **`render.write_output` no longer stack-traces on an unwritable target.**
+  `caliper overview --out <dir>` (table mode) surfaces a one-line error instead
+  of a raw `IsADirectoryError`.
+- **`--days inf` / `--days nan` error cleanly** instead of raising an uncaught
+  `OverflowError`; `--width` is floored so `--width 1` no longer spills one
+  character per line.
+- **A lone future `--since` gives a clear message** ("…is in the future; there
+  is no data after now") rather than pointing at a `--until` you never set.
+
+### Privacy
+
+- **"Safe Share" (`--privacy always`) is now actually safe to send.** The
+  interactive renderer previously kept real project/session names in CSS-hidden
+  `cal-real` spans (and in the ⌘K palette index), so the file leaked them. An
+  `always` render now embeds redacted text only — verified by a new CI assertion.
+
+### Performance — reading & aggregation
+
+- **Claude Code parser skips files whose mtime predates the window**, so a
+  recent-window query over a long history no longer reads (or holds in memory)
+  every historical log file.
+- **`model_vendor` is memoised** (was a linear prefix scan run millions of times
+  per build) and **`decimal_value` fast-paths ints** (skips a `Decimal(str(...))`
+  round-trip on the hottest pricing leaf). Identical numbers, materially less CPU.
+
+### Accessibility (WCAG 2.2 AA)
+
+- The ⌘K command palette now **traps focus, closes on Escape from anywhere, and
+  restores focus** to its trigger. Dark and light themes pass axe with **zero
+  violations** (light-theme `--ok`/`--ghost`/`--warn` darkened to clear 4.5:1).
+- Wide tables are keyboard-scrollable; the bar chart and activity heatmap carry
+  proper image roles/labels; data-table headers use `scope="col"`; the controls
+  panel keeps its landmark; static severity chips dropped a spurious
+  `role="status"`.
+
+### Mobile
+
+- Wide tables now **scroll horizontally instead of dropping columns 5+**, so
+  Cost/Tokens/Events stay reachable on phones. The activity heatmap scrolls with
+  legible cells instead of squishing to slivers. Floating controls meet the 44px
+  tap-target minimum; metric labels are no longer 9px.
+
+### Dashboard clarity
+
+- Renamed **"Operator brief" → "Next actions"** and **"Forward look" →
+  "Forecast"**; removed the redundant inner sub-header.
+- Resolved the **"4 priority items" vs "5 priority actions"** contradiction — the
+  verdict now reads "N items to review" and the action list "N ranked by impact".
+- The verdict subtitle no longer mixes window scopes; anomaly rows drop the
+  "Impact % n/a" noise; the 7/30/90-day **Spend windows** trend was promoted out
+  of the collapsed appendix into the main flow.
+- **`--demo` output is watermarked** "DEMO DATA — synthetic sample, not your
+  usage", and the demo billboard no longer claims "no measurable capability loss".
+
 ## 0.0.52 - 2026-05-25
 
 ### Fixed

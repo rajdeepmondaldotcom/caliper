@@ -90,7 +90,7 @@
   --ink: #0e1116;
   --ink-2: #353a44;
   --mute: #5a626e;
-  --ghost: #6d7585;
+  --ghost: #5f6775;
 
   --accent: #2563eb;
   --accent-strong: #1d4ed8;
@@ -98,8 +98,8 @@
   --accent-tint: rgba(37,99,235,0.08);
   --accent-tint-2: rgba(37,99,235,0.16);
 
-  --ok: #16a34a;
-  --warn: #b45309;
+  --ok: #0f7a37;
+  --warn: #a84d07;
   --bad: #b91c1c;
   --ok-tint: rgba(22,163,74,0.08);
   --warn-tint: rgba(180,83,9,0.08);
@@ -368,8 +368,6 @@ section[id] { scroll-margin-top: 36px; }
 [data-viewport="mobile"] .cal-shape-grid,
 [data-viewport="mobile"] .cal-forecast-grid { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] .cal-table { font-size: 12px !important; }
-[data-viewport="mobile"] table th:nth-child(n+5),
-[data-viewport="mobile"] table td:nth-child(n+5) { display: none; }
 [data-viewport="mobile"] aside { display: none !important; }
 [data-viewport="mobile"] header { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] header > div:last-child { text-align: left !important; align-items: flex-start !important; }
@@ -424,7 +422,7 @@ section[id] { scroll-margin-top: 36px; }
     flex: 1 1 calc(50% - 4px) !important;
     padding: 6px 9px !important;
   }
-  .cal-metric-label { font-size: 9px !important; }
+  .cal-metric-label { font-size: 11px !important; }
   .cal-metric-value { font-size: 12px !important; }
   .cal-insight-row {
     grid-template-columns: 1fr !important;
@@ -433,8 +431,9 @@ section[id] { scroll-margin-top: 36px; }
   .cal-metric-chip {
     flex: 1 1 132px;
   }
-  table th:nth-child(n+5),
-  table td:nth-child(n+5) { display: none; }
+  /* Don't hide columns on mobile — the .cal-table-scroll wrapper provides
+     horizontal scroll, so Cost/Tokens/Events stay reachable instead of being
+     silently dropped. */
   aside { display: none !important; }
   header {
     grid-template-columns: 1fr !important;
@@ -899,16 +898,21 @@ p, h1, h2, h3 { text-wrap: pretty; }
   .cal-tweaks-search-label { display: none; }
   .cal-tweaks-panel .cal-tweaks-search {
     padding: 7px 10px;
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 44px;
+    min-height: 44px;
     justify-content: center;
   }
-  .cal-tweaks-panel .cal-tweaks-btn { padding: 6px 10px; min-height: 34px; }
-  .cal-tweaks-panel .cal-tweaks-save { padding: 7px 12px; min-height: 36px; }
+  .cal-tweaks-panel .cal-tweaks-btn { padding: 6px 12px; min-height: 44px; }
+  .cal-tweaks-panel .cal-tweaks-save { padding: 7px 14px; min-height: 44px; }
   .cal-tweaks-panel .cal-tweaks-divider { display: none; }
   /* Reserve space at the bottom of the page so the floating panel never
      covers the trust footer. */
   .cal-receipt-root { padding-bottom: 96px !important; }
+
+  /* Heatmap: scroll horizontally with legible (>=13px) cells instead of
+     squishing 24 hour columns into unreadable slivers. */
+  .cal-heatmap-scroll { overflow-x: auto; }
+  .cal-heatmap-cols { grid-template-columns: repeat(24, 13px) !important; }
 
   /* Palette dialog — bigger input, taller rows for thumbs. */
   .cal-palette { padding-top: 8vh; }
@@ -1395,4 +1399,21 @@ p, h1, h2, h3 { text-wrap: pretty; }
 }
 @media (prefers-reduced-motion: reduce) {
   .cal-skip-link { transition: none; }
+}
+.cal-demo-ribbon {
+  margin: 0;
+  padding: 9px 16px;
+  background: var(--warn-tint);
+  border-bottom: 2px solid var(--warn);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+.cal-demo-ribbon code {
+  font-family: var(--mono);
+  background: var(--warn-tint);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
 }

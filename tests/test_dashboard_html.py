@@ -472,10 +472,10 @@ def test_dashboard_renders_operator_first_sections() -> None:
     ):
         assert f'id="{section_id}"' in html
 
-    assert "Operator brief" in html
+    assert "Operator brief" not in html  # renamed to "Next actions"
     assert "Next actions" in html
     assert "Spend drivers" in html
-    assert "Forward look" in html
+    assert "Forecast" in html  # renamed from "Forward look"
     assert "Recommended changes" in html
     assert "Detected waste" in html
     assert 'id="advisor"' not in html
@@ -499,20 +499,24 @@ def test_dashboard_renders_operator_first_sections() -> None:
         'id="inefficiencies"',  # decisions tier
         'id="overview"',  # trajectory tier
         'id="cost"',  # trajectory tier
+        'id="usage-windows"',  # trajectory tier (promoted from appendix)
         'id="usage-mix"',  # trajectory tier
         'id="forecast"',  # trajectory tier
-        'id="usage-windows"',  # appendix tier (inside <details>)
         'id="evidence"',  # trust tier (always last)
     ]
     positions = [html.index(marker) for marker in section_order]
     assert positions == sorted(positions), f"Tier ordering broken; got positions {positions}"
 
-    # The appendix tier sections must render inside the collapsible
-    # <details class="cal-appendix"> block so the default view stays calm.
+    # Spend windows (7/30/90-day trend) was promoted out of the appendix into
+    # the trajectory tier, so it renders BEFORE the collapsible block.
     appendix_start = html.index('class="cal-appendix"')
-    usage_windows_pos = html.index('id="usage-windows"')
-    assert appendix_start < usage_windows_pos, (
-        "usage-windows must render inside the appendix <details> block"
+    assert html.index('id="usage-windows"') < appendix_start, (
+        "usage-windows should render in the trajectory tier, before the appendix"
+    )
+    # A genuine appendix section (heatmap) still renders inside the <details>
+    # so the default view stays calm.
+    assert appendix_start < html.index('id="heatmap"'), (
+        "appendix sections must render inside the appendix <details> block"
     )
 
 
@@ -541,6 +545,38 @@ def test_new_dashboard_sections_obey_share_safe_redaction() -> None:
     # overhead row is no longer fixed at 2. Assert presence, not position.
     assert "Background agent" in html
     assert "Skill 1" in html
+
+
+def test_demo_render_is_watermarked() -> None:
+    # A --demo dashboard must visibly mark itself as synthetic so a screenshot
+    # of the confident numbers can't be mistaken for real usage.
+    demo_html = render_dashboard(sample_dashboard(), demo=True)
+    assert '<div class="cal-demo-ribbon"' in demo_html
+    assert "DEMO DATA" in demo_html
+    assert 'data-demo="true"' in demo_html
+    # A normal (real-data) render carries no ribbon.
+    real_html = render_dashboard(sample_dashboard())
+    assert '<div class="cal-demo-ribbon"' not in real_html
+    assert 'data-demo="true"' not in real_html
+
+
+def test_interactive_share_safe_file_embeds_no_real_values() -> None:
+    # Regression: the interactive renderer used to force "print-only" even when
+    # the caller asked for privacy=always, embedding real values in CSS-hidden
+    # `cal-real` spans — so the "Safe Share" file was not actually safe to share.
+    # An `always` file (interactive or not) must embed redacted text only.
+    d = sample_dashboard(show_paths=True)
+    html = render_dashboard(d, privacy="always", interactive=True)
+
+    # No real project/session/path labels anywhere in the file...
+    for leak in ("api-server", "frontend-app", "mobile-app", "data-pipeline", "~/work/", "session-018"):
+        assert leak not in html, f"Safe Share leaked real value {leak!r}"
+    # ...and no real-value data spans for the toggle to un-hide (the CSS rule
+    # `.cal-real {{...}}` may still appear; a `<span class="cal-real">` must not).
+    assert '<span class="cal-real">' not in html
+    # Redacted labels are present instead, including in the cmd+K palette index.
+    assert "Project 1" in html
+    assert '"type": "project", "label": "Project ' in html
 
 
 def test_attribution_section_uses_truthful_labels_and_safe_layout() -> None:

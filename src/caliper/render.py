@@ -511,11 +511,22 @@ def write_output(text: str, output: Path | None) -> None:
     if output:
         path = output.expanduser()
         # Create missing parent dirs so `--output some/new/dir/file.json`
-        # works instead of raising FileNotFoundError. Mirrors the CLI's
-        # _write_output_file helper.
-        if path.parent and not path.parent.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        # works instead of raising FileNotFoundError. An unwritable target
+        # (a directory, a read-only path) surfaces a one-line error instead
+        # of a raw traceback. Mirrors the CLI's _write_output_file helper.
+        try:
+            if path.parent and not path.parent.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            import typer
+            from rich.markup import escape
+
+            Console().print(
+                f"[red]error:[/red] could not write {escape(str(path))}: "
+                f"{escape(exc.strerror or str(exc))}"
+            )
+            raise typer.Exit(2) from exc
         return
     import contextlib
 
