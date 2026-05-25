@@ -345,6 +345,29 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 .cal-card-formula > summary::marker { display: none; }
 .cal-card-formula > summary:hover { color: var(--ink-2) !important; }
 .cal-card-formula[open] > summary { color: var(--ink-2) !important; }
+/* Expand/collapse affordance: the disclosure marker is hidden above, so a
+   rotating caret signals that "show the math" is clickable and shows its
+   open state. Rotation is keyed off the [open] attribute (a state selector,
+   not a pointer-hover rule), so the hover-jump guard does not apply. */
+.cal-card-chev {
+  display: inline-block;
+  font-size: 9px;
+  color: var(--ghost);
+  transition: transform 140ms ease-out;
+}
+.cal-card-formula[open] > summary .cal-card-chev { transform: rotate(90deg); }
+/* Glossary affordance: a dotted underline + ⓘ mark flags a term that carries a
+   plain-language definition in its native title/aria-label tooltip. */
+.cal-gloss {
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+.cal-gloss-mark {
+  margin-left: 2px;
+  font-size: 0.82em;
+  vertical-align: super;
+  color: var(--ghost);
+}
 
 /* Per-insight lineage chip ("based on N events · M sessions · X tokens").
    Only rendered when Insight.evidence_metrics carries those keys. */
@@ -578,6 +601,37 @@ section[id] { scroll-margin-top: 36px; }
     border-radius: var(--r-md);
     justify-content: center;
   }
+  /* Reveal the jump-to-section bar at the top of the content so 17 sections
+     are one tap away instead of a long blind scroll. Not position:sticky: an
+     ancestor (.cal-receipt-main) intentionally sets overflow-x:hidden, which
+     becomes a scroll container and would break sticky-to-viewport — a
+     non-sticky index is the robust choice. (display uses !important so it
+     beats the later, equal-specificity base `display:none`, matching the
+     !important convention the other mobile rules use.) */
+  .cal-mobile-nav {
+    display: flex !important;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin: 0 0 8px;
+    padding: 4px 0 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cal-mobile-nav::-webkit-scrollbar { display: none; }
+  /* WCAG 2.5.5 — interactive controls clear a 44px touch target on phones. */
+  .cal-mobile-nav-tab { min-height: 44px; }
+  .cal-verdict-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .cal-evidence-badge {
+    align-items: center;
+    min-height: 44px;
+  }
+  .cal-card-formula > summary { min-height: 44px; }
+  .cal-secondary-verdict-summary { min-height: 44px; }
 }
 
 /* Mobile viewport: render at 390px wide in a phone-shaped frame */
@@ -1138,9 +1192,41 @@ body[data-interactive="true"] .cal-terminal-main {
   gap: 40px;
   margin-top: var(--sp-m);
 }
+/* Secondary verdict — when a billboard owns the fold, the multi-finding
+   verdict strip is demoted into this collapsed disclosure. Mirrors the
+   appendix summary pattern. */
+.cal-secondary-verdict { margin: 0; }
+.cal-secondary-verdict-summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--mute);
+  text-transform: uppercase;
+  font-weight: 600;
+  user-select: none;
+  padding: 4px 0;
+}
+.cal-secondary-verdict-summary::marker,
+.cal-secondary-verdict-summary::-webkit-details-marker { display: none; }
+.cal-secondary-verdict-summary:hover { color: var(--ink-2); }
+.cal-secondary-verdict-chev {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--ghost);
+  transition: transform 140ms ease-out;
+  width: 8px;
+}
+.cal-secondary-verdict[open] .cal-secondary-verdict-chev { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) {
   .cal-appendix,
-  .cal-appendix-chev { transition: none; }
+  .cal-appendix-chev,
+  .cal-card-chev,
+  .cal-secondary-verdict-chev { transition: none; }
 }
 
 /* Canonical severity token — one shape per level. Pair the colour with
@@ -1290,6 +1376,36 @@ body[data-interactive="true"] .cal-terminal-main {
   min-width: 0;
   overflow-wrap: break-word;
 }
+/* Mobile jump-to-section nav — hidden by default; revealed inside the
+   <=720px media query (the desktop right-rail TOC is hidden there). Tabs are
+   plain anchors carrying data-toc-target, so the scroll-spy observer marks the
+   active one with aria-current="location" — no extra JS state. */
+.cal-mobile-nav { display: none; }
+.cal-mobile-nav-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.cal-mobile-nav-tab:hover { color: var(--ink-2); border-color: var(--border-strong); }
+.cal-mobile-nav-tab[aria-current="location"] {
+  color: var(--accent);
+  border-color: var(--accent-tint-2);
+  background: var(--accent-tint);
+}
+.cal-mobile-nav-num { color: var(--ghost); }
+.cal-mobile-nav-tab[aria-current="location"] .cal-mobile-nav-num { color: var(--accent); }
 /* Compact desktop — keep the TOC but narrow it slightly. */
 @media (max-width: 1380px) and (min-width: 1100px) {
   .cal-receipt-body {
@@ -1308,6 +1424,10 @@ body[data-interactive="true"] .cal-terminal-main {
 }
 /* Tablet — softer padding so content fills the page without crowding. */
 @media (max-width: 900px) and (min-width: 721px) {
+  /* Close the 721–900px gap left by the <=720px overflow guard so a wide
+     table never nudges the page into a few px of horizontal scroll. */
+  body { overflow-x: hidden; }
+  .cal-receipt-main { overflow-x: hidden; }
   .cal-receipt-root { padding: 28px 24px 64px; }
   .cal-receipt-main { gap: 28px; }
   .cal-anomaly-row,
@@ -1508,7 +1628,6 @@ body[data-interactive="true"] .cal-terminal-main {
   padding: 1px 5px;
   border-radius: var(--r-sm);
 }
-
 """
 
 
@@ -2494,6 +2613,7 @@ def _stat_card(
             "font-size:10px;letter-spacing:0;color:var(--ghost);"
             "user-select:none;display:inline-flex;align-items:center;gap:4px;"
             'outline:none" aria-label="Show the formula for this KPI">'
+            '<span class="cal-card-chev" aria-hidden="true">▸</span>'
             '<span aria-hidden="true" style="display:inline-block;width:11px;height:11px;'
             "border:1px solid var(--border-strong);border-radius:50%;text-align:center;"
             'line-height:9px;font-size:9px;color:var(--mute)">?</span>'
@@ -2536,6 +2656,26 @@ def _pill(content: str, *, tone: str = "default", mono: bool = False) -> str:
         f"border-radius:3px;font-size:11px;font-weight:500;color:{color};"
         f"background:var(--panel-2);border:1px solid var(--border);font-family:{font};"
         f'white-space:nowrap">{content}</span>'
+    )
+
+
+def _gloss(term: str, definition: str) -> str:
+    """Wrap a jargon term with an on-hover/focus definition.
+
+    Uses the native ``title`` tooltip plus an ``aria-label`` (so pointer hover,
+    keyboard focus, and screen readers all reach the definition) and a dotted
+    underline + ⓘ mark as the visible affordance. Deliberately no CSS popover:
+    several of these terms live inside the table scroll containers
+    (``overflow-x:auto``), which would clip an absolutely-positioned tooltip —
+    the native ``title`` is painted above everything instead. ``term`` and
+    ``definition`` are both escaped.
+    """
+    safe_def = _esc(definition)
+    return (
+        '<span class="cal-gloss" tabindex="0" role="note" '
+        f'title="{safe_def}" aria-label="{_esc(term)}: {safe_def}">'
+        f"{_esc(term)}"
+        '<span class="cal-gloss-mark" aria-hidden="true">ⓘ</span></span>'
     )
 
 
@@ -2907,6 +3047,36 @@ def _verdict_strip(d: Dashboard, rhythm: str) -> str:
         "</div>"
         f'<div style="display:flex;gap:8px;flex-wrap:wrap">{"".join(chips_html)}</div>'
         "</div>"
+    )
+
+
+def _verdict_block(d: Dashboard, rhythm: str, *, margin: str = "margin-top:18px") -> str:
+    """Place the multi-finding verdict strip in the summary band.
+
+    When a billboard is present it owns the first viewport (single headline,
+    Krug billboard test); the verdict strip — which repeats the verdict plus up
+    to four finding chips — is demoted into a collapsed disclosure so it stops
+    competing for the fold. Without a billboard (legacy payloads) the strip
+    renders inline as before. ``margin`` matches the host layout's spacing
+    convention (receipt uses ``margin-top``; terminal uses ``margin-bottom``).
+    """
+    eb = d.executive_brief
+    if eb is None or not eb.findings:
+        return ""
+    strip = _verdict_strip(d, rhythm)
+    if not strip:
+        return ""
+    if d.billboard is None:
+        return f'<div style="{margin}">{strip}</div>'
+    shown = len(list(eb.findings)[:4])
+    return (
+        f'<details class="cal-secondary-verdict" style="{margin}">'
+        '<summary class="cal-secondary-verdict-summary">'
+        f"More signals ({shown})"
+        '<span class="cal-secondary-verdict-chev" aria-hidden="true">▸</span>'
+        "</summary>"
+        f'<div style="margin-top:12px">{strip}</div>'
+        "</details>"
     )
 
 
@@ -3392,7 +3562,13 @@ def _section_outlook(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             '<div style="background:var(--panel);border:1px solid var(--border);'
             'border-radius:var(--r-md);padding:14px">'
             '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px">'
-            '<span style="font-size:12px;color:var(--ink);font-weight:600">Cost-weighted rhythm</span>'
+            '<span style="font-size:12px;color:var(--ink);font-weight:600">'
+            + _gloss(
+                "Cost-weighted rhythm",
+                "When your spend happens across the day, weighted by cost — "
+                "the peak hour and off-peak share, in your local time.",
+            )
+            + "</span>"
             f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">peak {s.peak_hour:02d}:00 · off-peak {fmt_pct(s.off_peak_share, 0)}</span>'
             "</div>"
             f"{_hour_bars(s.by_hour_cost_usd)}"
@@ -3475,7 +3651,20 @@ def _section_attribution(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             ]
             for label, count in t.sources
         ]
-        panels.append(_small_table(["Tier source", "Events", "Share"], rows))
+        panels.append(
+            _small_table(
+                [
+                    _gloss(
+                        "Tier source",
+                        "Which signal set the model's pricing tier — logged in "
+                        "the event, read from config, or assumed by default.",
+                    ),
+                    "Events",
+                    "Share",
+                ],
+                rows,
+            )
+        )
     if d.long_context_histogram:
         h = d.long_context_histogram
         labels = [fmt_tokens(edge) for edge in h.bins]
@@ -3501,7 +3690,21 @@ def _section_attribution(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             ]
             for row in d.cohort_deltas
         ]
-        panels.append(_small_table(["Cohort", "Current", "Previous", "Delta"], rows))
+        panels.append(
+            _small_table(
+                [
+                    _gloss(
+                        "Cohort",
+                        "A peer group of comparable sessions used as the "
+                        "baseline for this comparison.",
+                    ),
+                    "Current",
+                    "Previous",
+                    _gloss("Delta", "Change versus the previous window."),
+                ],
+                rows,
+            )
+        )
     # Each attribution table has 3–4 columns. At 300px the tables were
     # squeezed and the Evidence / Delta columns clipped. 380px gives every
     # column room to breathe; the grid still fits two-up at ~800px main
@@ -4121,7 +4324,13 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             f'font-weight:600;white-space:nowrap">+{_esc(impact)}</span>'
             f"{_pill(_esc(a.evidence_status), tone=evidence_tone)}"
             f'<span style="font-size:11px;color:var(--mute);font-family:var(--mono);'
-            f'white-space:nowrap">detector {_esc(sigma_label)}</span>'
+            'white-space:nowrap">'
+            + _gloss(
+                f"detector {sigma_label}",
+                "σ (sigma): how many standard deviations above your normal "
+                "daily spend this day sits — higher means more unusual.",
+            )
+            + "</span>"
             "</div>"
             "</div>"
         )
@@ -4285,7 +4494,13 @@ def _section_forecast(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             '<div style="background:var(--panel);border:1px solid var(--border);'
             'border-radius:var(--r-md);padding:14px">'
             '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px">'
-            '<span style="font-size:12px;color:var(--ink);font-weight:600">Cost-weighted rhythm</span>'
+            '<span style="font-size:12px;color:var(--ink);font-weight:600">'
+            + _gloss(
+                "Cost-weighted rhythm",
+                "When your spend happens across the day, weighted by cost — "
+                "the peak hour and off-peak share, in your local time.",
+            )
+            + "</span>"
             f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">peak {s.peak_hour:02d}:00 · off-peak {fmt_pct(s.off_peak_share, 0)}</span>'
             "</div>"
             f"{_hour_bars(s.by_hour_cost_usd)}"
@@ -4774,6 +4989,29 @@ def _render_receipt_toc(d: Dashboard) -> str:
     )
 
 
+def _render_mobile_nav(d: Dashboard) -> str:
+    """Sticky horizontal jump-to-section bar shown only on narrow screens.
+
+    The desktop right-rail TOC is hidden below 720px, which previously left a
+    17-section page with no wayfinding — just a long scroll. This bar reuses the
+    same section list and ``data-toc-target`` anchors, so the existing scroll-spy
+    observer highlights the active tab (``aria-current="location"``) with no
+    extra JS state. Hidden on desktop via CSS; with JS off it stays a plain row
+    of anchor links that still scroll.
+    """
+    tiered = _sections_by_tier(d)
+    sids = [sid for tier in _TIER_ORDER for sid in tiered[tier]]
+    if not sids:
+        return ""
+    tabs = "".join(
+        f'<a class="cal-mobile-nav-tab" href="#{sid}" data-toc-target="{sid}">'
+        f'<span class="cal-mobile-nav-num">{_display_num(sid)}</span> '
+        f"{_esc(_SECTION_TITLES[sid])}</a>"
+        for sid in sids
+    )
+    return f'<nav class="cal-mobile-nav" aria-label="Jump to section">{tabs}</nav>'
+
+
 # ----------------------------------------------------------------------------
 # Severity token — single canonical chip used across the redesign
 # (Von Restorff: critical = filled + 1-shot pulse; everything else neutral)
@@ -5066,11 +5304,7 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
     # payloads that omit the billboard.
     hero_inner = "" if d.billboard is not None else _hero_verdict_strip(d, rhythm)
     hero_html = f'<div style="margin-top:18px">{hero_inner}</div>' if hero_inner else ""
-    verdict_html = (
-        f'<div style="margin-top:18px">{_verdict_strip(d, rhythm)}</div>'
-        if d.executive_brief and d.executive_brief.findings
-        else ""
-    )
+    verdict_html = _verdict_block(d, rhythm)
     # The above-the-fold banner/billboard/verdict carry the primary CTA and
     # verdict, so they must sit inside a landmark (otherwise screen-reader
     # landmark navigation skips the most important content).
@@ -5107,7 +5341,9 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
             f'<div class="cal-appendix-body">{appendix_sections_html}</div>'
             "</details>"
         )
-    main_html = decisions_html + trajectory_html + appendix_html + trust_html
+    main_html = (
+        _render_mobile_nav(d) + decisions_html + trajectory_html + appendix_html + trust_html
+    )
     toc_html = _render_receipt_toc(d)
     body_html = (
         '<div class="cal-receipt-body">'
@@ -5276,11 +5512,7 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
     )
     hero_inner = "" if d.billboard is not None else _hero_verdict_strip(d, rhythm)
     hero_html = f'<div style="margin-bottom:22px">{hero_inner}</div>' if hero_inner else ""
-    verdict_html = (
-        f'<div style="margin-bottom:22px">{_verdict_strip(d, rhythm)}</div>'
-        if d.executive_brief and d.executive_brief.findings
-        else ""
-    )
+    verdict_html = _verdict_block(d, rhythm, margin="margin-bottom:22px")
     tiered = _sections_by_tier(d)
     decisions_html = "".join(
         _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["decisions"]
@@ -5320,6 +5552,7 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         f"{billboard_html}"
         f"{hero_html}"
         f"{verdict_html}"
+        f"{_render_mobile_nav(d)}"
         f'<div style="display:grid;gap:28px">{sections}</div>'
         f"{_caliper_footer(d)}"
         "</main></div></div>"
@@ -5401,7 +5634,10 @@ _INTERACTIVE_SCRIPT = """
   // .cal-toc-link. The TOC itself is sticky in CSS; this only updates
   // which link gets the highlighted state. Falls back gracefully when no
   // TOC is present (e.g., terminal rhythm).
-  var tocLinks = document.querySelectorAll('.cal-toc-link[data-toc-target]');
+  // Both the desktop right-rail TOC and the mobile jump-nav carry
+  // data-toc-target, so the one observer drives highlighting for whichever is
+  // visible at the current breakpoint.
+  var tocLinks = document.querySelectorAll('[data-toc-target]');
   if (tocLinks.length && 'IntersectionObserver' in window) {
     var tocMap = {};
     for (var i = 0; i < tocLinks.length; i++) {
@@ -5416,6 +5652,12 @@ _INTERACTIVE_SCRIPT = """
       for (var j = 0; j < tocLinks.length; j++) {
         if (tocLinks[j].dataset.tocTarget === id) {
           tocLinks[j].setAttribute('aria-current', 'location');
+          // Keep the active tab visible in the horizontally-scrolling mobile
+          // nav without yanking the whole page.
+          if (tocLinks[j].classList.contains('cal-mobile-nav-tab') &&
+              tocLinks[j].scrollIntoView) {
+            tocLinks[j].scrollIntoView({ block: 'nearest', inline: 'center' });
+          }
         } else {
           tocLinks[j].removeAttribute('aria-current');
         }

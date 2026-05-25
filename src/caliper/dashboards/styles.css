@@ -268,6 +268,29 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 .cal-card-formula > summary::marker { display: none; }
 .cal-card-formula > summary:hover { color: var(--ink-2) !important; }
 .cal-card-formula[open] > summary { color: var(--ink-2) !important; }
+/* Expand/collapse affordance: the disclosure marker is hidden above, so a
+   rotating caret signals that "show the math" is clickable and shows its
+   open state. Rotation is keyed off the [open] attribute (a state selector,
+   not a pointer-hover rule), so the hover-jump guard does not apply. */
+.cal-card-chev {
+  display: inline-block;
+  font-size: 9px;
+  color: var(--ghost);
+  transition: transform 140ms ease-out;
+}
+.cal-card-formula[open] > summary .cal-card-chev { transform: rotate(90deg); }
+/* Glossary affordance: a dotted underline + ⓘ mark flags a term that carries a
+   plain-language definition in its native title/aria-label tooltip. */
+.cal-gloss {
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+.cal-gloss-mark {
+  margin-left: 2px;
+  font-size: 0.82em;
+  vertical-align: super;
+  color: var(--ghost);
+}
 
 /* Per-insight lineage chip ("based on N events · M sessions · X tokens").
    Only rendered when Insight.evidence_metrics carries those keys. */
@@ -501,6 +524,37 @@ section[id] { scroll-margin-top: 36px; }
     border-radius: var(--r-md);
     justify-content: center;
   }
+  /* Reveal the jump-to-section bar at the top of the content so 17 sections
+     are one tap away instead of a long blind scroll. Not position:sticky: an
+     ancestor (.cal-receipt-main) intentionally sets overflow-x:hidden, which
+     becomes a scroll container and would break sticky-to-viewport — a
+     non-sticky index is the robust choice. (display uses !important so it
+     beats the later, equal-specificity base `display:none`, matching the
+     !important convention the other mobile rules use.) */
+  .cal-mobile-nav {
+    display: flex !important;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin: 0 0 8px;
+    padding: 4px 0 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cal-mobile-nav::-webkit-scrollbar { display: none; }
+  /* WCAG 2.5.5 — interactive controls clear a 44px touch target on phones. */
+  .cal-mobile-nav-tab { min-height: 44px; }
+  .cal-verdict-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .cal-evidence-badge {
+    align-items: center;
+    min-height: 44px;
+  }
+  .cal-card-formula > summary { min-height: 44px; }
+  .cal-secondary-verdict-summary { min-height: 44px; }
 }
 
 /* Mobile viewport: render at 390px wide in a phone-shaped frame */
@@ -1061,9 +1115,41 @@ body[data-interactive="true"] .cal-terminal-main {
   gap: 40px;
   margin-top: var(--sp-m);
 }
+/* Secondary verdict — when a billboard owns the fold, the multi-finding
+   verdict strip is demoted into this collapsed disclosure. Mirrors the
+   appendix summary pattern. */
+.cal-secondary-verdict { margin: 0; }
+.cal-secondary-verdict-summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--mute);
+  text-transform: uppercase;
+  font-weight: 600;
+  user-select: none;
+  padding: 4px 0;
+}
+.cal-secondary-verdict-summary::marker,
+.cal-secondary-verdict-summary::-webkit-details-marker { display: none; }
+.cal-secondary-verdict-summary:hover { color: var(--ink-2); }
+.cal-secondary-verdict-chev {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--ghost);
+  transition: transform 140ms ease-out;
+  width: 8px;
+}
+.cal-secondary-verdict[open] .cal-secondary-verdict-chev { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) {
   .cal-appendix,
-  .cal-appendix-chev { transition: none; }
+  .cal-appendix-chev,
+  .cal-card-chev,
+  .cal-secondary-verdict-chev { transition: none; }
 }
 
 /* Canonical severity token — one shape per level. Pair the colour with
@@ -1213,6 +1299,36 @@ body[data-interactive="true"] .cal-terminal-main {
   min-width: 0;
   overflow-wrap: break-word;
 }
+/* Mobile jump-to-section nav — hidden by default; revealed inside the
+   <=720px media query (the desktop right-rail TOC is hidden there). Tabs are
+   plain anchors carrying data-toc-target, so the scroll-spy observer marks the
+   active one with aria-current="location" — no extra JS state. */
+.cal-mobile-nav { display: none; }
+.cal-mobile-nav-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.cal-mobile-nav-tab:hover { color: var(--ink-2); border-color: var(--border-strong); }
+.cal-mobile-nav-tab[aria-current="location"] {
+  color: var(--accent);
+  border-color: var(--accent-tint-2);
+  background: var(--accent-tint);
+}
+.cal-mobile-nav-num { color: var(--ghost); }
+.cal-mobile-nav-tab[aria-current="location"] .cal-mobile-nav-num { color: var(--accent); }
 /* Compact desktop — keep the TOC but narrow it slightly. */
 @media (max-width: 1380px) and (min-width: 1100px) {
   .cal-receipt-body {
@@ -1231,6 +1347,10 @@ body[data-interactive="true"] .cal-terminal-main {
 }
 /* Tablet — softer padding so content fills the page without crowding. */
 @media (max-width: 900px) and (min-width: 721px) {
+  /* Close the 721–900px gap left by the <=720px overflow guard so a wide
+     table never nudges the page into a few px of horizontal scroll. */
+  body { overflow-x: hidden; }
+  .cal-receipt-main { overflow-x: hidden; }
   .cal-receipt-root { padding: 28px 24px 64px; }
   .cal-receipt-main { gap: 28px; }
   .cal-anomaly-row,
