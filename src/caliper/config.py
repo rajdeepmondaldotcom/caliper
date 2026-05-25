@@ -636,7 +636,8 @@ def _vendors(loaded: dict, values: list[str] | tuple[str, ...] | None) -> tuple[
         raw = tuple(str(item).strip() for item in configured)
     else:
         raw = ("all",)
-    cleaned = tuple(item for item in raw if item)
+    aliases = {"codex": "openai-codex"}
+    cleaned = tuple(aliases.get(item, item) for item in raw if item)
     selected = cleaned or ("all",)
     from caliper.vendors import VENDORS
 

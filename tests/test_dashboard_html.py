@@ -672,9 +672,9 @@ def test_hero_verdict_renders_period_cost_trend_and_fixable() -> None:
     # Trend chip: +8.2% with the prior-window label.
     assert "+8.2%" in html_text
     assert "vs prior" in html_text
-    # Fixable sum: top-3 advisor recs = $96.40 + $68.80 + $19.00 = $184.20.
+    # Fixable sum: top-3 advisor recs = $96.40 + $61.24 + $19.00 = $176.64.
     assert "FIXABLE" in html_text
-    assert "$184" in html_text
+    assert "$176.64" in html_text
     # The top action title appears verbatim.
     assert "Move low-output fast tier calls to standard" in html_text
     # The CLI command for the top action is shown (copy-paste path).

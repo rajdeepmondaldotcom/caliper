@@ -552,25 +552,25 @@ def test_rates_catalog_formats_filters_and_allow_network(monkeypatch, tmp_path) 
         assert result.exit_code == 0, result.output
         assert marker in result.output
 
-    live_catalog = PricingCatalog(
-        fetched_at=dt.datetime.now(tz=dt.UTC),
-        source="unit",
-        models={
-            "live-model": CatalogModel(
-                name="live-model",
-                provider="unit",
-                api_rates=Rates("1", "0.1", "2"),
-                source="unit",
-            )
-        },
-    )
     monkeypatch.setattr(
         "caliper.cli.load_cached_catalog",
         lambda: PricingCatalog(fetched_at=None, source="cache", models={}),
     )
     monkeypatch.setattr(
-        "caliper.cli.load_rate_card",
-        lambda _options: SimpleNamespace(pricing_catalog=live_catalog),
+        "caliper.cli.fetch_pricing_catalog",
+        lambda _source: {
+            "schema_version": 1,
+            "source": "unit",
+            "fetched_at": dt.datetime.now(tz=dt.UTC).isoformat(),
+            "models": [
+                {
+                    "name": "live-model",
+                    "provider": "unit",
+                    "source": "unit",
+                    "api": {"input": "1", "cached_input": "0.1", "output": "2"},
+                }
+            ],
+        },
     )
     result = runner.invoke(app, ["rates", "catalog", "--allow-network", "--format", "json"])
     assert result.exit_code == 0, result.output

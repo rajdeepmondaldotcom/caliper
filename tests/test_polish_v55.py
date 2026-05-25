@@ -243,3 +243,41 @@ def test_mobile_tap_targets_meet_44px() -> None:
 
     assert "min-height: 44px" in INLINE_STYLES
     assert ".cal-mobile-nav-tab { min-height: 44px; }" in INLINE_STYLES
+
+
+def test_rates_show_json_redacts_catalog_path() -> None:
+    result = runner.invoke(app, ["rates", "show", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["catalog"]["path"] == "<redacted-path>"
+    assert "/Users/" not in result.output
+    assert "Embedded rate card" not in result.output
+
+
+def test_empty_dashboard_quality_is_not_excellent(tmp_path) -> None:
+    from caliper.config import build_options
+    from caliper.dashboards.adapter import build_handoff_dashboard
+
+    options = build_options(
+        days=1,
+        session_root=tmp_path / "sessions",
+        state_db=tmp_path / "state.sqlite",
+        codex_config=tmp_path / "config.toml",
+    )
+    dashboard = build_handoff_dashboard(
+        LoadResult(
+            events=[],
+            duplicates=0,
+            tier_sources={},
+            plan_types=set(),
+            rate_limit_samples=[],
+            warnings=[],
+        ),
+        options,
+        with_deltas=False,
+    )
+
+    assert dashboard.quality_score is not None
+    assert dashboard.quality_score.grade == "No evidence yet"
+    assert dashboard.quality_score.score == 0

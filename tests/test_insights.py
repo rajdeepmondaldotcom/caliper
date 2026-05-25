@@ -179,7 +179,7 @@ def test_insights_markdown_renders_actions(tmp_path) -> None:
     assert "caliper project" in result.output
 
 
-def test_build_insights_returns_empty_for_empty_usage(tmp_path) -> None:
+def test_build_insights_marks_empty_usage_as_unsupported(tmp_path) -> None:
     options = build_options(
         session_root=tmp_path / "missing-sessions",
         state_db=tmp_path / "missing-state.sqlite",
@@ -194,7 +194,14 @@ def test_build_insights_returns_empty_for_empty_usage(tmp_path) -> None:
         warnings=[],
     )
 
-    assert build_insights(result, options) == []
+    insights = build_insights(result, options)
+
+    assert len(insights) == 1
+    accuracy = insights[0]
+    assert accuracy.title == "Accuracy is unsupported"
+    assert accuracy.severity == "fail"
+    assert accuracy.scope == "doctor"
+    assert "no model evidence" in accuracy.detail
 
 
 def test_build_insights_from_matches_wrapper(tmp_path) -> None:

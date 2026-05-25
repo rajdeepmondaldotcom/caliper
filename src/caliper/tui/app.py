@@ -31,6 +31,7 @@ from caliper.tui.messages import (
     LoadSucceeded,
     WorkerCancelled,
 )
+from caliper.tui.palette import CaliperCommands
 from caliper.tui.progress import TextualParseProgress
 from caliper.tui.screens.budgets import BudgetsScreen
 from caliper.tui.screens.doctor import DoctorScreen
@@ -62,6 +63,7 @@ class CaliperApp(App):
     CSS_PATH = [
         Path(__file__).parent / "tcss" / "base.tcss",
     ]
+    COMMANDS = {*App.COMMANDS, CaliperCommands}
     TITLE = "Caliper"
 
     BINDINGS = [
@@ -135,6 +137,8 @@ class CaliperApp(App):
         self._tui_config = tui_config or TuiConfig()
         if demo:
             options = materialize_demo(options)
+        if not self._tui_config.redact:
+            options = replace(options, show_prompts=True, show_paths=True)
         self.snapshot = AppSnapshot(
             options=options,
             scope=default_scope(dt.datetime.now(tz=local_timezone())),

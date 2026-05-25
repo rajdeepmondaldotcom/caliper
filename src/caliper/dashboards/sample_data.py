@@ -685,10 +685,11 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 2,
                 "Review budget posture",
                 "monthly cost: $1,754 of $2,250",
-                "Open the Impact section and decide whether the configured budget needs action.",
+                "Open the Budget burn section and decide whether the configured budget "
+                "needs action.",
                 "78%",
                 "warn",
-                "impact",
+                "budgets",
                 "finance",
             ),
             DecisionQueueItem(

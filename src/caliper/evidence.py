@@ -80,7 +80,10 @@ def usage_evidence(result: LoadResult) -> EvidenceDimension:
         reasons.append(f"{unsupported:,} discovered files have no supported usage records")
     if sources.get("unknown"):
         reasons.append(f"{sources['unknown']:,} events have unknown usage provenance")
-    if unsupported and not events:
+    if not events and not unsupported:
+        reasons.append("no usage events loaded for the selected window")
+        grade = GRADE_UNSUPPORTED
+    elif unsupported and not events:
         grade = GRADE_UNSUPPORTED
     elif unsupported:
         grade = GRADE_PARTIAL
@@ -93,6 +96,13 @@ def usage_evidence(result: LoadResult) -> EvidenceDimension:
 
 def model_evidence(total: Aggregate) -> EvidenceDimension:
     reasons: list[str] = []
+    if total.totals.events == 0:
+        return EvidenceDimension(
+            "model",
+            GRADE_UNSUPPORTED,
+            0,
+            ("no model evidence until usage events are loaded",),
+        )
     if total.unknown_model_events:
         reasons.append(f"{total.unknown_model_events:,} events used models outside the rate card")
     if total.fallback_model_events:
@@ -107,6 +117,13 @@ def model_evidence(total: Aggregate) -> EvidenceDimension:
 
 
 def tier_evidence(total: Aggregate) -> EvidenceDimension:
+    if total.totals.events == 0:
+        return EvidenceDimension(
+            "tier",
+            GRADE_UNSUPPORTED,
+            0,
+            ("no service-tier evidence until usage events are loaded",),
+        )
     if total.unknown_tier_events:
         return EvidenceDimension(
             "tier",
@@ -120,6 +137,13 @@ def tier_evidence(total: Aggregate) -> EvidenceDimension:
 def pricing_evidence(total: Aggregate) -> EvidenceDimension:
     reasons: list[str] = []
     events = total.totals.events
+    if events == 0:
+        return EvidenceDimension(
+            "pricing",
+            GRADE_UNSUPPORTED,
+            0,
+            ("no pricing evidence until usage events are loaded",),
+        )
     priced_events = _priced_cost_events(total)
     unsupported_events = max(events - priced_events, 0)
     if unsupported_events:
@@ -160,6 +184,13 @@ def _priced_cost_events(total: Aggregate) -> int:
 
 def project_evidence(result: LoadResult) -> EvidenceDimension:
     events = len(result.events)
+    if events == 0:
+        return EvidenceDimension(
+            "project",
+            GRADE_UNSUPPORTED,
+            0,
+            ("no project attribution until usage events are loaded",),
+        )
     missing = sum(1 for event in result.events if not event.thread.cwd)
     if missing:
         return EvidenceDimension(
@@ -173,6 +204,13 @@ def project_evidence(result: LoadResult) -> EvidenceDimension:
 
 def git_evidence(result: LoadResult) -> EvidenceDimension:
     events = len(result.events)
+    if events == 0:
+        return EvidenceDimension(
+            "git_attribution",
+            GRADE_UNSUPPORTED,
+            0,
+            ("no git attribution until usage events are loaded",),
+        )
     missing = sum(1 for event in result.events if not event.thread.git_sha)
     if missing == events and events:
         return EvidenceDimension(

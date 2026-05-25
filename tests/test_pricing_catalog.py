@@ -596,6 +596,23 @@ def test_rate_card_from_options_loads_catalog(monkeypatch, tmp_path) -> None:
     assert card.catalog_cards["model-one"].api_rates is not None
 
 
+def test_rate_card_from_options_is_cache_only_even_when_online(monkeypatch) -> None:
+    from caliper.config import build_options
+
+    calls: list[bool] = []
+
+    def load_catalog(**kwargs: object) -> pc.PricingCatalog:
+        calls.append(bool(kwargs["offline"]))
+        return pc.PricingCatalog(fetched_at=None, source="auto", models={})
+
+    monkeypatch.setattr("caliper.pricing.load_pricing_catalog", load_catalog)
+    options = build_options(days=1, pricing_source="auto", offline=False)
+
+    RateCard.from_options(options)
+
+    assert calls == [True]
+
+
 def test_live_catalog_rates_override_embedded_known_models() -> None:
     payload = {
         "schema_version": pc.CATALOG_SCHEMA_VERSION,

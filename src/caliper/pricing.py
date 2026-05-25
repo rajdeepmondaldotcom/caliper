@@ -448,7 +448,11 @@ class RateCard:
         catalog = load_pricing_catalog(
             pricing_source=options.pricing_source,
             ttl_hours=options.pricing_cache_ttl_hours,
-            offline=options.offline,
+            # Report commands must never fetch pricing data as a side effect.
+            # `caliper rates refresh --allow-network` is the only write/fetch
+            # path for the live catalog; reports read the cache or fall back to
+            # the embedded card.
+            offline=True,
         )
         return cls.load(options.rates_file, options.pricing_mode, catalog=catalog)
 

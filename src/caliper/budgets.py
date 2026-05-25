@@ -56,8 +56,9 @@ def evaluate(budgets: list[Budget], usage: dict[str, Any]) -> list[BudgetAlert]:
     """Score each budget against the matching usage value. Missing usage → 0."""
     alerts: list[BudgetAlert] = []
     for budget in budgets:
+        _validate_budget(budget)
         used = float(usage.get(budget.key(), 0.0))
-        used_percent = 0.0 if budget.limit <= 0 else used / budget.limit * 100.0
+        used_percent = used / budget.limit * 100.0
         alerts.append(
             BudgetAlert(
                 budget=budget,
@@ -200,7 +201,7 @@ def _budgets_from_table_entry(key: str, value: object) -> list[Budget]:
 def _nested_budgets(period: str, value: dict) -> list[Budget]:
     warn_at = float(value.get("warn_at", 0.8))
     return [
-        Budget(period=period, metric=metric, limit=float(limit), warn_at=warn_at)
+        _budget(period=period, metric=metric, limit=float(limit), warn_at=warn_at)
         for metric, limit in value.items()
         if metric in VALID_METRICS
     ]
@@ -210,7 +211,7 @@ def _flat_budget(key: str, value: float) -> Budget | None:
     period, metric = _split_flat_key(key)
     if not period or not metric:
         return None
-    return Budget(period=period, metric=metric, limit=float(value))
+    return _budget(period=period, metric=metric, limit=float(value))
 
 
 def _split_flat_key(key: str) -> tuple[str, str]:
@@ -232,4 +233,17 @@ def _budget_from_dict(raw: dict) -> Budget:
         raise ValueError(f"unknown budget period {period!r}; expected {VALID_PERIODS}")
     if metric not in VALID_METRICS:
         raise ValueError(f"unknown budget metric {metric!r}; expected {VALID_METRICS}")
-    return Budget(period=period, metric=metric, limit=limit, warn_at=warn_at)
+    return _budget(period=period, metric=metric, limit=limit, warn_at=warn_at)
+
+
+def _budget(*, period: str, metric: str, limit: float, warn_at: float = 0.8) -> Budget:
+    budget = Budget(period=period, metric=metric, limit=limit, warn_at=warn_at)
+    _validate_budget(budget)
+    return budget
+
+
+def _validate_budget(budget: Budget) -> None:
+    if budget.limit <= 0:
+        raise ValueError(f"budget {budget.key()} limit must be greater than 0")
+    if not 0 < budget.warn_at < 1:
+        raise ValueError(f"budget {budget.key()} warn_at must be greater than 0 and less than 1")

@@ -289,7 +289,11 @@ def _accuracy_insight(result: LoadResult, total) -> Insight | None:
     )
     reasons = [reason for dimension in ordered for reason in dimension.reasons]
     first = ordered[0] if ordered else None
-    scope = SCOPE_DOCTOR if first and first.name in {"usage", "pricing"} else SCOPE_HOME
+    scope = (
+        SCOPE_DOCTOR
+        if total.totals.events == 0 or (first and first.name in {"usage", "pricing"})
+        else SCOPE_HOME
+    )
     detail = _accuracy_detail(grade, total, reasons)
     return Insight(
         severity="warn" if grade in {"estimated", "partial"} else "fail",

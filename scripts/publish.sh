@@ -62,9 +62,9 @@ cat <<EOF
 
   Next steps (run yourself; this script does not commit, tag, push, or upload):
 
-    git add pyproject.toml uv.lock CHANGELOG.md SECURITY.md \\
+    git add pyproject.toml uv.lock README.md CHANGELOG.md SECURITY.md \\
       .github/workflows/release.yml scripts/release-smoke.sh \\
-      scripts/live-release-smoke.sh src/caliper tests
+      scripts/live-release-smoke.sh docs/screenshots src/caliper tests
     git commit -m "chore(release): $VER"
     git push origin main
     git tag -a "v$VER" -m "v$VER"

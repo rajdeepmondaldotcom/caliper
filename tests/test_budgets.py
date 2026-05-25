@@ -47,11 +47,10 @@ def test_evaluate_missing_usage_treats_as_zero() -> None:
     assert alerts[0].severity == SEVERITY_OK
 
 
-def test_zero_limit_produces_zero_percent() -> None:
+def test_zero_limit_is_rejected() -> None:
     budgets = [Budget(period="daily", metric="cost_usd", limit=0.0)]
-    alerts = evaluate(budgets, {"daily.cost_usd": 999.0})
-    assert alerts[0].used_percent == 0.0
-    assert alerts[0].severity == SEVERITY_OK
+    with pytest.raises(ValueError, match="limit must be greater than 0"):
+        evaluate(budgets, {"daily.cost_usd": 999.0})
 
 
 def test_max_severity_picks_worst() -> None:
@@ -98,6 +97,13 @@ def test_parse_items_rejects_unknown_metric() -> None:
     table = {"items": [{"period": "daily", "metric": "minutes", "limit": 10}]}
     with pytest.raises(ValueError):
         parse_budgets_table(table)
+
+
+def test_parse_rejects_non_positive_limit_and_bad_warn_at() -> None:
+    with pytest.raises(ValueError, match="limit must be greater than 0"):
+        parse_budgets_table({"daily_cost_usd": 0})
+    with pytest.raises(ValueError, match="warn_at must be greater than 0 and less than 1"):
+        parse_budgets_table({"daily": {"cost_usd": 10, "warn_at": 1.0}})
 
 
 def test_parse_silently_skips_unknown_flat_keys() -> None:

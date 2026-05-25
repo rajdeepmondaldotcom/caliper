@@ -21,7 +21,7 @@ caliper dashboard
 
 </div>
 
-![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/hero.png)
+![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/hero.png)
 
 <p align="center"><sub>Safe Share mode screenshot: paths, projects, and session labels are redacted while costs, evidence status, and recommendations stay visible.</sub></p>
 
@@ -59,7 +59,7 @@ fold — period, cost, trend, and the top fix Caliper found:
 ```text
 Caliper · Last 14 days · $1,243 · trend +8.2% · top fix: Move low-output fast
                                                 tier calls to standard ($96.40)
-Fixable: $184.20 across 3 recommendations. Inspect with `caliper advise --strict`.
+Fixable: $176.64 across 3 recommendations. Inspect with `caliper advise --strict`.
 Theme: dark · local-only · re-render: caliper dashboard --open
 ```
 
@@ -98,15 +98,15 @@ show the real report layout without exposing local paths or session identities.
 
 | Next actions | Spend drivers |
 |---|---|
-| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/usage-mix.png"> |
+| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/usage-mix.png"> |
 
 | Anomalies | Savings opportunities |
 |---|---|
-| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/inefficiencies.png"> |
+| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/inefficiencies.png"> |
 
 | Session drilldown | Attribution and evidence |
 |---|---|
-| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/attribution.png"> |
+| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/attribution.png"> |
 
 ## How it's different
 
@@ -174,6 +174,8 @@ silently treated as exact.
 
 The privacy invariant is enforced in CI. The generated HTML contains zero
 external resources, zero `<script src>`, zero `fetch`/`XMLHttpRequest`/`import()`.
+Interactive dashboards use one inline UI script and one JSON data block; pass
+`--no-interactive` for script-free HTML.
 You can verify it on your own file:
 
 ```bash
@@ -261,7 +263,7 @@ python -m venv .venv && source .venv/bin/activate
 python -m pip install caliper-ai
 
 # uvx one-off (use --from to avoid name-collision resolution)
-uvx --isolated --from caliper-ai caliper dashboard
+uvx --isolated --from caliper-ai caliper dashboard --demo --open
 ```
 
 If `uv` can't see a just-published version (stale PyPI index or resolver

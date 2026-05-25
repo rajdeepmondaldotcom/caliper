@@ -127,7 +127,7 @@ from caliper.predict import (
     forecast_rate_limits,
     total_outlook,
 )
-from caliper.pricing import RateCard, load_rate_card, model_vendor
+from caliper.pricing import MODELS_BY_NAME, RateCard, load_rate_card, model_vendor, normalize_model
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -2120,12 +2120,13 @@ def _build_long_context_histogram(
         cost, _, _ = event_cost(rate_card, event)
         cost_value = float(cost.cost_usd)
         total_cost += cost_value
-        card = rate_card.catalog_cards.get(event.model)
+        normalized_model = normalize_model(event.model)
+        card = rate_card.catalog_cards.get(normalized_model) or MODELS_BY_NAME.get(normalized_model)
         rule = getattr(card, "long_context", None) if card else None
-        model_threshold = getattr(rule, "input_tokens", 0) if rule else 0
+        model_threshold = getattr(rule, "threshold", 0) if rule else 0
         if model_threshold:
             threshold = max(threshold, int(model_threshold))
-        if model_threshold and inp >= model_threshold:
+        if model_threshold and inp > model_threshold:
             events_above += 1
             cost_above += cost_value
     total_events = sum(counts)
@@ -2633,6 +2634,20 @@ def _build_quality_score(
     total: Aggregate,
     evidence: list[EvidenceRow],
 ) -> QualityScore:
+    if total.totals.events == 0:
+        return QualityScore(
+            score=0,
+            grade="No evidence yet",
+            signals=[
+                QualitySignal(
+                    label="Selected window",
+                    status="unsupported",
+                    note="No usage events were loaded; run `caliper doctor` or try demo data.",
+                    tone="neutral",
+                )
+            ],
+            tone="neutral",
+        )
     status_scores = {"exact": 100, "estimated": 78, "partial": 55, "unsupported": 30}
     tone_by_status = {
         "exact": "good",

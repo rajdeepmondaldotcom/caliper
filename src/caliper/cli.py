@@ -103,6 +103,7 @@ from caliper.pricing import (
     resolve_hypothetical_model_alias,
 )
 from caliper.pricing_catalog import (
+    catalog_from_payload,
     catalog_model_records,
     fetch_pricing_catalog,
     load_cached_catalog,
@@ -248,7 +249,7 @@ PricingSourceOpt = Annotated[
         "--rates-from",
         "--pricing-catalog-source",
         "--pricing-source",
-        help="Pricing source. auto, embedded, litellm, openrouter, portkey, codex.",
+        help="Pricing source. auto, embedded, litellm, or portkey.",
     ),
 ]
 PricingCacheTtlOpt = Annotated[
@@ -345,7 +346,10 @@ OfflineOpt = Annotated[
     typer.Option(
         "--offline/--online",
         "--pricing-offline-only/--allow-pricing-network",
-        help="Network use is opt-in. online only affects rates refresh.",
+        help=(
+            "Reports are cache-only. Network fetching is only performed by "
+            "`caliper rates refresh --allow-network`."
+        ),
     ),
 ]
 CompactOpt = Annotated[
@@ -488,7 +492,9 @@ VendorOpt = Annotated[
         "--only",
         "--vendor",
         "--include-vendor",
-        help="Filter by tool vendor (codex, claude-code, cursor, aider). Repeatable.",
+        help=(
+            "Filter by tool vendor (openai-codex/codex, claude-code, cursor, aider). Repeatable."
+        ),
     ),
 ]
 ParseWorkersOpt = Annotated[
@@ -1128,6 +1134,10 @@ def main(
     classic: ClassicOpt = False,
 ) -> None:
     if ctx.invoked_subcommand is None:
+        if output_format == "table" and output is None and not quiet:
+            typer.echo(
+                "Caliper defaults to `overview`; run `caliper dashboard` for the browser report."
+            )
         _run_overview(locals())
 
 
@@ -2220,6 +2230,15 @@ def _print_dashboard_verdict(
     typer.echo(f"Theme: {theme_label} · {safe_text} · re-render: caliper dashboard --open")
 
 
+def _print_dashboard_empty_hint(payload: Any) -> None:
+    totals = getattr(payload, "totals", None)
+    if totals is None or getattr(totals, "events", 0) != 0:
+        return
+    typer.echo("No AI coding usage logs found in the dashboard window.")
+    typer.echo("Next: run `caliper doctor` to inspect local setup.")
+    typer.echo("Demo: run `caliper dashboard --demo --open` to explore sample data.")
+
+
 @app.command()
 def dashboard(
     output: Annotated[
@@ -2377,6 +2396,13 @@ def dashboard(
     share_safe_set, share_safe_value = _command_line_value("share_safe")
     if share_safe_set:
         share_safe = bool(share_safe_value)
+    inherited_io = _with_parent_options({"output": output, "output_format": "table"})
+    if output is None:
+        output = inherited_io.get("output")
+    if inherited_io.get("output_format") != "table":
+        raise _exit_error(
+            "`caliper dashboard` does not support --format; use --stdout or --output."
+        )
 
     if init_defaults:
         try:
@@ -2580,6 +2606,7 @@ def dashboard(
     # opening the file. Skipped when piping HTML or running quiet.
     if not quiet and not pipe_to_stdout:
         _print_dashboard_verdict(payload, share_safe=effective_share_safe, theme=theme)
+        _print_dashboard_empty_hint(payload)
     # Decide whether to auto-open the file. Explicit flags win; otherwise
     # the user's [dashboard].open_after preference applies only when we're
     # writing to the *derived* path (because they didn't pick their own).
@@ -2761,7 +2788,9 @@ def doctor(
     config: ConfigOpt = None,
     rates_file: RatesFileOpt = None,
     vendors: VendorOpt = None,
+    no_parse_cache: NoParseCacheOpt = False,
     show_paths: ShowPathsOpt = False,
+    output: OutputOpt = None,
     output_format: Annotated[
         str,
         typer.Option("--output-format", "--format", "-f", help="table, json, csv, or markdown."),
@@ -2770,6 +2799,16 @@ def doctor(
     """Verify your local setup: data paths, rate-card age, clock skew, and tooling.
 
     Run this first if anything looks wrong. Exits 0 ok, 1 warn, 2 fail."""
+    inherited = _with_parent_options(
+        {
+            "output_format": output_format,
+            "output": output,
+            "no_parse_cache": no_parse_cache,
+        }
+    )
+    output_format = inherited["output_format"]
+    output = inherited["output"]
+    no_parse_cache = inherited["no_parse_cache"]
     _validate_format(output_format)
     try:
         options = build_options(
@@ -2781,6 +2820,7 @@ def doctor(
             rates_file=rates_file,
             vendors=vendors,
             show_paths=show_paths,
+            no_parse_cache=no_parse_cache,
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc
@@ -2844,30 +2884,34 @@ def doctor(
     warning_summary_records = _redact_paths(warning_summary_records, options)
 
     if output_format == "json":
-        typer.echo(
-            json_dumps_enveloped(
-                {
-                    "checks": check_records,
-                    "worst": worst,
-                    "warning_summary": warning_summary_records,
-                    "tools": tool_records,
-                }
-            )
+        text = json_dumps_enveloped(
+            {
+                "checks": check_records,
+                "worst": worst,
+                "warning_summary": warning_summary_records,
+                "tools": tool_records,
+            }
         )
+        if output:
+            _write_output_file(output, text + "\n")
+        else:
+            typer.echo(text)
         raise typer.Exit(HEALTH_EXIT_CODES[worst])
 
     if output_format == "csv":
-        typer.echo(
-            records_to_csv(check_records),
-            nl=False,
-        )
+        text = records_to_csv(check_records)
+        if output:
+            _write_output_file(output, text)
+        else:
+            typer.echo(text, nl=False)
         raise typer.Exit(HEALTH_EXIT_CODES[worst])
 
     if output_format == "markdown":
-        typer.echo(
-            records_to_markdown(check_records),
-            nl=False,
-        )
+        text = records_to_markdown(check_records)
+        if output:
+            _write_output_file(output, text)
+        else:
+            typer.echo(text, nl=False)
         raise typer.Exit(HEALTH_EXIT_CODES[worst])
 
     console.print("[bold]Caliper - Doctor[/bold]")
@@ -2955,7 +2999,7 @@ def init(
         "# Pricing.\n"
         "# model = per-model rate card (recommended). flat = single fallback rate.\n"
         '# pricing_mode = "model"\n'
-        '# pricing_source = "auto"          # auto, embedded, litellm, openrouter, portkey, codex\n'
+        '# pricing_source = "auto"          # auto, embedded, litellm, portkey\n'
         "# pricing_cache_ttl_hours = 24\n"
         "# Pin a local rate card to match an invoice exactly:\n"
         '# rates_file = "./rates.json"\n'
@@ -3237,8 +3281,14 @@ def rates_show(
         raise _exit_error(str(exc)) from exc
     payload["pricing_source"] = pricing_source
     payload["catalog"] = pricing_catalog_status(card)
+    payload["embedded"] = {
+        "models": len(payload["models"]),
+        "age_days": age,
+        "stale": payload["stale"],
+        "active": not bool(payload["catalog"].get("models")),
+    }
     if output_format == "json":
-        typer.echo(json_dumps_enveloped(payload))
+        typer.echo(json_dumps_enveloped(_redact_paths(payload, options)))
         return
     if output_format in {"csv", "markdown"}:
         records = rate_card_records(payload)
@@ -3247,15 +3297,24 @@ def rates_show(
         return
 
     console.print("[bold]Caliper - Rate Card[/bold]")
+    checked = max(source.checked for source in PRICING_SOURCES)
     console.print(
-        f"Age: {age} days{'  [red](stale; consider refreshing)[/red]' if payload['stale'] else ''}"
+        "Embedded rate card: "
+        f"{len(payload['models'])} models · checked {checked} · age {age} days"
+        f"{'  [red](stale; consider refreshing)[/red]' if payload['stale'] else ''}"
     )
     catalog = payload["catalog"]
-    console.print(
-        "Catalog: "
-        f"{catalog['source']} · {catalog['models']} models"
-        f"{' · offline' if offline else ''}"
-    )
+    if catalog["models"]:
+        console.print(
+            "Live catalog cache: "
+            f"{catalog['source']} · {catalog['models']} models"
+            f"{' · offline' if offline else ''}"
+        )
+    else:
+        cache_suffix = (
+            " · offline; embedded rate card active" if offline else " · embedded rate card active"
+        )
+        console.print("Live catalog cache: none" + cache_suffix)
     for source in PRICING_SOURCES:
         console.print(f"- {source.name} (checked {source.checked}): {source.url}")
     console.print()
@@ -3363,13 +3422,24 @@ def rates_catalog(
     """Search the cached pricing catalog. Use --model/--query to filter model names."""
     _validate_format(output_format)
     catalog = load_cached_catalog()
-    if allow_network or not catalog.models:
+    if allow_network:
+        try:
+            payload = fetch_pricing_catalog(pricing_source)
+        except ValueError as exc:
+            raise _exit_error(str(exc)) from exc
+        if payload.get("source") != "embedded" and not payload.get("models"):
+            warnings = "; ".join(str(item) for item in payload.get("warnings", []) if item)
+            detail = f": {warnings}" if warnings else ""
+            raise _exit_error(f"no live pricing models were fetched{detail}")
+        target = replace_pricing_catalog_cache(payload, pricing_catalog_path())
+        catalog = catalog_from_payload(payload, path=target)
+    elif not catalog.models:
         try:
             options = build_options(
                 days=1.0,
                 pricing_source=pricing_source,
                 pricing_cache_ttl_hours=pricing_cache_ttl_hours,
-                offline=not allow_network,
+                offline=True,
             )
             catalog = _safe_load_rate_card(options).pricing_catalog or catalog
         except ValueError as exc:
@@ -3534,6 +3604,7 @@ def forecast(
     service_tier: ServiceTierOpt = "auto",
     pricing_mode: PricingModeOpt = "model",
     vendors: VendorOpt = None,
+    no_parse_cache: NoParseCacheOpt = False,
     output: OutputOpt = None,
     progress: ProgressOpt = False,
     quiet: QuietOpt = False,
@@ -3542,6 +3613,16 @@ def forecast(
     """Project month-end cost with a ±1σ band. Pass --cap for days-to-depletion."""
     from caliper.cli_progress import cli_report_progress
 
+    inherited = _with_parent_options(
+        {
+            "output_format": output_format,
+            "output": output,
+            "no_parse_cache": no_parse_cache,
+        }
+    )
+    output_format = inherited["output_format"]
+    output = inherited["output"]
+    no_parse_cache = inherited["no_parse_cache"]
     _validate_format(output_format)
     try:
         options = build_options(
@@ -3555,6 +3636,7 @@ def forecast(
             service_tier=service_tier,
             pricing_mode=pricing_mode,
             vendors=vendors,
+            no_parse_cache=no_parse_cache,
         )
     except ValueError as exc:
         raise _exit_error(str(exc)) from exc

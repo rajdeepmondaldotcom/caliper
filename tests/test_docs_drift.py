@@ -13,7 +13,7 @@ GITIGNORE = Path(".gitignore")
 def test_security_doc_has_no_broken_trusted_publisher_setup_link() -> None:
     security = SECURITY.read_text()
 
-    assert "Trusted Publisher" in security
+    assert "project-scoped" in security
     assert "docs/caliper-vision/10-pypi-trusted-publisher-setup.md" not in security
 
 

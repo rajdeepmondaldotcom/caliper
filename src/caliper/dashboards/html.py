@@ -340,7 +340,11 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 
 /* Show-the-math disclosure on KPI cards. Hides the default summary marker
    so the eye reads our "?" affordance; otherwise styling stays inline. */
-.cal-card-formula > summary { list-style: none; }
+.cal-card-formula > summary {
+  list-style: none;
+  min-height: 40px;
+  padding: 8px 0 !important;
+}
 .cal-card-formula > summary::-webkit-details-marker { display: none; }
 .cal-card-formula > summary::marker { display: none; }
 .cal-card-formula > summary:hover { color: var(--ink-2) !important; }
@@ -356,6 +360,11 @@ table { font-variant-numeric: tabular-nums lining-nums; }
   transition: transform 140ms ease-out;
 }
 .cal-card-formula[open] > summary .cal-card-chev { transform: rotate(90deg); }
+.cal-evidence-badge {
+  align-items: center !important;
+  min-height: 40px;
+  padding: 8px 12px !important;
+}
 /* Glossary affordance: a dotted underline + ⓘ mark flags a term that carries a
    plain-language definition in its native title/aria-label tooltip. */
 .cal-gloss {
@@ -594,12 +603,18 @@ section[id] { scroll-margin-top: 36px; }
     justify-content: flex-start !important;
   }
   .cal-tweaks-panel {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
-    flex-wrap: wrap;
-    border-radius: var(--r-md);
+    left: auto;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+    flex-wrap: nowrap;
+    border-radius: 999px;
     justify-content: center;
+  }
+  .cal-evidence-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 4px !important;
+    align-items: start !important;
   }
   /* Reveal the jump-to-section bar at the top of the content so 17 sections
      are one tap away instead of a long blind scroll. Not position:sticky: an
@@ -627,8 +642,9 @@ section[id] { scroll-margin-top: 36px; }
     min-height: 44px;
   }
   .cal-evidence-badge {
-    align-items: center;
+    align-items: center !important;
     min-height: 44px;
+    padding: 8px 12px !important;
   }
   .cal-card-formula > summary { min-height: 44px; }
   .cal-secondary-verdict-summary { min-height: 44px; }
@@ -788,7 +804,11 @@ p, h1, h2, h3 { text-wrap: pretty; }
   .cal-bar-group:focus .cal-bar-hover-label { opacity: 1; }
   /* Verdict-strip pill links: existing <a> gets underline; the chip gets
      a stable contrast state. */
-  .cal-verdict-chip { display: inline-block; }
+  .cal-verdict-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
   .cal-verdict-chip:hover > span {
     background: var(--panel-hover) !important;
     border-color: var(--accent-tint-2) !important;
@@ -924,7 +944,8 @@ body[data-interactive="true"] .cal-terminal-main {
   color: var(--ink-2);
   font: inherit;
   font-size: 12px;
-  padding: 5px 12px;
+  min-height: 40px;
+  padding: 8px 12px;
   border-radius: 999px;
   cursor: pointer;
   transition: background 120ms ease-out, color 120ms ease-out;
@@ -950,7 +971,8 @@ body[data-interactive="true"] .cal-terminal-main {
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  padding: 6px 14px;
+  min-height: 40px;
+  padding: 8px 14px;
   border-radius: 999px;
   cursor: pointer;
   display: inline-flex;
@@ -977,7 +999,8 @@ body[data-interactive="true"] .cal-terminal-main {
   color: var(--ink-2);
   font: inherit;
   font-size: 12px;
-  padding: 5px 10px 5px 8px;
+  min-height: 40px;
+  padding: 8px 12px 8px 10px;
   border-radius: 999px;
   cursor: pointer;
   display: inline-flex;
@@ -1028,16 +1051,22 @@ body[data-interactive="true"] .cal-terminal-main {
    "Investigate" is a 44px+ touch target. */
 @media (max-width: 720px) {
   .cal-tweaks-panel {
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
-    padding: 8px 10px;
-    gap: 8px;
+    left: auto;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+    padding: 6px;
+    gap: 0;
     font-size: 11px;
+    flex-wrap: nowrap;
+    border-radius: 999px;
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     background: color-mix(in srgb, var(--panel) 92%, transparent);
   }
+  .cal-tweaks-panel .cal-tweaks-section,
+  .cal-tweaks-panel .cal-tweaks-save,
+  .cal-tweaks-panel .cal-tweaks-divider { display: none; }
   .cal-tweaks-panel .cal-tweaks-label,
   .cal-tweaks-search-hint,
   .cal-tweaks-search-label { display: none; }
@@ -1048,11 +1077,9 @@ body[data-interactive="true"] .cal-terminal-main {
     justify-content: center;
   }
   .cal-tweaks-panel .cal-tweaks-btn { padding: 6px 12px; min-height: 44px; }
-  .cal-tweaks-panel .cal-tweaks-save { padding: 7px 14px; min-height: 44px; }
-  .cal-tweaks-panel .cal-tweaks-divider { display: none; }
   /* Reserve space at the bottom of the page so the floating panel never
      covers the trust footer. */
-  .cal-receipt-root { padding-bottom: 96px !important; }
+  .cal-receipt-root { padding-bottom: 72px !important; }
 
   /* Heatmap: scroll horizontally with legible (>=13px) cells instead of
      squishing 24 hour columns into unreadable slivers. */
@@ -1170,7 +1197,8 @@ body[data-interactive="true"] .cal-terminal-main {
   text-transform: uppercase;
   font-weight: 600;
   user-select: none;
-  padding: 4px 0;
+  min-height: 40px;
+  padding: 8px 0;
 }
 .cal-appendix-summary::marker,
 .cal-appendix-summary::-webkit-details-marker { display: none; }
@@ -1209,7 +1237,8 @@ body[data-interactive="true"] .cal-terminal-main {
   text-transform: uppercase;
   font-weight: 600;
   user-select: none;
-  padding: 4px 0;
+  min-height: 40px;
+  padding: 8px 0;
 }
 .cal-secondary-verdict-summary::marker,
 .cal-secondary-verdict-summary::-webkit-details-marker { display: none; }
@@ -1339,8 +1368,9 @@ body[data-interactive="true"] .cal-terminal-main {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   gap: 8px;
-  align-items: baseline;
-  padding: 5px 8px;
+  align-items: center;
+  min-height: 40px;
+  padding: 7px 8px;
   border-radius: 3px;
   color: var(--ink-2);
   text-decoration: none;
@@ -2108,7 +2138,7 @@ def _skill_display_label(name: str, index: int, *, private: bool = False) -> str
 
 _ANCHOR_ALIASES = {
     "command-center": "action-center",
-    "impact": "action-center",
+    "impact": "budgets",
     "usage-windows": "usage-windows",
     "top-sessions": "sessions",
     "metric-glossary": "evidence",
@@ -2682,23 +2712,34 @@ def _gloss(term: str, definition: str) -> str:
 def _evidence_badge(qs: QualityScore) -> str:
     score = qs.score
     grade = qs.grade
+    no_evidence = score <= 0 and grade.lower().startswith("no evidence")
+    score_html = (
+        '<span style="color:var(--ink);font-weight:600">No evidence yet</span>'
+        if no_evidence
+        else (
+            f'<span style="color:var(--ink);font-weight:600">{score}'
+            '<span style="color:var(--mute);font-weight:400">/100</span></span>'
+        )
+    )
     if score >= 80:
         color = "var(--ok)"
     elif score >= 65:
         color = "var(--warn)"
     else:
         color = "var(--bad)"
+    grade_html = (
+        "" if no_evidence else f'<span style="color:{color};font-size:11px">{_esc(grade)}</span>'
+    )
     return (
         '<a href="#evidence" style="text-decoration:none">'
-        '<span class="cal-evidence-badge" title="Evidence quality — click to jump to §14" '
+        '<span class="cal-evidence-badge" title="Evidence quality — click to jump to Trust & evidence" '
         'style="display:inline-flex;align-items:baseline;gap:6px;padding:5px 10px;'
         "border-radius:3px;background:var(--panel-2);border:1px solid var(--border);"
         'font-family:var(--mono);font-size:12px;white-space:nowrap">'
         f'<span style="width:6px;height:6px;border-radius:50%;background:{color};align-self:center"></span>'
         '<span style="color:var(--mute);text-transform:uppercase;letter-spacing:0;font-size:10px">Evidence</span>'
-        f'<span style="color:var(--ink);font-weight:600">{score}'
-        '<span style="color:var(--mute);font-weight:400">/100</span></span>'
-        f'<span style="color:{color};font-size:11px">{_esc(grade)}</span>'
+        f"{score_html}"
+        f"{grade_html}"
         "</span></a>"
     )
 
@@ -4718,7 +4759,7 @@ def _section_evidence(d: Dashboard, *, dense: bool, rhythm: str) -> str:
         color = colors.get(e.status, "var(--mute)")
         dot = dots.get(e.status, "·")
         rows.append(
-            f'<div style="display:grid;grid-template-columns:180px auto 1fr;gap:16px;'
+            f'<div class="cal-evidence-row" style="display:grid;grid-template-columns:180px auto 1fr;gap:16px;'
             f'align-items:baseline;padding:{pad};border-bottom:1px solid var(--border)">'
             f'<span style="color:var(--ink);font-size:13px">{_esc(e.label)}</span>'
             f'<span style="display:inline-flex;gap:6px;align-items:baseline;color:{color};'

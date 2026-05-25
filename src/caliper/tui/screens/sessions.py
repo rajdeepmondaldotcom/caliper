@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from textual.css.query import NoMatches
 from textual.widgets import DataTable, Static, Tab, Tabs
 
 from caliper.tui.formatting import format_cost_usd_cell
@@ -93,13 +94,30 @@ class SessionsScreen(CaliperScreen):
     def on_tabs_tab_activated(self, event) -> None:
         new_vendor = event.tab.id.removeprefix("v-") if event.tab and event.tab.id else "all"
         self._active_vendor = new_vendor
-        self.refresh(recompose=True)
+        self._refresh_table()
+
+    def update_from_snapshot(self, _snapshot) -> None:
+        self._refresh_table()
 
     def action_refresh(self) -> None:
         if hasattr(self.app, "action_refresh"):
             self.app.action_refresh()
 
     # ------------------------------------------------------------------ helpers
+    def _refresh_table(self) -> None:
+        snap: AppSnapshot | None = getattr(self.app, "snapshot", None)
+        try:
+            table = self.query_one("#sessions-table", DataTable)
+        except NoMatches:
+            return
+        table.clear()
+        rows = list(self._rows_for(snap.sessions if snap else (), vendor=self._active_vendor))
+        if rows:
+            for row in rows[:50]:
+                table.add_row(*row)
+        else:
+            table.add_row("(no sessions)", "", "", "", "", "")
+
     def _rows_for(self, sessions: Iterable, *, vendor: str):
         for session in sessions:
             session_vendors = getattr(session, "vendors", set()) or set()

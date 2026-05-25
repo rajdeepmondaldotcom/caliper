@@ -50,8 +50,8 @@ In scope:
 - The Caliper CLI (`src/caliper/`).
 - The PyPI distribution `caliper-ai`.
 - The GitHub Actions release pipeline (`.github/workflows/release.yml`).
-- The PyPI Trusted Publisher configuration for the protected GitHub Actions
-  `pypi` environment.
+- The protected GitHub Actions `pypi` environment and its project-scoped
+  PyPI API token.
 
 Out of scope:
 
