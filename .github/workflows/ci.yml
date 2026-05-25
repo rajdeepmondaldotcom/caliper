@@ -30,6 +30,8 @@ jobs:
           enable-cache: true
       - name: Set up Python
         run: uv python install ${{ matrix.python-version }}
+      - name: Lockfile check
+        run: uv lock --check
       - name: Install
         run: uv sync --all-extras --dev --python ${{ matrix.python-version }}
       - name: Ruff lint

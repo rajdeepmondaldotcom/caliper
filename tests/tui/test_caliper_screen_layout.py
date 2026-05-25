@@ -16,6 +16,7 @@ def test_caliper_screen_source_declares_three_containers():
     assert 'id="top"' in src, "Missing #top container in CaliperScreen.compose"
     assert 'id="middle"' in src, "Missing #middle container"
     assert 'id="footer-band"' in src, "Missing #footer-band container"
+    assert "markup=False" in src, "Footer shortcut hints must render literal brackets"
 
 
 def test_caliper_screen_default_footer_pills_carry_globals():

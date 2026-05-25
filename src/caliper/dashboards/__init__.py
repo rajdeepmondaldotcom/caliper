@@ -1,5 +1,6 @@
 from caliper.dashboards.adapter import build_handoff_dashboard
 from caliper.dashboards.data_models import (
+    DASHBOARD_SCHEMA_VERSION,
     AdvisorRecommendation,
     AgentRow,
     AnomalyRow,
@@ -58,6 +59,7 @@ __all__ = [
     "AgentRow",
     "AnomalyRow",
     "CaliperMeta",
+    "DASHBOARD_SCHEMA_VERSION",
     "CategoryCount",
     "AdvisorRecommendation",
     "CommandCenterCard",

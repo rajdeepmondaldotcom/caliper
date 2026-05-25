@@ -113,10 +113,9 @@ class DashboardConfig:
     theme: str = "dark"
     rhythm: str = "receipt"
     density: str = "comfortable"
-    # Default: original format — real names everywhere. Privacy redaction
-    # is opt-in via the ``--privacy`` flag (print-only | always) or the
-    # corresponding key in ``[dashboard]``.
-    privacy: str = "off"
+    # Default: safe-to-forward HTML. Users can opt into local-only real labels
+    # with dashboard.privacy="off" or `caliper dashboard --no-share-safe`.
+    privacy: str = "always"
     show_paths: bool = False
     output_dir: str = "~/Downloads"
     # ``{privacy_suffix}`` is "" when privacy is off and ``-privacy-<mode>``
@@ -222,30 +221,29 @@ theme = "dark"                # dark | light | print
 rhythm = "receipt"            # receipt | terminal
 density = "comfortable"       # comfortable | compact
 
-# Privacy / redaction (opt-in)
-# off         — original format: real project names, session labels, paths
+# Privacy / redaction
+# always      — indexed placeholders everywhere; safe to forward
 # print-only  — show real names on screen, swap to indexed placeholders
 #               (Project 1, Session 2, [path]) when printing
-# always      — indexed placeholders everywhere
+# off         — local-only format: real project names, session labels, paths
 #
-# Default is "off". Switch with the CLI flag --privacy <mode> or by
-# editing this line.
-privacy = "off"
+# Default is "always". Switch with --privacy <mode>, --no-share-safe, or by
+# editing this line when you need local-only real labels.
+privacy = "always"
 show_paths = false            # show full filesystem paths in the projects table
 
 # File output (used when --output is not passed on the CLI)
 output_dir = "~/Downloads"
 # Placeholders: {timestamp}, {theme}, {rhythm}, {density}, {privacy},
 # {privacy_suffix}. {privacy_suffix} is "" when privacy=off and
-# "-privacy-<mode>" otherwise — keeps default filenames clean.
+# "-privacy-<mode>" otherwise — tags safe exports clearly.
 filename_template = "caliper-dashboard-{timestamp}{privacy_suffix}.html"
 timestamp_format = "%Y-%m-%d-%H-%M"
 open_after = true             # auto-open the generated file in a browser
 
-# Interactive playground: embed both rhythms + a floating toggle panel +
-# a "Save snapshot" button. Off-by-default for CI/CD, on-by-default for
-# humans. The toggle lets the recipient flip between Receipt/Terminal and
-# Dark/Light/Safe Share without re-running this CLI.
+# Interactive playground: embed a floating toggle panel + a "Save snapshot"
+# button. The toggle lets the recipient flip between Dark/Light/Safe Share
+# without re-running this CLI.
 interactive = true
 
 # Data window

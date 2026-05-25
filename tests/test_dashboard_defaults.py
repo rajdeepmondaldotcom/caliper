@@ -26,13 +26,13 @@ def test_dashboard_config_defaults_when_section_missing() -> None:
     assert cfg.theme == "dark"
     assert cfg.rhythm == "receipt"
     assert cfg.density == "comfortable"
-    # Default is the original format — real names everywhere. Privacy
-    # redaction is opt-in via the ``--privacy`` flag.
-    assert cfg.privacy == "off"
+    # Default renders safe-to-forward HTML. Real labels are opt-in via
+    # dashboard.privacy="off" or `caliper dashboard --no-share-safe`.
+    assert cfg.privacy == "always"
     assert cfg.output_dir == "~/Downloads"
     assert "{timestamp}" in cfg.filename_template
-    # Filename uses the auto-suffix placeholder so privacy=off doesn't
-    # leak "-privacy-off" into every filename.
+    # Filename uses the auto-suffix placeholder so redacted exports are
+    # visibly tagged and local-only exports stay clean.
     assert "{privacy_suffix}" in cfg.filename_template
     assert cfg.open_after is True
     assert cfg.default_days == 14
@@ -70,7 +70,7 @@ def test_dashboard_config_falls_back_on_invalid_choice() -> None:
     cfg = load_dashboard_config({"dashboard": {"theme": "neon", "privacy": "maybe"}})
     # Unknown values silently revert to defaults — typos don't crash the CLI.
     assert cfg.theme == "dark"
-    assert cfg.privacy == "off"
+    assert cfg.privacy == "always"
 
 
 # ---------------------------------------------------------------------------
@@ -95,10 +95,13 @@ def test_derive_path_default_template_drops_off_suffix(tmp_path: Path) -> None:
     """{privacy_suffix} keeps the default filename clean when privacy=off."""
     cfg = DashboardConfig(output_dir=str(tmp_path))  # uses default template
     moment = dt.datetime(2026, 5, 21, 14, 30)
-    # Default privacy is "off" → no "-privacy-…" suffix.
-    path_off = derive_dashboard_output_path(cfg, now=moment)
+    # Default privacy is "always" → suffix appears.
+    path_default = derive_dashboard_output_path(cfg, now=moment)
+    assert path_default.name == "caliper-dashboard-2026-05-21-14-30-privacy-always.html"
+    # Explicit local-only output → no suffix.
+    path_off = derive_dashboard_output_path(cfg, now=moment, privacy="off")
     assert path_off.name == "caliper-dashboard-2026-05-21-14-30.html"
-    # Explicit redaction → suffix appears.
+    # Print-only redaction → suffix appears.
     path_safe = derive_dashboard_output_path(cfg, now=moment, privacy="print-only")
     assert path_safe.name == "caliper-dashboard-2026-05-21-14-30-privacy-print-only.html"
     path_always = derive_dashboard_output_path(cfg, now=moment, privacy="always")
@@ -159,7 +162,8 @@ def test_write_defaults_refuses_to_overwrite_existing_section(tmp_path: Path) ->
     write_dashboard_defaults(path=target, force=True)
     body = target.read_text()
     assert body.count("[dashboard]") == 1
-    assert 'privacy = "always"' not in body  # replaced by template
+    assert 'theme = "slate"' not in body  # replaced by template
+    assert 'privacy = "always"' in body
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ caliper dashboard
 
 </div>
 
-![Caliper dashboard — verdict, KPIs, and operator brief in Safe Share mode](docs/screenshots/hero.png)
+![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/hero.png)
 
 <p align="center"><sub>Safe Share mode screenshot: paths, projects, and session labels are redacted while costs, evidence status, and recommendations stay visible.</sub></p>
 
@@ -65,22 +65,25 @@ rate card date, and the sample size. Evidence, anomalies, savings, and session
 rows show the source quality behind the number instead of forcing you to trust
 an unexplained total.
 
+Large first runs may spend a moment indexing local log history; later runs reuse
+the local parse cache.
+
 ## Dashboard tour
 
 These screenshots are generated from `caliper dashboard --safe-share`, so they
 show the real report layout without exposing local paths or session identities.
 
-| Operator brief | Spend drivers |
+| Next actions | Spend drivers |
 |---|---|
-| <img alt="Dashboard operator brief with verdict, priority actions, and selected-window cost" src="docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="docs/screenshots/usage-mix.png"> |
+| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/usage-mix.png"> |
 
 | Anomalies | Savings opportunities |
 |---|---|
-| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="docs/screenshots/inefficiencies.png"> |
+| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/inefficiencies.png"> |
 
 | Session drilldown | Attribution and evidence |
 |---|---|
-| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="docs/screenshots/attribution.png"> |
+| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.54/docs/screenshots/attribution.png"> |
 
 ## How it's different
 
@@ -101,7 +104,7 @@ actually cost — without sending prompts to a third party — use this.
 
 | Surface | Command | Purpose |
 |---|---|---|
-| Browser dashboard | `caliper dashboard` | Operator brief, spend drivers, savings, anomalies, sessions, evidence. |
+| Browser dashboard | `caliper dashboard` | Next actions, spend drivers, savings, anomalies, sessions, evidence. |
 | PR receipt | `caliper pr 42` | Cost attributed to one pull request. |
 | Overview | `caliper overview` | Rolling 7 / 30 / 90 day spend. |
 | Project rollup | `caliper project` | Spend by repository or folder. |

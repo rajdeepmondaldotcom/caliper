@@ -428,4 +428,28 @@ def test_first_run_welcome_screenshot_regression(tmp_path, monkeypatch):
 
     assert "Local&#160;AI&#160;cost&#160;ledger" in svg
     assert "Press&#160;space&#160;to&#160;enter" in svg
+    assert "Preparing&#160;session&#160;scan" not in svg
+    assert "Counting&#160;files" not in svg
     _assert_no_obvious_midword_splits(svg)
+
+
+def test_first_run_welcome_defers_refresh_until_dismissed(tmp_path, monkeypatch):
+    app = _demo_app(tmp_path, monkeypatch, demo=False, first_run=True)
+
+    async def _drive() -> tuple[bool, bool, str]:
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause(0.2)
+            before_started = app.snapshot.refresh_started_at is not None
+            await pilot.press("space")
+            await _wait_for_first_load(app, pilot)
+            return (
+                before_started,
+                app.snapshot.refresh_completed_at is not None,
+                app.export_screenshot(),
+            )
+
+    before_started, completed, svg = asyncio.run(_drive())
+
+    assert before_started is False
+    assert completed is True
+    assert "Press&#160;space&#160;to&#160;enter" not in svg

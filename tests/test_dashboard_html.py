@@ -396,7 +396,10 @@ def test_dashboard_css_has_real_mobile_breakpoint() -> None:
     assert "@media (max-width: 720px)" in INLINE_STYLES
     assert ".cal-terminal-layout { grid-template-columns: 1fr !important; }" in INLINE_STYLES
     assert ".cal-stat-card-value { font-size: 22px !important; }" in INLINE_STYLES
+    assert ".cal-receipt-main { overflow-x: hidden; }" in INLINE_STYLES
     assert ".cal-window-badge" in INLINE_STYLES
+    assert "aside { display: none !important; }" not in INLINE_STYLES
+    assert ".cal-tweaks-panel" in INLINE_STYLES
 
 
 def test_top_sessions_rows_have_meaningful_accessible_copy(monkeypatch, tmp_path) -> None:
@@ -578,6 +581,16 @@ def test_interactive_share_safe_file_embeds_no_real_values() -> None:
     # Redacted labels are present instead, including in the cmd+K palette index.
     assert "Project 1" in html
     assert '"type": "project", "label": "Project ' in html
+
+
+def test_interactive_safe_share_snapshot_sanitizes_hidden_real_values() -> None:
+    html = render_dashboard(sample_dashboard(show_paths=True), privacy="off", interactive=True)
+
+    assert '<span class="cal-real">' in html
+    assert "snapshotRoot" in html
+    assert "querySelectorAll('.cal-real')" in html
+    assert 'script[type="application/json"]' in html
+    assert "text.split(replacements" in html
 
 
 def test_attribution_section_uses_truthful_labels_and_safe_layout() -> None:
@@ -843,6 +856,10 @@ def test_interactive_dashboard_emits_palette_and_keyboard_shortcuts() -> None:
     html_text = render_dashboard(sample_dashboard(show_paths=True), interactive=True)
     assert 'id="cal-palette"' in html_text
     assert 'role="dialog"' in html_text
+    assert 'role="combobox"' in html_text
+    assert 'aria-controls="cal-palette-results"' in html_text
+    assert "aria-activedescendant" in html_text
+    assert "aria-selected" in html_text
     assert 'id="cal-palette-index"' in html_text
     assert "paletteOpen" in html_text
     # Palette index contains section, model, project, anomaly entries.
@@ -878,6 +895,13 @@ def test_dashboard_renders_appendix_block_with_collapsed_diagnostic_sections() -
     assert html_text.index('id="action-center"') < appendix_start
     assert html_text.index('id="inefficiencies"') < appendix_start
     assert html_text.index('id="anomalies"') < appendix_start
+
+
+def test_print_css_forces_appendix_body_visible() -> None:
+    assert (
+        "details.cal-appendix > .cal-appendix-body { display: grid !important; }" in INLINE_STYLES
+    )
+    assert ".theme-print details.cal-appendix > .cal-appendix-body" in INLINE_STYLES
 
 
 # ---------------------------------------------------------------------------

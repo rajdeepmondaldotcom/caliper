@@ -31,12 +31,23 @@ def test_live_requires_tty_in_non_interactive() -> None:
     result = runner.invoke(app, ["live"])
     assert result.exit_code == 2
     assert "interactive terminal" in result.output
+    assert result.stdout == ""
+    assert "interactive terminal" in result.stderr
 
 
 def test_tui_requires_tty_even_with_demo() -> None:
     result = runner.invoke(app, ["tui", "--demo"])
     assert result.exit_code == 2
     assert "interactive terminal" in result.output
+    assert result.stdout == ""
+    assert "interactive terminal" in result.stderr
+
+
+def test_custom_errors_go_to_stderr() -> None:
+    result = runner.invoke(app, ["--format", "bogus", "overview"])
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "--output-format must be one of" in result.stderr
 
 
 def test_future_since_gives_clear_message() -> None:

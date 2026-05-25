@@ -90,3 +90,17 @@ def test_local_publish_script_does_not_use_twine_credentials():
 
     assert "twine upload" not in text
     assert "TWINE_PASSWORD" not in text
+
+
+def test_release_workflow_does_not_skip_existing_pypi_uploads():
+    text = _workflow_text()
+
+    assert "skip-existing" not in text
+
+
+def test_release_workflow_and_publish_script_check_lockfile():
+    text = _workflow_text()
+    script = PUBLISH_SCRIPT.read_text()
+
+    assert "uv lock --check" in text
+    assert "uv lock --check" in script

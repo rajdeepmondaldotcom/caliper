@@ -445,7 +445,8 @@ section[id] { scroll-margin-top: 36px; }
 [data-viewport="mobile"] .cal-shape-grid,
 [data-viewport="mobile"] .cal-forecast-grid { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] .cal-table { font-size: 12px !important; }
-[data-viewport="mobile"] aside { display: none !important; }
+[data-viewport="mobile"] .cal-receipt-toc,
+[data-viewport="mobile"] .cal-terminal-index { display: none !important; }
 [data-viewport="mobile"] header { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] header > div:last-child { text-align: left !important; align-items: flex-start !important; }
 [data-viewport="mobile"] .cal-section-head.receipt { flex-wrap: wrap; row-gap: 4px; }
@@ -455,12 +456,14 @@ section[id] { scroll-margin-top: 36px; }
 [data-viewport="mobile"] .cal-stat-card { padding: 12px !important; }
 [data-viewport="mobile"] .cal-stat-card-value { font-size: 22px !important; }
 [data-viewport="mobile"] .cal-receipt-root { padding: 16px 14px 48px !important; }
+[data-viewport="mobile"] .cal-receipt-main { overflow-x: hidden; }
 [data-viewport="mobile"] .cal-terminal-layout { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] .cal-terminal-main { padding: 20px 16px 64px !important; }
 
 @media (max-width: 720px) {
   body { overflow-x: hidden; }
   .cal-receipt-root { padding: 16px 14px 48px !important; }
+  .cal-receipt-main { overflow-x: hidden; }
   .cal-terminal-layout { grid-template-columns: 1fr !important; }
   .cal-terminal-main { padding: 20px 16px 64px !important; }
   .cal-summary-row {
@@ -511,7 +514,8 @@ section[id] { scroll-margin-top: 36px; }
   /* Don't hide columns on mobile — the .cal-table-scroll wrapper provides
      horizontal scroll, so Cost/Tokens/Events stay reachable instead of being
      silently dropped. */
-  aside { display: none !important; }
+  .cal-receipt-toc,
+  .cal-terminal-index { display: none !important; }
   header {
     grid-template-columns: 1fr !important;
     gap: 18px !important;
@@ -654,6 +658,12 @@ section[id] { scroll-margin-top: 36px; }
   .cal-stat-card, .cal-banner, .cal-table, [data-screen-label] { break-inside: avoid; }
   body { font-size: 10.5pt !important; line-height: 1.45 !important; }
 }
+@media print {
+  details.cal-appendix > .cal-appendix-body { display: grid !important; }
+  details.cal-appendix .cal-appendix-chev { transform: rotate(90deg); }
+}
+.theme-print details.cal-appendix > .cal-appendix-body { display: grid !important; }
+.theme-print details.cal-appendix .cal-appendix-chev { transform: rotate(90deg); }
 
 /* Lift focus rings */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
@@ -830,6 +840,10 @@ p, h1, h2, h3 { text-wrap: pretty; }
   color: var(--ink-2);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
+}
+body[data-interactive="true"] .cal-receipt-root,
+body[data-interactive="true"] .cal-terminal-main {
+  padding-bottom: 116px !important;
 }
 .cal-tweaks-panel .cal-tweaks-section { display: flex; align-items: center; gap: 6px; }
 .cal-tweaks-panel .cal-tweaks-label {
@@ -2914,7 +2928,8 @@ def _caliper_footer(d: Dashboard) -> str:
         '<div style="color:var(--mute)">'
         "Caliper is "
         '<span style="color:var(--ok)">offline-first</span>. '
-        "This dashboard contains no external resources, scripts, or fetch calls. "
+        "This dashboard contains no external resources, no external scripts, "
+        "and no fetch/XHR/import calls. "
         "All data was parsed from local AI coding logs."
         "</div></div>"
         '<div style="text-align:right;font-family:var(--mono)">'
@@ -4706,8 +4721,10 @@ def _render_palette() -> str:
         '<div class="cal-palette-dialog">'
         '<input class="cal-palette-input" type="search" '
         'placeholder="Search sections, models, projects, anomalies…" '
-        'aria-label="Search query" autocomplete="off" spellcheck="false">'
-        '<ul class="cal-palette-results" role="listbox" '
+        'aria-label="Search query" autocomplete="off" spellcheck="false" '
+        'role="combobox" aria-controls="cal-palette-results" '
+        'aria-expanded="false" aria-activedescendant="">'
+        '<ul class="cal-palette-results" id="cal-palette-results" role="listbox" '
         'aria-label="Search results"></ul>'
         '<div class="cal-palette-hints">'
         "<kbd>↑</kbd><kbd>↓</kbd> navigate · "
@@ -5225,7 +5242,8 @@ def _terminal_index(d: Dashboard) -> str:
     sha = getattr(d.caliper, "build_sha", "") or ""
     sha_line = f"<div>sha {_esc(sha)}</div>" if sha else ""
     return (
-        '<aside style="border-right:1px solid var(--border);'
+        '<nav class="cal-terminal-index" aria-label="Section navigation" '
+        'style="border-right:1px solid var(--border);'
         "padding:24px 8px 24px 20px;position:sticky;top:0;align-self:start;"
         'max-height:100vh;overflow-y:auto">'
         '<div style="font-family:var(--mono);font-size:10px;letter-spacing:0;'
@@ -5238,7 +5256,7 @@ def _terminal_index(d: Dashboard) -> str:
         f"<div>v{_esc(d.caliper.version)}</div>"
         f"<div>schema {_esc(d.caliper.schema_version)}</div>"
         f"{sha_line}"
-        "</div></aside>"
+        "</div></nav>"
     )
 
 
@@ -5467,7 +5485,10 @@ _INTERACTIVE_SCRIPT = """
     for (var i = 0; i < paletteResults.length; i++) {
       var r = paletteResults[i];
       var active = i === paletteSelected ? ' is-active' : '';
+      var selected = i === paletteSelected ? 'true' : 'false';
+      var optionId = 'cal-palette-option-' + i;
       html += '<li class="cal-palette-item' + active + '" role="option"' +
+              ' id="' + optionId + '" aria-selected="' + selected + '"' +
               ' data-idx="' + i + '" data-anchor="' + escapeHtml(r.anchor) + '">' +
               '<span class="cal-palette-type">' + escapeHtml(r.type) + '</span>' +
               '<span class="cal-palette-label">' + escapeHtml(r.label) + '</span>' +
@@ -5478,6 +5499,13 @@ _INTERACTIVE_SCRIPT = """
       html = '<li class="cal-palette-empty">No matches.</li>';
     }
     paletteList.innerHTML = html;
+    if (paletteInput) {
+      if (paletteResults.length) {
+        paletteInput.setAttribute('aria-activedescendant', 'cal-palette-option-' + paletteSelected);
+      } else {
+        paletteInput.removeAttribute('aria-activedescendant');
+      }
+    }
   }
   function paletteUpdate(query) {
     var q = (query || '').toLowerCase().trim();
@@ -5496,6 +5524,7 @@ _INTERACTIVE_SCRIPT = """
     // (WCAG 2.4.3). Don't capture if the palette is already open.
     if (palette.hidden) paletteLastFocus = document.activeElement;
     palette.hidden = false;
+    paletteInput.setAttribute('aria-expanded', 'true');
     paletteInput.value = '';
     paletteUpdate('');
     paletteInput.focus();
@@ -5503,6 +5532,10 @@ _INTERACTIVE_SCRIPT = """
   function paletteClose() {
     if (!palette || palette.hidden) return;
     palette.hidden = true;
+    if (paletteInput) {
+      paletteInput.setAttribute('aria-expanded', 'false');
+      paletteInput.removeAttribute('aria-activedescendant');
+    }
     // Restore focus so keyboard users aren't dropped at the top of the
     // document. Prefer where focus was; if that was the body (e.g. opened via
     // ⌘K), land on the palette trigger button instead.
@@ -5636,7 +5669,36 @@ _INTERACTIVE_SCRIPT = """
   var saveBtn = document.getElementById('cal-save-snapshot');
   if (saveBtn) {
     saveBtn.addEventListener('click', function () {
-      var html = '<!doctype html>' + document.documentElement.outerHTML;
+      var snapshotRoot = document.documentElement.cloneNode(true);
+      var snapshotBody = snapshotRoot.querySelector('body');
+      if (snapshotBody && snapshotBody.dataset.privacy === 'always') {
+        var replacements = [];
+        var realNodes = snapshotRoot.querySelectorAll('.cal-real');
+        for (var i = 0; i < realNodes.length; i++) {
+          var realNode = realNodes[i];
+          var redactedNode = realNode.nextElementSibling;
+          if (redactedNode && redactedNode.classList.contains('cal-redacted')) {
+            replacements.push([realNode.textContent || '', redactedNode.textContent || '']);
+          }
+          realNode.remove();
+        }
+        var redactedNodes = snapshotRoot.querySelectorAll('.cal-redacted');
+        for (var j = 0; j < redactedNodes.length; j++) {
+          redactedNodes[j].classList.remove('cal-redacted');
+        }
+        var jsonBlocks = snapshotRoot.querySelectorAll('script[type="application/json"]');
+        for (var k = 0; k < jsonBlocks.length; k++) {
+          var text = jsonBlocks[k].textContent || '';
+          for (var r = 0; r < replacements.length; r++) {
+            if (replacements[r][0]) text = text.split(replacements[r][0]).join(replacements[r][1]);
+          }
+          jsonBlocks[k].textContent = text;
+        }
+        snapshotBody.dataset.shareSafe = 'true';
+        snapshotBody.dataset.privacy = 'always';
+        snapshotBody.dataset.mode = 'safe-share';
+      }
+      var html = '<!doctype html>' + snapshotRoot.outerHTML;
       var blob = new Blob([html], { type: 'text/html;charset=utf-8' });
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');

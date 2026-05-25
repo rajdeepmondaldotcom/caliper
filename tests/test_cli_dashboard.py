@@ -80,6 +80,33 @@ def test_dashboard_default_prints_html_when_stdout_is_not_tty(tmp_path) -> None:
     assert "Wrote" not in result.output
 
 
+def test_dashboard_safe_share_alias_writes_safe_file(tmp_path) -> None:
+    out = tmp_path / "safe.html"
+
+    result = runner.invoke(app, ["dashboard", "--demo", "--safe-share", "--output", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert "share-safe" in result.output
+    html = out.read_text(encoding="utf-8")
+    assert 'data-share-safe="true"' in html
+    assert 'data-privacy="always"' in html
+    assert "api-server" not in html
+    assert "Project 1" in html
+
+
+def test_dashboard_no_share_safe_keeps_local_labels(tmp_path) -> None:
+    out = tmp_path / "local.html"
+
+    result = runner.invoke(app, ["dashboard", "--demo", "--no-share-safe", "--output", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert "local-only" in result.output
+    html = out.read_text(encoding="utf-8")
+    assert 'data-share-safe="false"' in html
+    assert 'data-privacy="off"' in html
+    assert "api-server" in html
+
+
 def test_dashboard_default_opens_browser_for_interactive_terminal(monkeypatch, tmp_path) -> None:
     opened: list[str] = []
 

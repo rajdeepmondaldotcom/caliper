@@ -50,6 +50,7 @@ class HomeScreen(Screen):
             Static(
                 "[ 0 receipt ] [ i insights ] [ ? help ] [ r refresh ] [ q quit ]",
                 id="home-footer",
+                markup=False,
             ),
             id="home-body",
         )

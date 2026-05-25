@@ -2,6 +2,45 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.54 - 2026-05-25
+
+Critical-user polish pass focused on the install path, share-safe dashboard
+defaults, mobile usability, and release confidence.
+
+### Fixed
+
+- **Dashboard output is share-safe by default.** `caliper dashboard` now renders
+  with `privacy=always` unless explicitly disabled, the documented
+  `--safe-share` alias works, and interactive Safe Share snapshots strip hidden
+  real project/session/path values before saving.
+- **Quiet/error output is script-friendly.** `--quiet` now suppresses dashboard
+  success lines from both global and command placement, and custom CLI errors go
+  to stderr instead of stdout.
+- **`caliper vendors --output-format json` now works without a subcommand,**
+  matching the rest of the command surface while preserving `vendors list`.
+- **Mobile dashboard controls stay reachable without page-sideways scrolling.**
+  Wide data tables keep local horizontal scroll, but the document itself stays
+  at viewport width on 390px and 320px phone layouts.
+- **TUI footer hints render literally** (`[ r refresh ]`, `[ ? help ]`) instead
+  of being parsed as Rich markup, and first-run welcome copy is no longer covered
+  by the loading overlay.
+
+### Hardened
+
+- CI, release, and local publish now run `uv lock --check`; `uv.lock` is updated
+  for the release version.
+- The PyPI publish job no longer uses `skip-existing`, so a duplicate or
+  mismatched release fails loudly.
+- `scripts/live-release-smoke.sh` selects Python 3.11+ (or rejects an older
+  `$PYTHON`) instead of accidentally building a smoke venv with Python 3.9.
+- Dashboard sample payloads now carry an exported schema-version constant so
+  demo fixtures and generated dashboards stay in sync.
+
+### Docs
+
+- README screenshots are pinned to the release tag, the dashboard tour now says
+  "Next actions", and the first-run cache warm-up is called out explicitly.
+
 ## 0.0.53 - 2026-05-25
 
 A critical-user polish pass: correctness, privacy, performance, accessibility,

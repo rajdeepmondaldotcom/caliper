@@ -25,6 +25,8 @@ EvidenceStatus = Literal["exact", "estimated", "partial", "unsupported"]
 ImpactTone = Literal["neutral", "good", "warn", "critical"]
 DashboardLens = Literal["executive", "engineer", "finance", "audit"]
 
+DASHBOARD_SCHEMA_VERSION = 3
+
 
 # ---------------------------------------------------------------------------
 # Header / window

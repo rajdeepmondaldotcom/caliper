@@ -12,7 +12,7 @@ from pathlib import Path
 import caliper.dashboards.sample_data as sample_data
 from caliper import __version__
 from caliper.dashboards import render_dashboard
-from caliper.dashboards.data_models import Banner
+from caliper.dashboards.data_models import DASHBOARD_SCHEMA_VERSION, Banner
 from caliper.dashboards.html import _hero_verdict_data
 
 FORBIDDEN = ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import(")
@@ -30,6 +30,7 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
     dashboard = sample_data.sample_dashboard(show_paths=True)
 
     assert dashboard.caliper.version == __version__
+    assert dashboard.caliper.schema_version == DASHBOARD_SCHEMA_VERSION
     assert dashboard.show_paths is True
     assert dashboard.heatmap is not None
     assert len(dashboard.heatmap.cells) == 365
@@ -61,6 +62,7 @@ def test_empty_sample_dashboard_renders_empty_state() -> None:
     dashboard = sample_data.empty_dashboard()
 
     assert dashboard.caliper.version == __version__
+    assert dashboard.caliper.schema_version == DASHBOARD_SCHEMA_VERSION
     assert dashboard.totals.events == 0
 
     html = render_dashboard(dashboard, theme="print")

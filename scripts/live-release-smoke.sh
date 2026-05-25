@@ -9,6 +9,7 @@ STATE_DB="$ROOT/state.sqlite"
 CONFIG="$ROOT/config.toml"
 PACKAGE="${CALIPER_SMOKE_PACKAGE:-caliper-ai}"
 VERSION_SPEC=""
+PYTHON_BIN="${PYTHON:-}"
 
 export CALIPER_CACHE_DIR="$ROOT/cache"
 export XDG_DATA_HOME="$ROOT/data"
@@ -21,7 +22,32 @@ if [[ -n "${CALIPER_SMOKE_VERSION:-}" ]]; then
 fi
 
 mkdir -p "$OUT"
-python3 -m venv "$VENV"
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  for candidate in python3.13 python3.12 python3.11 python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 \
+      && "$candidate" - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
+PY
+    then
+      PYTHON_BIN="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "error: Python 3.11 or newer is required for live release smoke." >&2
+  exit 127
+fi
+"$PYTHON_BIN" - <<'PY'
+import sys
+if sys.version_info < (3, 11):
+    raise SystemExit("error: Python 3.11 or newer is required for live release smoke.")
+PY
+
+"$PYTHON_BIN" -m venv "$VENV"
 "$VENV/bin/python" -m pip install --upgrade pip >/dev/null
 "$VENV/bin/python" -m pip install "${PACKAGE}${VERSION_SPEC}" >/dev/null
 

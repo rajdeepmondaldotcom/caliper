@@ -67,7 +67,7 @@ json_ok compare_total uv run caliper compare --comparison-window-a "last 1 days"
 json_ok compare_vendor uv run caliper compare --comparison-window-a "last 1 days" --comparison-window-b "previous 1 days" --comparison-grouping vendor --output-format json
 json_ok whatif uv run caliper whatif --scenario-history-days 1 --hypothetical-service-tier fast --output-format json
 json_ok advise uv run caliper advise --lookback-days 1 --output-format json
-json_ok vendors uv run caliper vendors list --output-format json
+json_ok vendors uv run caliper vendors --output-format json
 json_ok taxonomy uv run caliper taxonomy show --output-format json
 json_ok schema_export uv run caliper schema export --output-format json
 text_ok schema_validate uv run caliper schema validate "$ROOT/event.json"

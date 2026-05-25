@@ -32,7 +32,11 @@ def test_home_boots_with_demo_fixture(tmp_path, monkeypatch):
     )
     options = materialize_demo(options)
 
-    app = CaliperApp(options, demo=False, tui_config=TuiConfig())
+    app = CaliperApp(
+        options,
+        demo=False,
+        tui_config=TuiConfig(show_demo_on_first_run=False),
+    )
 
     async def _drive() -> None:
         async with app.run_test(size=(120, 40)) as pilot:

@@ -59,3 +59,6 @@ class WelcomeScreen(CaliperScreen):
     def action_dismiss(self) -> None:
         mark_welcome_seen()
         self.app.pop_screen()
+        on_dismiss = getattr(self.app, "welcome_dismissed", None)
+        if callable(on_dismiss):
+            self.app.call_after_refresh(on_dismiss)

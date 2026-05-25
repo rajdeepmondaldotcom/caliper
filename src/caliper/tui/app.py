@@ -151,6 +151,7 @@ class CaliperApp(App):
         self._progress_done = 0
         self._progress_cached = 0
         self._progress_stage = "idle"
+        self._refresh_after_welcome = False
 
     def compose(self) -> ComposeResult:
         yield from ()
@@ -159,13 +160,16 @@ class CaliperApp(App):
         self._register_caliper_themes()
         self._apply_theme()
         self.push_screen(HomeScreen())
-        if (
+        should_show_welcome = (
             not self._demo
             and self._tui_config.show_demo_on_first_run
             and not welcome_already_seen()
-        ):
+        )
+        if should_show_welcome:
+            self._refresh_after_welcome = True
             self.push_screen(WelcomeScreen())
-        self.action_refresh()
+        else:
+            self.action_refresh()
         self._start_refresh_monitoring()
 
     def on_unmount(self) -> None:
@@ -379,6 +383,8 @@ class CaliperApp(App):
 
     # ------------------------------------------------------------------ refresh
     def action_refresh(self) -> None:
+        if self._is_waiting_for_welcome():
+            return
         snapshot = self.snapshot
         if snapshot is None:
             return
@@ -414,6 +420,17 @@ class CaliperApp(App):
             group="data",
             exit_on_error=False,
         )
+
+    def _is_waiting_for_welcome(self) -> bool:
+        return self._refresh_after_welcome and any(
+            isinstance(screen, WelcomeScreen) for screen in self.screen_stack
+        )
+
+    def welcome_dismissed(self) -> None:
+        if not self._refresh_after_welcome:
+            return
+        self._refresh_after_welcome = False
+        self.action_refresh()
 
     def _load_worker(
         self,
@@ -645,6 +662,8 @@ class CaliperApp(App):
         self._refresh_timer = self.set_timer(0.75, self._refresh_if_manifest_changed)
 
     def _refresh_if_manifest_changed(self) -> None:
+        if self._is_waiting_for_welcome():
+            return
         snapshot = self.snapshot
         if snapshot is None or snapshot.is_loading():
             return

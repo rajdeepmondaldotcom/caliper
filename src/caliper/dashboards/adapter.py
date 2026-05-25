@@ -59,6 +59,7 @@ from caliper.budgets import (
     evaluate as evaluate_budgets,
 )
 from caliper.dashboards.data_models import (
+    DASHBOARD_SCHEMA_VERSION,
     AdvisorAlternative,
     AdvisorRecommendation,
     AgentRow,
@@ -418,7 +419,7 @@ def build_handoff_dashboard(
     )
 
     return Dashboard(
-        caliper=CaliperMeta(version=__version__, schema_version=3),
+        caliper=CaliperMeta(version=__version__, schema_version=DASHBOARD_SCHEMA_VERSION),
         window=window,
         generated_at=(generated_at or dt.datetime.now(tz=dt.UTC)).isoformat(timespec="seconds"),
         totals=totals,

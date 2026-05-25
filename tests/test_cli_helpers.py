@@ -84,6 +84,14 @@ def test_records_helpers_handle_empty_and_escaping() -> None:
     assert "12.35" in records_to_markdown([{"cache_pct": 12.34567}])
 
 
+def test_vendors_defaults_to_list_json() -> None:
+    result = runner.invoke(cli.app, ["vendors", "--output-format", "json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert "vendors" in payload
+    assert {row["id"] for row in payload["vendors"]} >= {"openai-codex", "claude-code"}
+
+
 def test_version_label_survives_missing_git(monkeypatch) -> None:
     def fail_run(*_args, **_kwargs):
         raise FileNotFoundError

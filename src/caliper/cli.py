@@ -148,11 +148,12 @@ app = typer.Typer(
         "Reads local OpenAI Codex CLI, Claude Code, Cursor, and Aider logs. "
         "Joins them into one event shape. Prints what each PR, commit, and "
         "project cost. Offline by default. No login. No upload.\n\n"
-        "Start with: caliper overview"
+        "Start with: caliper dashboard. If no usage appears, run caliper doctor."
     ),
     no_args_is_help=False,
 )
 console = Console()
+error_console = Console(stderr=True)
 
 OUTPUT_FORMATS = ("table", "json", "csv", "markdown", "compat-json", "html")
 
@@ -386,7 +387,7 @@ FormatOpt = Annotated[
         "--format",
         "--output-format",
         "-f",
-        help="table, json, csv, markdown, compat-json.",
+        help="table, json, csv, markdown, compat-json, html.",
     ),
 ]
 StatuslineFormatOpt = Annotated[
@@ -423,10 +424,10 @@ ShareSafeOpt = Annotated[
     bool,
     typer.Option(
         "--share-safe/--no-share-safe",
+        "--safe-share/--unsafe-share",
         help=(
             "Redact project paths, project names, session labels, and prompts from HTML "
-            "output (default ON so reports are safe to forward). Pass --no-share-safe for "
-            "local-only renders that need real labels."
+            "output. Pass --no-share-safe for local-only renders that need real labels."
         ),
     ),
 ]
@@ -596,8 +597,25 @@ def _exit_error(message: str) -> typer.Exit:
     # silently parsed as markup tags by Rich's console.
     from rich.markup import escape
 
-    console.print(f"[red]error:[/red] {escape(message)}")
+    error_console.print(f"[red]error:[/red] {escape(message)}")
     return typer.Exit(2)
+
+
+def _command_line_value(name: str) -> tuple[bool, Any]:
+    """Return the value for an option explicitly provided on this command line.
+
+    Typer/Click fill defaults into every command's params, which makes it
+    impossible to tell whether a boolean flag was actually passed by looking at
+    ``ctx.params`` alone. This helper lets dashboard privacy flags override
+    config only when the user explicitly typed one of them.
+    """
+    ctx = click.get_current_context(silent=True)
+    while ctx is not None:
+        source = ctx.get_parameter_source(name) if hasattr(ctx, "get_parameter_source") else None
+        if source is click.core.ParameterSource.COMMANDLINE:
+            return True, ctx.params.get(name)
+        ctx = ctx.parent
+    return False, None
 
 
 def _validate_format(output_format: str) -> None:
@@ -2214,7 +2232,7 @@ def dashboard(
             "--theme",
             help=(
                 "Visual theme: dark, light, or print. "
-                "Falls back to [dashboard].theme (default: dark)."
+                "Falls back to dashboard.theme (default: dark)."
             ),
         ),
     ] = None,
@@ -2224,7 +2242,7 @@ def dashboard(
             "--density",
             help=(
                 "Row density: comfortable or compact. "
-                "Falls back to [dashboard].density (default: comfortable)."
+                "Falls back to dashboard.density (default: comfortable)."
             ),
         ),
     ] = None,
@@ -2234,7 +2252,7 @@ def dashboard(
             "--rhythm",
             help=(
                 "Layout rhythm: receipt (engineer-grade) or terminal "
-                "(audit-terminal). Falls back to [dashboard].rhythm (default: receipt)."
+                "(audit-terminal). Falls back to dashboard.rhythm (default: receipt)."
             ),
         ),
     ] = None,
@@ -2246,8 +2264,8 @@ def dashboard(
                 "Privacy mode: off (show real names), print-only (real names "
                 "in the file but hidden on print/screen-share — NOT safe to "
                 "send the file), or always (real names stripped from the file "
-                "entirely — safe to share). Falls back to [dashboard].privacy "
-                "(default: off)."
+                "entirely — safe to share). Falls back to dashboard.privacy "
+                "(default: always)."
             ),
         ),
     ] = None,
@@ -2262,7 +2280,7 @@ def dashboard(
         bool,
         typer.Option(
             "--force",
-            help="With --init-defaults, overwrite an existing [dashboard] section.",
+            help="With --init-defaults, overwrite an existing dashboard section.",
         ),
     ] = False,
     no_open: Annotated[
@@ -2277,9 +2295,9 @@ def dashboard(
         typer.Option(
             "--interactive/--no-interactive",
             help=(
-                "Embed both rhythms + a floating toggle panel + a Save Snapshot button "
-                "so the recipient can flip between Receipt/Terminal and Dark/Light/Safe Share "
-                "without re-running the CLI. Defaults to [dashboard].interactive (default: on)."
+                "Embed a floating toggle panel + a Save Snapshot button "
+                "so the recipient can flip between Dark/Light/Safe Share "
+                "without re-running the CLI. Defaults to dashboard.interactive (default: on)."
             ),
         ),
     ] = None,
@@ -2334,6 +2352,16 @@ def dashboard(
     )
     from caliper.dashboards.adapter import DASHBOARD_BUILD_STEPS
 
+    quiet_set, quiet_value = _command_line_value("quiet")
+    if quiet_set:
+        quiet = bool(quiet_value)
+    progress_set, progress_value = _command_line_value("progress")
+    if progress_set:
+        progress = bool(progress_value)
+    share_safe_set, share_safe_value = _command_line_value("share_safe")
+    if share_safe_set:
+        share_safe = bool(share_safe_value)
+
     if init_defaults:
         try:
             written = write_dashboard_defaults(force=force_init)
@@ -2380,6 +2408,8 @@ def dashboard(
     density = density if density is not None else dash_cfg.density
     rhythm = rhythm if rhythm is not None else dash_cfg.rhythm
     privacy = privacy if privacy is not None else dash_cfg.privacy
+    if share_safe_set:
+        privacy = "always" if share_safe else "off"
     interactive_effective = interactive if interactive is not None else dash_cfg.interactive
 
     if theme not in {"dark", "light", "print"}:
@@ -2484,14 +2514,7 @@ def dashboard(
                 ),
             )
         prog.stage_start("render")
-        # The dashboard CLI uses ``--privacy`` (off / print-only / always) as
-        # the canonical control. The legacy ``--share-safe`` boolean is still
-        # accepted for backwards compatibility but is no longer the dominant
-        # factor: only explicit ``--no-share-safe`` flips the privacy back to
-        # ``off`` (since users who passed it presumably want unredacted data).
-        effective_share_safe = False
-        if not share_safe and privacy == "off":
-            effective_share_safe = False
+        effective_share_safe = privacy == "always"
         text = render_dashboard(
             payload,
             theme=theme,
@@ -2535,7 +2558,8 @@ def dashboard(
     target.parent.mkdir(parents=True, exist_ok=True)
     already_existed = target.exists()
     target.write_text(text, encoding="utf-8")
-    typer.echo(f"Wrote {target}" + (" (overwritten)" if already_existed else ""))
+    if not quiet:
+        typer.echo(f"Wrote {target}" + (" (overwritten)" if already_existed else ""))
     # Stdout verdict — three short lines a programmer can scan without
     # opening the file. Skipped when piping HTML or running quiet.
     if not quiet and not pipe_to_stdout:
@@ -2959,7 +2983,11 @@ def init(
 rates_app = typer.Typer(help="Show, refresh, and audit the pricing rate card.")
 app.add_typer(rates_app, name="rates")
 
-vendors_app = typer.Typer(help="List the AI coding tools Caliper found on disk.")
+vendors_app = typer.Typer(
+    help="List the AI coding tools Caliper found on disk.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
 app.add_typer(vendors_app, name="vendors")
 
 taxonomy_app = typer.Typer(help="Show the canonical model taxonomy Caliper uses.")
@@ -3046,16 +3074,15 @@ def taxonomy_show(output_format: FormatOpt = "table") -> None:
     console.print(table)
 
 
-@vendors_app.command("list")
-def vendors_list(
-    session_root: SessionRootOpt = None,
-    state_db: StateDbOpt = None,
-    codex_config: CodexConfigOpt = None,
-    config: ConfigOpt = None,
-    output_format: FormatOpt = "table",
-    vendors: VendorOpt = None,
+def _emit_vendors_list(
+    *,
+    session_root: Path | None,
+    state_db: Path | None,
+    codex_config: Path | None,
+    config: Path | None,
+    output_format: str,
+    vendors: list[str] | None,
 ) -> None:
-    """List supported vendors and whether Caliper found their logs on disk."""
     _validate_format(output_format)
     try:
         options = build_options(
@@ -3103,6 +3130,49 @@ def vendors_list(
             "yes" if row["enabled"] else "no",
         )
     console.print(table)
+
+
+@vendors_app.callback(invoke_without_command=True)
+def vendors_default(
+    ctx: typer.Context,
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    output_format: FormatOpt = "table",
+    vendors: VendorOpt = None,
+) -> None:
+    """Default to ``vendors list`` so the advertised noun command works."""
+    if ctx.invoked_subcommand is not None:
+        return
+    _emit_vendors_list(
+        session_root=session_root,
+        state_db=state_db,
+        codex_config=codex_config,
+        config=config,
+        output_format=output_format,
+        vendors=vendors,
+    )
+
+
+@vendors_app.command("list")
+def vendors_list(
+    session_root: SessionRootOpt = None,
+    state_db: StateDbOpt = None,
+    codex_config: CodexConfigOpt = None,
+    config: ConfigOpt = None,
+    output_format: FormatOpt = "table",
+    vendors: VendorOpt = None,
+) -> None:
+    """List supported vendors and whether Caliper found their logs on disk."""
+    _emit_vendors_list(
+        session_root=session_root,
+        state_db=state_db,
+        codex_config=codex_config,
+        config=config,
+        output_format=output_format,
+        vendors=vendors,
+    )
 
 
 def _format_rates_label(rates: Rates | None) -> str:

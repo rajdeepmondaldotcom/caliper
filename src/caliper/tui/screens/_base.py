@@ -95,7 +95,7 @@ class CaliperScreen(Screen):
             for widget in self.middle():
                 yield widget
         with Container(id="footer-band"):
-            yield Static(self.footer_pills(), id="footer-pills")
+            yield Static(self.footer_pills(), id="footer-pills", markup=False)
 
     def top(self):
         """Yield top-band widgets. Override in the subclass."""

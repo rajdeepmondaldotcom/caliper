@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from caliper import __version__
 from caliper.dashboards.data_models import (
+    DASHBOARD_SCHEMA_VERSION,
     AdvisorAlternative,
     AdvisorRecommendation,
     AgentRow,
@@ -183,7 +184,9 @@ def _sample_recap() -> Recap:
 
 def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> Dashboard:
     return Dashboard(
-        caliper=CaliperMeta(version=__version__, schema_version=2, build_sha="330c1ab"),
+        caliper=CaliperMeta(
+            version=__version__, schema_version=DASHBOARD_SCHEMA_VERSION, build_sha="330c1ab"
+        ),
         window=WindowMeta(
             start="2026-05-03",
             end="2026-05-17",
@@ -1167,7 +1170,9 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
 def empty_dashboard() -> Dashboard:
     """The all-zero dashboard. Renderer falls back to empty placeholders."""
     return Dashboard(
-        caliper=CaliperMeta(version=__version__, schema_version=2, build_sha="330c1ab"),
+        caliper=CaliperMeta(
+            version=__version__, schema_version=DASHBOARD_SCHEMA_VERSION, build_sha="330c1ab"
+        ),
         window=WindowMeta(
             start="2026-05-10",
             end="2026-05-17",

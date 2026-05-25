@@ -40,6 +40,8 @@ jobs:
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - name: Set up Python
         run: uv python install 3.13
+      - name: Lockfile check
+        run: uv lock --check
       - name: Validate tag matches pyproject version
         run: |
           set -euo pipefail
@@ -204,7 +206,6 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           print-hash: true
-          skip-existing: true
           verbose: true
 
   github-publish:

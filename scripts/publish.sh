@@ -33,6 +33,9 @@ fi
 VER=$(grep '^version = ' pyproject.toml | head -n1 | awk -F'"' '{print $2}')
 echo "==> preparing caliper-ai $VER"
 
+echo "==> lockfile check"
+uv lock --check
+
 echo "==> running tests"
 uv run pytest -q
 
