@@ -405,7 +405,7 @@ Test count: 900 → 1031.
   writing the HTML: `Caliper · <window> · $<cost> · trend ±X.Y% · top fix: ...`
   / `Fixable: $… across N recommendations.` / `Theme: … · re-render: …`.
   Suppressed by `--quiet`; never pollutes a `--stdout` HTML stream.
-- **Footer moat line.** `Caliper reads logs already on your disk. No proxy.
+- **Footer trust line.** `Caliper reads logs already on your disk. No proxy.
   No upload. No login.` Above the version stamp.
 - **Privacy-mode screenshots** (`docs/screenshots/*.png`) — hero, models,
   projects, insights, sessions, usage-mix, advisor, anomalies,

@@ -2917,7 +2917,7 @@ def _caliper_footer(d: Dashboard) -> str:
         '<footer style="border-top:1px solid var(--border);padding-top:16px;margin-top:32px;'
         'display:grid;grid-template-columns:1fr auto;gap:16px;color:var(--mute);font-size:11px;line-height:1.6">'
         '<div style="max-width:640px;display:flex;flex-direction:column;gap:6px">'
-        # The moat, said plainly. The voice rule (design-brief/03) is
+        # The privacy boundary, said plainly. The voice rule (design-brief/03) is
         # "headers are nouns" — three short clauses, no marketing verbs.
         '<div style="color:var(--ink-2);font-size:12px;font-weight:500">'
         "Caliper reads logs already on your disk. "
