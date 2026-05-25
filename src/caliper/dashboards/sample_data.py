@@ -630,9 +630,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
         executive_brief=ExecutiveBrief(
             title="AI usage needs review",
             verdict="4 items to review before sharing or acting on this report.",
-            subtitle=(
-                "$1,243 selected-window cost · 480 deduped events · 32 sessions"
-            ),
+            subtitle=("$1,243 selected-window cost · 480 deduped events · 32 sessions"),
             tone="warn",
             findings=[
                 BriefFinding(

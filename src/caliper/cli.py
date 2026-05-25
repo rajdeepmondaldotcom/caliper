@@ -5076,12 +5076,12 @@ def export_receipt(
         raise _exit_error("--receipt-format must be one of: markdown, html")
 
     # Backwards compatibility: --show-sensitive ⇒ --no-share-safe.
-    # Emit a one-line stderr deprecation note when the legacy flag is
-    # supplied so CI scripts get a nudge to migrate without breaking.
+    # Emit a one-line stderr notice when the legacy flag is supplied so CI
+    # scripts get a nudge to migrate without breaking.
     if show_sensitive:
         Console(stderr=True).print(
-            "[yellow]deprecation:[/yellow] --show-sensitive / "
-            "--include-sensitive-receipt-data is deprecated; "
+            "[yellow][deprecated][/yellow] --show-sensitive / "
+            "--include-sensitive-receipt-data is superseded; "
             "use --no-share-safe instead."
         )
         share_safe = False

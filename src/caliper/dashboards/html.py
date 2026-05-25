@@ -2223,7 +2223,7 @@ def _bar_chart(
         # avoids the invalid role="listitem"-without-list-parent. Per-day values
         # remain available in the §02 summary and the cost-over-time table; the
         # <title> still gives a native hover tooltip.
-        parts.append(f'<g class="cal-bar-group" aria-hidden="true">')
+        parts.append('<g class="cal-bar-group" aria-hidden="true">')
         parts.append(f"<title>{_esc(aria_label)}</title>")
         parts.append(
             f'<rect x="{x:.1f}" y="{pad_t}" width="{bw:.1f}" height="{inner_h:.1f}" '
@@ -2326,7 +2326,9 @@ def _heatmap_7x24(recap: Recap) -> str:
         f'<div style="display:grid;grid-template-rows:repeat(7,{cell_size}px);gap:{gap}px">'
     )
     for d in range(7):
-        parts.append(f'<div class="cal-heatmap-cols" style="display:grid;grid-template-columns:repeat(24,1fr);gap:{gap}px">')
+        parts.append(
+            f'<div class="cal-heatmap-cols" style="display:grid;grid-template-columns:repeat(24,1fr);gap:{gap}px">'
+        )
         for h in range(24):
             v = grid[d][h]
             if v == 0:
@@ -5767,6 +5769,8 @@ def _wrap_document(
         if demo
         else ""
     )
+    interactive_attr = "true" if interactive else "false"
+    demo_attr = ' data-demo="true"' if demo else ""
     return (
         "<!doctype html>"
         '<html lang="en">'
@@ -5778,8 +5782,8 @@ def _wrap_document(
         "</head>"
         f'<body class="{class_attr}" data-theme="{theme}" data-density="{density}" '
         f'data-share-safe="{share}" data-privacy="{privacy}" data-rhythm="{rhythm}" '
-        f'data-mode="{mode}" data-interactive="{"true" if interactive else "false"}"'
-        f'{" data-demo=\"true\"" if demo else ""}>'
+        f'data-mode="{mode}" data-interactive="{interactive_attr}"'
+        f"{demo_attr}>"
         f"{skip_link}"
         f"{demo_ribbon}"
         f"{body}"

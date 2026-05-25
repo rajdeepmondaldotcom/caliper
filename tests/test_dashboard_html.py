@@ -569,7 +569,8 @@ def test_interactive_share_safe_file_embeds_no_real_values() -> None:
     html = render_dashboard(d, privacy="always", interactive=True)
 
     # No real project/session/path labels anywhere in the file...
-    for leak in ("api-server", "frontend-app", "mobile-app", "data-pipeline", "~/work/", "session-018"):
+    leaks = ("api-server", "frontend-app", "mobile-app", "data-pipeline", "~/work/", "session-018")
+    for leak in leaks:
         assert leak not in html, f"Safe Share leaked real value {leak!r}"
     # ...and no real-value data spans for the toggle to un-hide (the CSS rule
     # `.cal-real {{...}}` may still appear; a `<span class="cal-real">` must not).

@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 import typer
+from typer.testing import CliRunner
 
 from caliper.cli import app
 from caliper.render import write_output
-from typer.testing import CliRunner
 
 runner = CliRunner()
 

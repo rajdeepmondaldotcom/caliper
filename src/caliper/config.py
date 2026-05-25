@@ -500,9 +500,7 @@ def _time_window(
         # case; point at the real problem instead of an --until the user never
         # set.
         if since and until is None and start > default_end:
-            raise ValueError(
-                f"--window-start {since} is in the future; there is no data after now"
-            )
+            raise ValueError(f"--window-start {since} is in the future; there is no data after now")
         raise ValueError("--window-start must be before --window-end")
     return start, end
 
