@@ -546,7 +546,9 @@ def _parse_since(
             return parse_interval(raw, now).start.astimezone(timezone)
         except ValueError as exc:
             raise ValueError(
-                f"--since does not match an ISO date or a known window expression: {raw!r}"
+                f"--since does not match an ISO date or a known window expression: {raw!r}. "
+                "Try an ISO date (2026-05-20) or a window like 'last 7 days', "
+                "'yesterday', or 'this week'."
             ) from exc
     return parse_datetime(since, default_tz=timezone)
 

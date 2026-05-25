@@ -16,7 +16,12 @@ from rich.table import Table
 
 from caliper import SCHEMA_VERSION, __version__
 from caliper.aggregation import aggregate_many, aggregate_total, budget_impact_sort_key
-from caliper.evidence import evidence_dimensions, evidence_metadata, worst_grade
+from caliper.evidence import (
+    evidence_dimensions,
+    evidence_metadata,
+    parser_issue_warning,
+    worst_grade,
+)
 from caliper.humanize import compact_number, format_int, redact, short_table_label
 from caliper.models import (
     UNKNOWN_PROJECT,
@@ -597,8 +602,27 @@ def _print_report_header(
     if vendor_breakdown:
         console.print(f"Vendors: {vendor_breakdown}")
     if result.warnings:
+        # Coverage caveats (e.g. "Cursor files have no per-event token counts")
+        # repeat on every analytical command and quickly become noise. Collapse
+        # them to one short pointer here; the full detail still lives in the JSON
+        # envelope, `caliper doctor`, and `caliper evidence`, which read
+        # ``result.parser_issues`` directly rather than this header.
+        coverage_warnings = {
+            parser_issue_warning(issue)
+            for issue in result.parser_issues
+            if issue.kind.startswith("unsupported:")
+        }
+        saw_coverage = False
         for warning in result.warnings:
+            if warning in coverage_warnings:
+                saw_coverage = True
+                continue
             console.print(f"[yellow]Warning:[/yellow] {warning}")
+        if saw_coverage:
+            console.print(
+                "[yellow]Note:[/yellow] Some sources have limited token coverage. "
+                "Run `caliper doctor` for details."
+            )
     for warning in pricing_warnings(total):
         console.print(
             f"[yellow]Warning:[/yellow] {warning} Reported costs are {pricing_status(total)}."

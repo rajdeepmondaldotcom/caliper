@@ -142,6 +142,9 @@ from caliper.taxonomy import taxonomy_records
 from caliper.timeutil import iso_z, local_timezone, window_label
 from caliper.vendors import vendor_summaries
 
+# Accept both -h and --help everywhere (root app, every command, and sub-apps).
+_HELP_OPTION_NAMES = {"help_option_names": ["-h", "--help"]}
+
 app = typer.Typer(
     help=(
         "Caliper: the cost layer for AI-assisted development.\n\n"
@@ -151,6 +154,7 @@ app = typer.Typer(
         "Start with: caliper dashboard. If no usage appears, run caliper doctor."
     ),
     no_args_is_help=False,
+    context_settings=_HELP_OPTION_NAMES,
 )
 console = Console()
 error_console = Console(stderr=True)
@@ -618,9 +622,21 @@ def _command_line_value(name: str) -> tuple[bool, Any]:
     return False, None
 
 
-def _validate_format(output_format: str) -> None:
+# compat-json is the Codex-compatible session export. Only the session-style
+# commands (and the commands that treat it as a plain-json alias) implement it;
+# everywhere else it must fail cleanly instead of silently rendering the human
+# table, which would hand a script garbage when it asked for JSON.
+_COMPAT_JSON_COMMANDS = "daily, weekly, monthly, project, models, session"
+
+
+def _validate_format(output_format: str, *, allow_compat: bool = False) -> None:
     if output_format not in OUTPUT_FORMATS:
         raise _exit_error(f"--output-format must be one of: {', '.join(OUTPUT_FORMATS)}")
+    if output_format == "compat-json" and not allow_compat:
+        raise _exit_error(
+            "--format compat-json is only available on the session-style commands "
+            f"({_COMPAT_JSON_COMMANDS}). Use --format json instead."
+        )
 
 
 def _write_output_file(output: Path, text: str, *, encoding: str = "utf-8") -> None:
@@ -797,7 +813,7 @@ def _run_grouped(name: str, rows_fn: RowsFn, values: dict) -> None:
     from caliper.cli_progress import cli_report_progress
 
     values = _with_parent_options(values)
-    _validate_format(values["output_format"])
+    _validate_format(values["output_format"], allow_compat=True)
     options = _options(values)
     with cli_report_progress(
         output_format=values["output_format"],
@@ -905,7 +921,7 @@ def _render_grouped_per_vendor(
 
 def _run_session_id(values: dict, session_id: str) -> None:
     values = _with_parent_options(values)
-    _validate_format(values["output_format"])
+    _validate_format(values["output_format"], allow_compat=True)
     options = _options(values)
     result = _safe_load_usage(options)
     scoped = LoadResult(
@@ -1594,7 +1610,7 @@ def blocks(
     """Print session billing blocks. Use --active to see the current block only."""
     from caliper.blocks import block_payload, build_blocks, filter_recent_blocks
 
-    _validate_format(output_format)
+    _validate_format(output_format, allow_compat=True)
     options = _options(locals())
     result = _safe_load_usage(options)
     rate_card = _safe_load_rate_card(options)
@@ -2980,20 +2996,30 @@ def init(
     console.print("[dim]Open it, set your budgets, then run `caliper budgets check`.[/dim]")
 
 
-rates_app = typer.Typer(help="Show, refresh, and audit the pricing rate card.")
+rates_app = typer.Typer(
+    help="Show, refresh, and audit the pricing rate card.",
+    context_settings=_HELP_OPTION_NAMES,
+)
 app.add_typer(rates_app, name="rates")
 
 vendors_app = typer.Typer(
     help="List the AI coding tools Caliper found on disk.",
     invoke_without_command=True,
     no_args_is_help=False,
+    context_settings=_HELP_OPTION_NAMES,
 )
 app.add_typer(vendors_app, name="vendors")
 
-taxonomy_app = typer.Typer(help="Show the canonical model taxonomy Caliper uses.")
+taxonomy_app = typer.Typer(
+    help="Show the canonical model taxonomy Caliper uses.",
+    context_settings=_HELP_OPTION_NAMES,
+)
 app.add_typer(taxonomy_app, name="taxonomy")
 
-schema_app = typer.Typer(help="Export and validate Caliper JSON output schemas.")
+schema_app = typer.Typer(
+    help="Export and validate Caliper JSON output schemas.",
+    context_settings=_HELP_OPTION_NAMES,
+)
 app.add_typer(schema_app, name="schema")
 
 
@@ -5027,7 +5053,10 @@ def _format_record_cell(value: object) -> str:
     return str(value or "")
 
 
-export_app = typer.Typer(help="Render receipts, Grafana dashboards, and Prometheus metrics.")
+export_app = typer.Typer(
+    help="Render receipts, Grafana dashboards, and Prometheus metrics.",
+    context_settings=_HELP_OPTION_NAMES,
+)
 app.add_typer(export_app, name="export")
 
 
@@ -5256,7 +5285,10 @@ def export_receipt(
         typer.echo(text)
 
 
-budgets_app = typer.Typer(help="Check usage against budgets and gate CI on cost.")
+budgets_app = typer.Typer(
+    help="Check usage against budgets and gate CI on cost.",
+    context_settings=_HELP_OPTION_NAMES,
+)
 app.add_typer(budgets_app, name="budgets")
 
 
@@ -5748,7 +5780,7 @@ def predict(
         total_outlook,
     )
 
-    _validate_format(output_format)
+    _validate_format(output_format, allow_compat=True)
     options = _options(locals())
     result = _safe_load_usage(options)
     rate_card = _safe_load_rate_card(options)
@@ -5956,7 +5988,7 @@ def audit(
         waste_share_of_spend,
     )
 
-    _validate_format(output_format)
+    _validate_format(output_format, allow_compat=True)
     options = _options(locals())
     result = _safe_load_usage(options)
     rate_card = _safe_load_rate_card(options)
@@ -6119,7 +6151,7 @@ def recommend(
         total_savings_usd,
     )
 
-    _validate_format(output_format)
+    _validate_format(output_format, allow_compat=True)
     options = _options(locals())
     result = _safe_load_usage(options)
     rate_card = _safe_load_rate_card(options)
