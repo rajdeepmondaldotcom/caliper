@@ -2,6 +2,45 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.56 - 2026-05-25
+
+Release of the 0.0.55 critical-user polish branch, with the final release
+metadata and package artifacts cut from the branch that was exercised locally.
+
+### Fixed
+
+- **Dashboard mobile controls no longer cover the primary CTA.** The floating
+  control panel collapses to a compact search affordance on phones, while the
+  Investigate CTA remains directly clickable.
+- **Dashboard touch targets are consistently usable.** Search, theme, save,
+  section index, evidence, verdict, appendix, and "show the math" controls now
+  clear the browser-verified target-size pass on desktop and mobile.
+- **Empty or unsupported evidence no longer looks excellent.** Zero-event
+  dashboard and insight states now surface unsupported evidence explicitly and
+  route users to `caliper doctor`.
+- **CLI output inheritance is consistent.** `dashboard`, `doctor`, and
+  `forecast` now respect the intended parent `--out`, `--format`, and
+  `--no-cache` behavior, and unsupported dashboard formats fail clearly.
+
+### Hardened
+
+- **Reports stay cache-only.** Live pricing fetches are restricted to
+  `caliper rates refresh --allow-network`; report commands no longer fetch as a
+  side effect.
+- **Rate-card JSON redacts local catalog paths** unless path output is
+  explicitly requested.
+- **Budget config validation rejects impossible thresholds** instead of treating
+  zero or negative limits as a harmless zero-percent budget.
+- **TUI refresh and redaction behavior** now matches configuration: sessions
+  refresh without blanking, command palette commands are registered, and
+  `[tui].redact = false` is honored.
+
+### Docs
+
+- README screenshot URLs point at the `v0.0.56` tag, the release checklist names
+  README/screenshots explicitly, and SECURITY documents the project-scoped PyPI
+  publishing setup used by the workflow.
+
 ## 0.0.55 - 2026-05-25
 
 Critical-user polish pass: a fleet of reviewer personas exercised the dashboard

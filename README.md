@@ -21,7 +21,7 @@ caliper dashboard
 
 </div>
 
-![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/hero.png)
+![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/hero.png)
 
 <p align="center"><sub>Safe Share mode screenshot: paths, projects, and session labels are redacted while costs, evidence status, and recommendations stay visible.</sub></p>
 
@@ -98,15 +98,15 @@ show the real report layout without exposing local paths or session identities.
 
 | Next actions | Spend drivers |
 |---|---|
-| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/usage-mix.png"> |
+| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/usage-mix.png"> |
 
 | Anomalies | Savings opportunities |
 |---|---|
-| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/inefficiencies.png"> |
+| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/inefficiencies.png"> |
 
 | Session drilldown | Attribution and evidence |
 |---|---|
-| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.55/docs/screenshots/attribution.png"> |
+| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.56/docs/screenshots/attribution.png"> |
 
 ## How it's different
 
