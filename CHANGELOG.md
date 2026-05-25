@@ -2,6 +2,43 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.55 - 2026-05-25
+
+Critical-user polish pass: a fleet of reviewer personas exercised the dashboard
+and CLI end to end. Verified, real findings were fixed; loud false alarms (e.g.
+"cost totals don't reconcile" — they do, to the cent, on a pinned window) were
+confirmed and left alone.
+
+### Added
+
+- **Mobile jump-to-section nav.** Narrow screens get a horizontal, scroll-spy-
+  aware index of all sections instead of a blind scroll through 17 of them.
+- **Glossary affordances on jargon.** "Tier source", "Cohort", "Delta",
+  "Cost-weighted rhythm", and the σ/detector chip now carry a dotted-underline
+  ⓘ with a plain-language definition (native tooltip + `aria-label`).
+- **"Show the math" chevron.** The KPI disclosure now shows a rotating caret so
+  it reads as clickable and signals its open/closed state.
+- **`-h` is a help alias** everywhere (root, every command, and sub-apps).
+- **Docs.** README documents `caliper dashboard --demo`, plus `caliper rates
+  show` / `caliper rates refresh --allow-network` for rate-card age and refresh.
+
+### Fixed
+
+- **`-f compat-json` no longer silently prints a table** on commands that don't
+  support it (e.g. `overview`). It now fails cleanly, naming the session-style
+  commands that do — so scripts asking for JSON never get a table.
+- **The Cursor "no per-event token counts" warning no longer repeats** on every
+  analytical command; the table shows one short pointer to `caliper doctor`,
+  while the full detail stays in the JSON envelope, `doctor`, and `evidence`.
+- **Clearer bad-date error.** An unparseable `--since` now suggests working
+  forms (an ISO date, or windows like `last 7 days`).
+- **Mobile tap targets** for the verdict chips, evidence badge, and disclosures
+  now clear the 44px WCAG target; the 721–900px tablet range no longer leaks a
+  few pixels of horizontal scroll.
+- **Above-the-fold focus.** When a billboard is present it owns the first
+  viewport; the multi-finding verdict strip is demoted into a collapsed
+  "More signals" disclosure.
+
 ## 0.0.54 - 2026-05-25
 
 Critical-user polish pass focused on the install path, share-safe dashboard

@@ -50,6 +50,9 @@ The answer never leaves your machine.
 caliper dashboard
 ```
 
+No logs yet? Run `caliper dashboard --demo` to explore the full report with
+built-in sample data before pointing Caliper at your own usage.
+
 Opens a self-contained HTML file in your browser. The verdict sits above the
 fold — period, cost, trend, and the top fix Caliper found:
 
@@ -67,6 +70,26 @@ an unexplained total.
 
 Large first runs may spend a moment indexing local log history; later runs reuse
 the local parse cache.
+
+### Rate cards stay current — on your terms
+
+Costs are priced from a rate card embedded at release time. See exactly which
+card is active and how old it is:
+
+```bash
+caliper rates show     # active rate card, its sources, and its age
+```
+
+Caliper is offline by default and never fetches on its own. When you want the
+latest published pricing, opt in explicitly:
+
+```bash
+caliper rates refresh --allow-network
+```
+
+This is the auditable backing for every dollar: `rates show` names the dated,
+sourced rate card behind the prices, and the dashboard's per-KPI "show the math"
+disclosures expand the formula and sample size on top of it.
 
 ## Dashboard tour
 
