@@ -110,6 +110,8 @@ def test_dashboard_no_share_safe_keeps_local_labels(tmp_path) -> None:
 def test_dashboard_default_opens_browser_for_interactive_terminal(monkeypatch, tmp_path) -> None:
     opened: list[str] = []
 
+    monkeypatch.setattr("caliper.config.USER_CONFIG", tmp_path / "missing-user-config.toml")
+    monkeypatch.setattr("caliper.config.LOCAL_CONFIG", tmp_path / "missing-local-config.toml")
     monkeypatch.setattr("caliper.cli._dashboard_stdout_is_interactive", lambda: True)
     monkeypatch.setattr(
         _webbrowser,
@@ -147,11 +149,10 @@ def test_dashboard_default_opens_browser_for_interactive_terminal(monkeypatch, t
     assert "Opened" in result.output
     assert opened
     opened_path = Path(urlparse(opened[0]).path)
-    # v2 default: ~/Downloads/caliper-dashboard-<timestamp>.html
-    # Privacy suffix is only embedded when --privacy is explicitly used.
+    # v0.0.54 default: share-safe filenames carry the privacy mode.
     assert opened_path.name.startswith("caliper-dashboard-")
     assert opened_path.name.endswith(".html")
-    assert "privacy-" not in opened_path.name  # default = no suffix
+    assert "privacy-always" in opened_path.name
     assert opened_path.exists()
     assert opened_path.read_text(encoding="utf-8").startswith("<!doctype html>")
     # Cleanup the generated file so re-running tests doesn't litter ~/Downloads.

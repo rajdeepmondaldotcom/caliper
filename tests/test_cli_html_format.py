@@ -25,6 +25,8 @@ from caliper.html_export import lens_for_command
 
 @pytest.fixture
 def setup_environment(monkeypatch, tmp_path):
+    monkeypatch.setattr("caliper.config.USER_CONFIG", tmp_path / "missing-user-config.toml")
+    monkeypatch.setattr("caliper.config.LOCAL_CONFIG", tmp_path / "missing-local-config.toml")
     monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
     monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
@@ -53,6 +55,12 @@ def _common_args(env: dict[str, str]) -> list[str]:
         "--codex-config",
         env["codex_config"],
     ]
+
+
+def _body_tag(html: str) -> str:
+    start = html.index("<body ")
+    end = html.index(">", start)
+    return html[start : end + 1]
 
 
 HTML_COMMANDS = [
@@ -178,14 +186,7 @@ def test_html_format_self_contained_no_external_resources(setup_environment, tmp
 def test_html_format_dashboard_command_default_privacy(
     setup_environment,
 ) -> None:
-    """v2 redesign: ``caliper dashboard`` defaults to privacy="off".
-
-    The legacy ``--share-safe`` boolean has been superseded by the
-    three-way ``--privacy`` flag (off / print-only / always). Setting
-    ``privacy = "print-only"`` in ``~/.config/caliper/config.toml`` is
-    the recommended way to get always-redacted print output while
-    keeping the browser view unredacted.
-    """
+    """``caliper dashboard`` defaults to a file-safe redacted render."""
     runner = CliRunner()
     result = runner.invoke(
         app,
@@ -196,11 +197,12 @@ def test_html_format_dashboard_command_default_privacy(
         ],
     )
     assert result.exit_code == 0, result.output
-    # Default privacy is "off" — original format, real names everywhere.
-    # The user opts into redaction by passing --privacy print-only or
-    # --privacy always. ``data-share-safe`` mirrors ``privacy == "always"``.
-    assert 'data-privacy="off"' in result.stdout
-    assert 'data-share-safe="false"' in result.stdout
+    # Default privacy is "always" so a generated file can be shared safely.
+    # The user opts out for local-only renders with --privacy off or
+    # --no-share-safe. ``data-share-safe`` mirrors ``privacy == "always"``.
+    body_tag = _body_tag(result.stdout)
+    assert 'data-privacy="always"' in body_tag
+    assert 'data-share-safe="true"' in body_tag
 
 
 def test_html_format_dashboard_command_privacy_always(setup_environment) -> None:
