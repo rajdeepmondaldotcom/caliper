@@ -74,6 +74,22 @@ def test_metrics_text_includes_all_expected_metric_names() -> None:
     assert 'kind="output"' in body
 
 
+def test_metrics_text_carries_pricing_status_label() -> None:
+    snapshot = MetricsSnapshot(
+        cost_usd=1.0,
+        burn_per_hour=0.0,
+        primary_window_percent=0.0,
+        secondary_window_percent=0.0,
+        events_total=1,
+        long_context_events_total=0,
+        pricing_status="estimated",
+    )
+    body = build_metrics_text(snapshot).decode()
+    # Monitoring must be able to tell estimated cost from exact.
+    assert "caliper_pricing_status" in body
+    assert 'status="estimated"' in body
+
+
 def test_metrics_text_handles_empty_tokens_dict() -> None:
     snapshot = MetricsSnapshot(
         cost_usd=0.0,

@@ -129,7 +129,7 @@ actually cost — without sending prompts to a third party — use this.
 | Surface | Command | Purpose |
 |---|---|---|
 | Browser dashboard | `caliper dashboard` | Next actions, spend drivers, savings, anomalies, sessions, evidence. |
-| PR receipt | `caliper pr 42` | Cost attributed to one pull request. |
+| PR receipt | `caliper pr 42` | Cost of events that recorded the PR's commit SHAs (it states how much of window spend that covers). |
 | Overview | `caliper overview` | Rolling 7 / 30 / 90 day spend. |
 | Project rollup | `caliper project` | Spend by repository or folder. |
 | Model rollup | `caliper models` | Spend by model and vendor. |

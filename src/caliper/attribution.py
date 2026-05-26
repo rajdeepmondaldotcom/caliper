@@ -545,6 +545,39 @@ def _scale_to_monthly(impact: Decimal, options: RuntimeOptions) -> Decimal:
     return Decimal(str(round(float(impact) * (30.0 / window_days), 4)))
 
 
+def git_attribution_coverage(events: list[UsageEvent], rate_card: RateCard) -> dict[str, object]:
+    """How much spend actually carries a git SHA.
+
+    ``caliper pr`` / ``caliper commit`` can only price the slice of events
+    that recorded a commit SHA. Most events don't, so the honest framing is
+    a coverage statement: "cost-per-commit covers X% of recorded spend; the
+    rest has no SHA." This returns the raw numbers for that disclosure — it
+    does **not** infer SHAs (Caliper never fabricates attribution).
+    """
+    events_total = len(events)
+    cost_total = Decimal("0")
+    events_with_sha = 0
+    cost_with_sha = Decimal("0")
+    for event in events:
+        cost, _long, _unknown = event_cost(rate_card, event)
+        cost_total += cost.cost_usd
+        if event.thread.git_sha:
+            events_with_sha += 1
+            cost_with_sha += cost.cost_usd
+    cost_coverage = float(cost_with_sha / cost_total) if cost_total > 0 else 0.0
+    sha_coverage = (events_with_sha / events_total) if events_total else 0.0
+    return {
+        "events_with_sha": events_with_sha,
+        "events_total": events_total,
+        "sha_coverage": sha_coverage,
+        "cost_with_sha_usd_exact": decimal_string(cost_with_sha),
+        "cost_total_usd_exact": decimal_string(cost_total),
+        "cost_coverage": cost_coverage,
+        # Full SHA coverage is the only "exact" story; anything less is partial.
+        "evidence_status": "exact" if sha_coverage >= 1.0 and events_total else "partial",
+    }
+
+
 __all__ = [
     "AgentAttribution",
     "SOURCE_DIRECT",
@@ -553,5 +586,6 @@ __all__ = [
     "attribution_findings",
     "build_agent_attributions",
     "build_skill_attributions",
+    "git_attribution_coverage",
     "skill_summary",
 ]

@@ -40,7 +40,7 @@ from caliper.subscriptions import (
     subscription_plan_payload,
     subscription_warnings,
 )
-from caliper.timeutil import iso_z, window_label
+from caliper.timeutil import iso_z, window_label, window_label_with_days
 
 __all__ = ["format_int", "redact", "render", "render_limits"]
 
@@ -641,7 +641,7 @@ def _print_report_header(
     total: Aggregate,
 ) -> None:
     console.print(f"[bold]{title}[/bold]")
-    console.print(f"Window: {window_label(options.start, options.end, options.timezone)}")
+    console.print(f"Window: {window_label_with_days(options.start, options.end, options.timezone)}")
     _print_data_source(console, result, options)
     vendor_breakdown = _vendor_breakdown(result)
     if vendor_breakdown:
@@ -662,21 +662,28 @@ def _print_report_header(
             if warning in coverage_warnings:
                 saw_coverage = True
                 continue
-            console.print(f"[yellow]Warning:[/yellow] {warning}")
+            console.print(f"[bold yellow]Warning:[/bold yellow] {warning}")
         if saw_coverage:
             console.print(
-                "[yellow]Note:[/yellow] Some sources have limited token coverage. "
+                "[dim]Note:[/dim] Some sources have limited token coverage. "
                 "Run `caliper doctor` for details."
             )
+    # Three-tier prefix convention so a reader can scan severity at a glance:
+    #   Warning: (bold) — material, may need action
+    #   Note:    (dim)  — informational, no action
+    #   Caveat:  (bold) — trust/accuracy of the headline number itself
+    # The word prefix carries the meaning (not colour alone) for a11y.
     summary = pricing_summary_line(total)
     if summary:
-        label = "Warning" if pricing_is_material(total) else "Note"
-        console.print(f"[yellow]{label}:[/yellow] {summary}")
+        if pricing_is_material(total):
+            console.print(f"[bold]Caveat:[/bold] {summary}")
+        else:
+            console.print(f"[dim]Note:[/dim] {summary}")
     for warning in subscription_warnings(total.plan_types):
         console.print(f"[yellow]Subscription:[/yellow] {warning}")
     caveat = subscription_cost_caveat(total.plan_types)
     if caveat:
-        console.print(f"[yellow]Subscription:[/yellow] {caveat}")
+        console.print(f"[bold]Caveat:[/bold] {caveat}")
     console.print()
 
 
@@ -898,9 +905,11 @@ def _print_report_footer(console: Console, result: LoadResult, total: Aggregate)
             f"${total.costs.reported_calculated_delta_usd:+,.2f} delta"
         )
     if total.cache_savings.cost_usd:
+        # "Discount", not "savings": cached tokens were billed at the cache
+        # rate; this is the discount already applied, not money you set aside.
         console.print(
-            f"Cache savings: ${total.cache_savings.cost_usd:,.2f} "
-            "(vs paying the full input rate for every cached token)"
+            f"Cache discount: ${total.cache_savings.cost_usd:,.2f} "
+            "(vs the full input rate for every cached token)"
         )
     if result.tier_sources:
         sources = ", ".join(
@@ -1116,6 +1125,17 @@ def render_markdown(
             )
             + " |"
         )
+    # Carry the same pricing/subscription caveats the JSON envelope exposes, so
+    # a shared markdown report isn't silently more confident than the JSON.
+    if total is not None:
+        caveats = list(pricing_warnings(total)) + list(subscription_warnings(total.plan_types))
+        caveat = subscription_cost_caveat(total.plan_types)
+        if caveat:
+            caveats.append(caveat)
+        if caveats:
+            lines.append("")
+            lines.append("**Caveats**")
+            lines.extend(f"- {note}" for note in caveats)
     return "\n".join(lines) + "\n"
 
 
@@ -1167,7 +1187,7 @@ def render_limits_table(result: LoadResult, options: RuntimeOptions) -> str:
     buffer = io.StringIO()
     console = _make_console(buffer, options)
     console.print("[bold]Caliper - Limits[/bold]")
-    console.print(f"Window: {window_label(options.start, options.end, options.timezone)}")
+    console.print(f"Window: {window_label_with_days(options.start, options.end, options.timezone)}")
     samples = _recent_samples(result.rate_limit_samples, options.top_threads)
     if not samples:
         console.print("No rate-limit samples found.")

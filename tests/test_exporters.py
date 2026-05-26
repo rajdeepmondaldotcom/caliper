@@ -72,7 +72,7 @@ def test_receipt_markdown_includes_sections_and_totals() -> None:
     assert "## Top projects" in text
     assert "$12.34" in text
     assert "$12.34" in text
-    assert "Cache savings" in text
+    assert "Cache discount" in text
     assert "$9.87" in text
 
 
@@ -82,7 +82,7 @@ def test_receipt_html_escapes_user_input() -> None:
     html = render_receipt_html(payload)
     assert "&lt;script&gt;" in html
     assert "<script>alert(1)</script>" not in html
-    assert "Cache savings" in html
+    assert "Cache discount" in html
 
 
 def test_grafana_dashboard_has_required_panels() -> None:

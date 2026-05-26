@@ -794,14 +794,14 @@ p, h1, h2, h3 { text-wrap: pretty; }
      SVG label without shifting anything around it. */
   .cal-bar-rect { transition: fill-opacity 120ms ease-out; }
   .cal-bar-group:hover .cal-bar-rect,
-  .cal-bar-group:focus .cal-bar-rect { fill-opacity: 0.82; }
+  .cal-bar-group:focus-visible .cal-bar-rect { fill-opacity: 0.82; }
   .cal-bar-hover-label {
     opacity: 0;
     pointer-events: none;
     transition: opacity 80ms ease-out;
   }
   .cal-bar-group:hover .cal-bar-hover-label,
-  .cal-bar-group:focus .cal-bar-hover-label { opacity: 1; }
+  .cal-bar-group:focus-visible .cal-bar-hover-label { opacity: 1; }
   /* Verdict-strip pill links: existing <a> gets underline; the chip gets
      a stable contrast state. */
   .cal-verdict-chip {
@@ -3153,7 +3153,7 @@ def _caliper_footer(d: Dashboard) -> str:
     sha = getattr(d.caliper, "build_sha", "") or ""
     sha_line = f"<div>sha {_esc(sha)}</div>" if sha else ""
     return (
-        '<footer style="border-top:1px solid var(--border);padding-top:16px;margin-top:32px;'
+        '<footer role="contentinfo" style="border-top:1px solid var(--border);padding-top:16px;margin-top:32px;'
         'display:grid;grid-template-columns:1fr auto;gap:16px;color:var(--mute);font-size:11px;line-height:1.6">'
         '<div style="max-width:640px;display:flex;flex-direction:column;gap:6px">'
         # The privacy boundary, said plainly. The voice rule (design-brief/03) is
@@ -3307,7 +3307,10 @@ def _small_table(
         # (WCAG 2.1.1 / axe scrollable-region-focusable).
         '<div class="cal-table-scroll" tabindex="0" style="overflow-x:auto;max-width:100%;'
         'border-radius:var(--r-md)">'
-        '<table class="cal-table" style="width:100%;min-width:max-content;'
+        # aria-label gives screen-reader users a name for the table; derive it
+        # from the leading column so the generic helper stays caller-agnostic.
+        f'<table class="cal-table" aria-label="{_esc(headers[0]) if headers else "Breakdown"} breakdown" '
+        'style="width:100%;min-width:max-content;'
         'border-collapse:collapse;font-size:13px">'
         + head
         + "<tbody>"
@@ -3919,7 +3922,7 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
                 formula=cost_formula,
             ),
             _card(
-                label="Cache savings",
+                label="Cache discount",
                 value="—" if is_empty else fmt_money(t.cache_savings_usd),
                 sub=empty_sub or f"{fmt_pct(t.cache_hit_rate)} hit rate",
                 delta=t.delta_cache_pct,
@@ -4100,7 +4103,7 @@ def render_models(rows: Sequence[ModelRow], *, total_cost: float | None = None) 
         # keyboard-scrollable) on narrow screens instead of clipping columns.
         '<div tabindex="0" style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);overflow-x:auto">'
-        '<table class="cal-table data data-sortable" '
+        '<table class="cal-table data data-sortable" aria-label="Cost by model" '
         'style="width:100%;border-collapse:collapse;font-size:13px">'
         + head
         + "<tbody>"
@@ -4218,7 +4221,7 @@ def render_projects(
         # keyboard-scrollable) on narrow screens instead of clipping columns.
         '<div tabindex="0" style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);overflow-x:auto">'
-        '<table class="cal-table data data-sortable" '
+        '<table class="cal-table data data-sortable" aria-label="Cost by project" '
         'style="width:100%;border-collapse:collapse;font-size:13px">'
         + head
         + "<tbody>"
@@ -4341,6 +4344,8 @@ def _anomaly_action(kind: str) -> str:
 def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap) -> str:
     if not d.anomalies:
         return ""
+    from caliper.anomaly import human_label
+
     pad = "12px 16px" if dense else "16px 20px"
     rows_html: list[str] = []
     for i, a in enumerate(d.anomalies):
@@ -4393,6 +4398,9 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             f'<span style="font-size:13px;color:{tone_color};font-family:var(--mono);'
             f'font-weight:600;white-space:nowrap">+{_esc(impact)}</span>'
             f"{_pill(_esc(a.evidence_status), tone=evidence_tone)}"
+            # Plain-English magnitude so a reader doesn't need to know what σ means.
+            f'<span style="font-size:11px;color:var(--ink-2);text-align:right">'
+            f"{_esc(human_label(a.observed_usd, a.baseline_usd, a.z_score))}</span>"
             f'<span style="font-size:11px;color:var(--mute);font-family:var(--mono);'
             'white-space:nowrap">'
             + _gloss(
@@ -4759,7 +4767,8 @@ def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     body = (
         '<div tabindex="0" style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);overflow-x:auto">'
-        '<table class="cal-table" style="width:100%;border-collapse:collapse;'
+        '<table class="cal-table" aria-label="Top sessions by cost" '
+        'style="width:100%;border-collapse:collapse;'
         'font-size:13px;table-layout:fixed">'
         '<colgroup><col style="width:16%"><col style="width:12%"><col style="width:14%">'
         '<col style="width:11%"><col style="width:10%"><col style="width:8%">'

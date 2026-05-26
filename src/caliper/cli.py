@@ -140,7 +140,12 @@ from caliper.statusline import (
     statusline_payload,
 )
 from caliper.taxonomy import taxonomy_records
-from caliper.timeutil import iso_z, local_timezone, window_label
+from caliper.timeutil import (
+    iso_z,
+    local_timezone,
+    window_label,
+    window_label_with_days,
+)
 from caliper.vendors import vendor_summaries
 
 # Accept both -h and --help everywhere (root app, every command, and sub-apps).
@@ -1870,7 +1875,7 @@ def _redact_evidence_payload(payload: dict[str, Any], options: RuntimeOptions) -
     redacted = _redact_paths(payload, options)
     if options.show_paths:
         return redacted
-    issues = ((redacted.get("evidence") or {}).get("parser_issues") or [])
+    issues = (redacted.get("evidence") or {}).get("parser_issues") or []
     for issue in issues:
         if isinstance(issue, dict) and issue.get("examples"):
             issue["examples"] = ["<redacted-path>" for _ in issue.get("examples", [])]
@@ -2162,6 +2167,21 @@ def _render_shape_table(report: SessionShapeReport) -> str:
     return buffer.getvalue()
 
 
+def _window_span_days(window: Any) -> int | None:
+    """Whole-day span from a dashboard ``WindowMeta`` (ISO start/end), or None."""
+    start = getattr(window, "start", None)
+    end = getattr(window, "end", None)
+    if not start or not end:
+        return None
+    try:
+        start_date = dt.date.fromisoformat(str(start)[:10])
+        end_date = dt.date.fromisoformat(str(end)[:10])
+    except ValueError:
+        return None
+    span = (end_date - start_date).days
+    return span if span > 0 else None
+
+
 def _print_dashboard_verdict(
     payload: Any,
     *,
@@ -2191,18 +2211,15 @@ def _print_dashboard_verdict(
     else:
         delta_str = "trend —"
 
-    # Recoverable savings = sum of top-3 advisor recommendations by savings.
-    recs = sorted(
-        [
-            r
-            for r in (getattr(payload, "advisor_recommendations", None) or [])
-            if float(getattr(r, "savings_usd", 0.0) or 0.0) > 0
-        ],
-        key=lambda r: (
-            -float(getattr(r, "savings_usd", 0.0) or 0.0),
-            -float(getattr(r, "confidence", 0.0) or 0.0),
-        ),
-    )
+    # Recoverable savings = sum of the top-3 advisor recommendations. The
+    # advisor list arrives already in canonical rank order (same engine as
+    # `caliper recommend`), so we must NOT re-sort by savings here — that
+    # would let the dashboard's "top fix" disagree with `caliper recommend`.
+    recs = [
+        r
+        for r in (getattr(payload, "advisor_recommendations", None) or [])
+        if float(getattr(r, "savings_usd", 0.0) or 0.0) > 0
+    ]
     top = recs[0] if recs else None
     top_recoverable = sum(float(getattr(r, "savings_usd", 0.0) or 0.0) for r in recs[:3])
 
@@ -2231,9 +2248,15 @@ def _print_dashboard_verdict(
             rec_str = f"${top_recoverable:,.0f}"
         else:
             rec_str = f"${top_recoverable:.2f}"
+        # Point at the command that reproduces this exact number — same engine,
+        # and carry --days so the window matches even if the CLI default differs.
+        reproduce = "caliper recommend"
+        span = _window_span_days(window)
+        if span:
+            reproduce = f"caliper recommend --days {span}"
         typer.echo(
             f"Fixable: {rec_str} across {rec_count} recommendation{plural}. "
-            f"Inspect with `caliper advise --strict`."
+            f"Reproduce with `{reproduce}`."
         )
 
     safe_text = "share-safe" if share_safe else "local-only"
@@ -2470,8 +2493,10 @@ def dashboard(
             privacy = "always"
             if not quiet and not stdout_html and output is not None:
                 typer.echo(
-                    f"ℹ Ignoring generated legacy dashboard privacy=off in {legacy_path}; "
-                    "use --no-share-safe or edit privacy = \"off\" again for local-only output.",
+                    f'Note: ignoring privacy="off" from the auto-generated config at '
+                    f"{legacy_path}; defaulting to share-safe (redacted) output. "
+                    'Pass --no-share-safe for local-only output, or set privacy="off" '
+                    "yourself to keep it.",
                     err=True,
                 )
     interactive_effective = interactive if interactive is not None else dash_cfg.interactive
@@ -2643,7 +2668,10 @@ def dashboard(
         # also passed --open. Preserves the long-standing CLI contract.
         should_open = False
     else:
-        should_open = dash_cfg.open_after
+        # The *implicit* open_after preference must never fire in CI or any
+        # non-interactive shell — webbrowser.open can block there. Explicit
+        # --open above still honours an intentional request.
+        should_open = dash_cfg.open_after and interactive_stdout
     if should_open:
         opened = _open_dashboard_in_browser(target)
         if not opened:
@@ -3010,7 +3038,9 @@ def init(
         "# Caliper config. Every key here can also be passed as a CLI flag.\n"
         "# The flag wins. Uncomment what you want to pin, leave the rest alone.\n"
         "\n"
-        "# Rolling window for `caliper` and `caliper overview` in days.\n"
+        "# Default rolling window (in days) for the dashboard and every command\n"
+        "# that doesn't take an explicit --since/--until/--days. 30 = a billing\n"
+        "# month. The dashboard and the CLI share this knob so their numbers agree.\n"
         "default_days = 30\n"
         '# timezone = "local"   # or an IANA zone, e.g. "America/Los_Angeles"\n'
         "\n"
@@ -3067,6 +3097,7 @@ def init(
 rates_app = typer.Typer(
     help="Show, refresh, and audit the pricing rate card.",
     context_settings=_HELP_OPTION_NAMES,
+    no_args_is_help=True,
 )
 app.add_typer(rates_app, name="rates")
 
@@ -3081,18 +3112,21 @@ app.add_typer(vendors_app, name="vendors")
 taxonomy_app = typer.Typer(
     help="Show the canonical model taxonomy Caliper uses.",
     context_settings=_HELP_OPTION_NAMES,
+    no_args_is_help=True,
 )
 app.add_typer(taxonomy_app, name="taxonomy")
 
 schema_app = typer.Typer(
     help="Export and validate Caliper JSON output schemas.",
     context_settings=_HELP_OPTION_NAMES,
+    no_args_is_help=True,
 )
 app.add_typer(schema_app, name="schema")
 
 cache_app = typer.Typer(
     help="Inspect or clear the local parse cache.",
     context_settings=_HELP_OPTION_NAMES,
+    no_args_is_help=True,
 )
 app.add_typer(cache_app, name="cache")
 
@@ -4319,6 +4353,8 @@ def _render_commit_scope(
     options: RuntimeOptions,
     output_format: str,
 ) -> None:
+    from caliper.attribution import git_attribution_coverage
+
     result = _safe_load_usage(options)
     scoped = LoadResult(
         events=[event for event in result.events if event.thread.git_sha in shas],
@@ -4331,9 +4367,13 @@ def _render_commit_scope(
     rate_card = _safe_load_rate_card(options)
     total = aggregate_total(scoped, options, rate_card=rate_card)
     vendor_rows = _commit_scope_vendor_rows(scoped, options, rate_card)
+    # Honest coverage: how much of the window's spend carries *any* git SHA.
+    # Most events don't, so cost-per-commit only sees a slice — say so.
+    coverage = git_attribution_coverage(result.events, rate_card)
     payload: dict[str, Any] = {
         "title": title,
         "commits": sorted(shas),
+        "coverage": coverage,
         "totals": {
             "events": total.totals.events,
             "cost_usd": str(total.costs.cost_usd),
@@ -4372,6 +4412,12 @@ def _render_commit_scope(
         f"${total.costs.cost_usd:,.2f}  ·  "
         f"{len(shas)} commits"
     )
+    cov = float(coverage["cost_coverage"])
+    if cov < 1.0:
+        local_console.print(
+            f"[dim]Covers {cov:.0%} of window spend; the rest has no recorded git SHA. "
+            "Per-commit cost is exact for attributed events only.[/dim]"
+        )
     if vendor_rows:
         table = Table()
         table.add_column("Vendor")
@@ -4676,7 +4722,7 @@ def advise(
     ] = None,
     since: SinceOpt = None,
     until: UntilOpt = None,
-    days: DaysOpt = 7.0,
+    days: DaysOpt = None,
     timezone: TimezoneOpt = "local",
     output_format: FormatOpt = "table",
     session_root: SessionRootOpt = None,
@@ -4733,8 +4779,15 @@ def advise(
     recommendations = [
         item.to_record() for item in recommend_arbitrage(result.events, rate_card, threshold)
     ]
+    window = window_label_with_days(options.start, options.end, options.timezone)
     _emit_advisor(
-        rows, recommendations, output_format, threshold, len(result.events), options.width
+        rows,
+        recommendations,
+        output_format,
+        threshold,
+        len(result.events),
+        options.width,
+        window=window,
     )
 
 
@@ -4745,6 +4798,8 @@ def _emit_advisor(
     threshold: float,
     event_count: int,
     width: int | None = None,
+    *,
+    window: str = "",
 ) -> None:
     local_console = Console(width=width or 140, _environ={})
     display_rows = recommendations or records
@@ -4758,6 +4813,7 @@ def _emit_advisor(
                     "record_count": len(records),
                     "event_count": event_count,
                     "confidence_threshold": threshold,
+                    "window": window,
                     "status": "ok" if display_rows else "no_recommendations",
                     "message": "" if display_rows else empty_message,
                 }
@@ -4774,6 +4830,12 @@ def _emit_advisor(
         typer.echo(records_to_markdown(display_rows), nl=False)
         return
     local_console.print("[bold]Caliper - Advisor[/bold]")
+    if window:
+        local_console.print(f"Window: {window}")
+    local_console.print(
+        "[dim]Model/tier arbitrage sweep. For the canonical ranked fixes used "
+        "across Caliper, run `caliper recommend`.[/dim]"
+    )
     if not display_rows:
         local_console.print(empty_message)
         return
@@ -5039,7 +5101,7 @@ def skills(
 def inefficiencies(
     since: SinceOpt = None,
     until: UntilOpt = None,
-    days: DaysOpt = 7.0,
+    days: DaysOpt = None,
     timezone: TimezoneOpt = "local",
     output_format: FormatOpt = "table",
     output: OutputOpt = None,
@@ -5220,6 +5282,7 @@ def _format_record_cell(value: object) -> str:
 export_app = typer.Typer(
     help="Render receipts, Grafana dashboards, and Prometheus metrics.",
     context_settings=_HELP_OPTION_NAMES,
+    no_args_is_help=True,
 )
 app.add_typer(export_app, name="export")
 
@@ -5452,6 +5515,7 @@ def export_receipt(
 budgets_app = typer.Typer(
     help="Check usage against budgets and gate CI on cost.",
     context_settings=_HELP_OPTION_NAMES,
+    no_args_is_help=True,
 )
 app.add_typer(budgets_app, name="budgets")
 
@@ -5938,6 +6002,7 @@ def predict(
     """Predictive analytics: per-model demand, seasonality, rate-limit ETA, anomalies."""
     from caliper.anomaly import detect_actionable_anomalies
     from caliper.predict import (
+        cache_efficiency_trend,
         decompose_seasonality,
         forecast_per_model,
         forecast_rate_limits,
@@ -5962,8 +6027,10 @@ def predict(
     )
     daily_costs = [float(row.costs.cost_usd) for row in daily]
     outlook = total_outlook(daily_costs)
+    cache_trend = cache_efficiency_trend(daily)
     payload = {
         "horizon_days": horizon_days,
+        "cache_efficiency": cache_trend,
         "per_model": [dataclasses.asdict(item) for item in per_model],
         "seasonality": dataclasses.asdict(seasonality),
         "rate_limits": [dataclasses.asdict(item) for item in rate_limits],
@@ -6022,14 +6089,17 @@ def _predict_markdown(payload: dict[str, Any]) -> str:
         "Forward run-rate from recent demand — not this month's bill (see `caliper forecast`)."
     )
     if payload["anomalies"]:
+        from caliper.anomaly import human_label
+
         lines.append("")
         lines.append("### Anomalies")
-        lines.append("| Kind | Label | Observed | σ | Impact |")
-        lines.append("| --- | --- | ---: | ---: | ---: |")
+        lines.append("| Kind | Label | Observed | σ | Magnitude | Impact |")
+        lines.append("| --- | --- | ---: | ---: | --- | ---: |")
         for row in payload["anomalies"][:5]:
+            gloss = human_label(row["observed"], row["baseline_center"], row["z_score"])
             lines.append(
                 f"| {row['kind']} | {row['label'][:32]} | ${row['observed']:,.2f} | "
-                f"{row['z_score']:.1f} | ${float(row['impact_usd_exact']):,.2f} |"
+                f"{row['z_score']:.1f} | {gloss} | ${float(row['impact_usd_exact']):,.2f} |"
             )
     return "\n".join(lines) + "\n"
 
@@ -6073,12 +6143,28 @@ def _predict_table(payload: dict[str, Any]) -> str:
                 f"  {row['window']}: {row['current_percent']:.0f}% used, "
                 f"ETA→100 {eta} (confidence: {row['confidence']})"
             )
+    cache = payload.get("cache_efficiency")
+    if cache and cache["days_analyzed"]:
+        arrow = {"rising": "↑", "declining": "↓", "flat": "→"}.get(cache["direction"], "→")
+        note = (
+            " — reuse is eroding, check for churning prompts"
+            if cache["direction"] == "declining"
+            else ""
+        )
+        local_console.print(
+            f"[bold]Cache efficiency[/bold] {cache['current_ratio']:.1%} now "
+            f"({arrow} {cache['direction']}, {cache['slope_per_day'] * 100:+.2f} pp/day "
+            f"over {cache['days_analyzed']} days){note}"
+        )
     if payload["anomalies"]:
+        from caliper.anomaly import human_label
+
         local_console.print("[bold]Anomalies[/bold]")
         for row in payload["anomalies"][:5]:
+            gloss = human_label(row["observed"], row["baseline_center"], row["z_score"])
             local_console.print(
                 f"  {row['kind']}: {row['label'][:40]} "
-                f"(σ={row['z_score']:.1f}, ${row['observed']:,.2f})"
+                f"(σ={row['z_score']:.1f} — {gloss}, ${row['observed']:,.2f})"
             )
     seasonality = payload["seasonality"]
     if any(seasonality["by_hour_cost_usd"]):
@@ -6315,20 +6401,14 @@ def recommend(
     ] = False,
 ) -> None:
     """Top-N action-first recommendations ranked by dollar impact × confidence."""
-    from caliper.efficiency import (
-        monthly_projected_savings_usd,
-        rank_recommendations,
-        run_audit,
-        total_savings_usd,
-    )
+    from caliper.recommendations import select_recommendations
 
     _validate_format(output_format, allow_compat=True)
     options = _options(locals())
     result = _safe_load_usage(options)
     rate_card = _safe_load_rate_card(options)
-    findings = run_audit(result, options, rate_card)
+    selection = select_recommendations(result, options, rate_card, top=top)
     total_spend = aggregate_total(result, options, rate_card=rate_card).costs.cost_usd
-    recs = rank_recommendations(findings, top=top)
     payload = {
         "recommendations": [
             {
@@ -6336,11 +6416,18 @@ def recommend(
                 "impact_usd_exact": str(rec.impact_usd_exact),
                 "monthly_projected_savings_usd": str(rec.monthly_projected_savings_usd),
             }
-            for rec in recs
+            for rec in selection.ranked
         ],
-        "total_savings_usd": str(total_savings_usd(findings)),
-        "monthly_projected_savings_usd": str(monthly_projected_savings_usd(findings)),
+        # The headline number is the sum of exactly the rows shown, so
+        # "recover $X across N" reconciles by construction.
+        "fixable_shown_usd": str(selection.fixable_shown_usd),
+        "monthly_shown_usd": str(selection.monthly_shown_usd),
+        "recommendations_shown": selection.shown_count,
+        # Full-audit totals: kept for machine consumers and the reference line.
+        "total_savings_usd": str(selection.total_savings_usd),
+        "total_findings": selection.total_findings,
         "total_spend_usd": str(total_spend),
+        "window": window_label_with_days(options.start, options.end, options.timezone),
         "summary": summary,
     }
     text = _render_recommend(payload, output_format)
@@ -6361,22 +6448,31 @@ def _render_recommend(payload: dict[str, Any], output_format: str) -> str:
 
 
 def _recommend_markdown(payload: dict[str, Any]) -> str:
-    total = float(payload["total_savings_usd"])
-    monthly = float(payload["monthly_projected_savings_usd"])
+    shown = float(payload["fixable_shown_usd"])
+    monthly_shown = float(payload["monthly_shown_usd"])
+    full_total = float(payload["total_savings_usd"])
     spend = float(payload["total_spend_usd"])
-    share = (total / spend) if spend > 0 else 0.0
+    share = (shown / spend) if spend > 0 else 0.0
+    count = int(payload["recommendations_shown"])
+    total_findings = int(payload["total_findings"])
+    window = payload.get("window", "")
     lines: list[str] = []
     if payload["summary"]:
         lines.append("# Caliper executive summary")
         lines.append("")
+        if window:
+            lines.append(f"_Window: {window}._")
+            lines.append("")
         lines.append(
-            f"**Window spend**: ${spend:,.2f} • **Estimated recoverable waste**: ${total:,.2f} "
-            f"({share:.0%}) • **Projected monthly savings**: ${monthly:,.2f}."
+            f"**Window spend**: ${spend:,.2f} • **Top {count} fixes recover**: ${shown:,.2f} "
+            f"({share:.0%} of spend) • **Monthly savings if implemented**: ${monthly_shown:,.2f}."
         )
         lines.append("")
         lines.append("## Top actions")
     else:
         lines.append("## Recommendations")
+        if window:
+            lines.append(f"_Window: {window}._")
     if not payload["recommendations"]:
         lines.append("_No actionable savings opportunities in this window._")
         return "\n".join(lines) + "\n"
@@ -6384,21 +6480,33 @@ def _recommend_markdown(payload: dict[str, Any]) -> str:
         lines.append(
             f"{rec['rank']}. **{rec['payback_action']}** — saves "
             f"${float(rec['impact_usd_exact']):,.2f} "
-            f"(${float(rec['monthly_projected_savings_usd']):,.2f}/month, "
+            f"(${float(rec['monthly_projected_savings_usd']):,.2f}/month if implemented, "
             f"confidence {rec['confidence']})."
         )
         lines.append(f"   - {rec['detail']}")
+    if total_findings > count:
+        lines.append("")
+        lines.append(
+            f"_Full audit: ${full_total:,.2f} across {total_findings} findings — `caliper audit`._"
+        )
     return "\n".join(lines) + "\n"
 
 
 def _recommend_table(payload: dict[str, Any]) -> str:
     buffer = io.StringIO()
     local_console = Console(file=buffer, width=140, _environ={})
-    total = float(payload["total_savings_usd"])
-    monthly = float(payload["monthly_projected_savings_usd"])
+    shown = float(payload["fixable_shown_usd"])
+    monthly_shown = float(payload["monthly_shown_usd"])
+    full_total = float(payload["total_savings_usd"])
+    count = int(payload["recommendations_shown"])
+    total_findings = int(payload["total_findings"])
+    window = payload.get("window", "")
     local_console.print("[bold]Caliper - Recommendations[/bold]")
+    if window:
+        local_console.print(f"Window: {window}")
     local_console.print(
-        f"Window savings: [bold]${total:,.2f}[/bold]. Projected monthly savings: ${monthly:,.2f}."
+        f"Top {count} fixes recover: [bold]${shown:,.2f}[/bold]. "
+        f"Monthly savings if implemented: ${monthly_shown:,.2f}."
     )
     if not payload["recommendations"]:
         local_console.print("[green]No actionable savings in this window.[/green]")
@@ -6418,6 +6526,10 @@ def _recommend_table(payload: dict[str, Any]) -> str:
             rec["confidence"],
         )
     local_console.print(table)
+    if total_findings > count:
+        local_console.print(
+            f"Full audit: ${full_total:,.2f} across {total_findings} findings — `caliper audit`."
+        )
     return buffer.getvalue()
 
 

@@ -717,14 +717,14 @@ p, h1, h2, h3 { text-wrap: pretty; }
      SVG label without shifting anything around it. */
   .cal-bar-rect { transition: fill-opacity 120ms ease-out; }
   .cal-bar-group:hover .cal-bar-rect,
-  .cal-bar-group:focus .cal-bar-rect { fill-opacity: 0.82; }
+  .cal-bar-group:focus-visible .cal-bar-rect { fill-opacity: 0.82; }
   .cal-bar-hover-label {
     opacity: 0;
     pointer-events: none;
     transition: opacity 80ms ease-out;
   }
   .cal-bar-group:hover .cal-bar-hover-label,
-  .cal-bar-group:focus .cal-bar-hover-label { opacity: 1; }
+  .cal-bar-group:focus-visible .cal-bar-hover-label { opacity: 1; }
   /* Verdict-strip pill links: existing <a> gets underline; the chip gets
      a stable contrast state. */
   .cal-verdict-chip {

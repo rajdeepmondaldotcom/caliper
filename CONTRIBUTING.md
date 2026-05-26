@@ -39,9 +39,11 @@ These are not preferences. They are the reasons people trust the project.
    test.
 5. **Stable exit codes.** `caliper budgets check` and `caliper doctor`
    exit `0` ok, `1` warn, `2` fail. CI pipelines depend on this.
-6. **Small runtime dependency list.** Today: `rich`, `typer`,
+6. **Small runtime dependency list.** Today: `click`, `rich`, `typer`,
    `platformdirs`, `textual`, and `watchdog`. The optional `[prom]` extra
    brings `prometheus-client`. Adding anything else requires a real reason.
+   Anything imported directly in `src/caliper` must be declared here and in
+   `pyproject.toml` — never lean on a transitive pull (a test enforces this).
 7. **No telemetry.** Ever.
 
 ## Before you write code

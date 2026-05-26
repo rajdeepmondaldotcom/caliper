@@ -97,3 +97,21 @@ def window_label(start: dt.datetime, end: dt.datetime, tzname: str) -> str:
     start_label = start.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
     end_label = end.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
     return f"{start_label} to {end_label}"
+
+
+def window_span_days(start: dt.datetime, end: dt.datetime) -> int:
+    """Whole-day span of a window, rounded to the nearest day (min 1).
+
+    Used to print an explicit "(N days)" so the same dollar figure can't be
+    read against three different windows across surfaces.
+    """
+    seconds = (end - start).total_seconds()
+    days = round(seconds / 86_400)
+    return max(days, 1)
+
+
+def window_label_with_days(start: dt.datetime, end: dt.datetime, tzname: str) -> str:
+    """``<start> to <end> (N days)`` — the explicit window every surface prints."""
+    span = window_span_days(start, end)
+    plural = "" if span == 1 else "s"
+    return f"{window_label(start, end, tzname)} ({span} day{plural})"

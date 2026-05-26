@@ -17,7 +17,6 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import json
-from decimal import Decimal
 from typing import Any
 
 from caliper.aggregation import (
@@ -45,7 +44,6 @@ from caliper.analysis.session_shape import (
     compute_session_shape,
 )
 from caliper.anomaly import detect_actionable_anomalies
-from caliper.arbitrage import recommend as recommend_arbitrage
 from caliper.attribution import build_agent_attributions, build_skill_attributions
 from caliper.budgets import (
     SEVERITY_BREACH,
@@ -60,7 +58,6 @@ from caliper.budgets import (
 )
 from caliper.dashboards.data_models import (
     DASHBOARD_SCHEMA_VERSION,
-    AdvisorAlternative,
     AdvisorRecommendation,
     AgentRow,
     AnomalyRow,
@@ -1253,7 +1250,7 @@ def _build_impact_cards(
 _IMPACT_LABEL_ORDER = {
     "Budget risk": 0,
     "Cost driver": 1,
-    "Estimated cache savings": 2,
+    "Cache discount": 2,
     "Usage rhythm": 3,
     "Dedupe": 4,
 }
@@ -1374,14 +1371,14 @@ def _cache_leverage_card(total: Aggregate) -> ImpactCard:
     savings = float(total.cache_savings.cost_usd)
     if savings > 0:
         return ImpactCard(
-            label="Estimated cache savings",
+            label="Cache discount",
             value=_format_money(savings),
-            detail=f"{_format_pct(cache_hit)} cached-input share.",
+            detail=f"{_format_pct(cache_hit)} cached-input share, vs. the full input rate.",
             tone="good",
         )
     return ImpactCard(
-        label="Estimated cache savings",
-        value="No savings",
+        label="Cache discount",
+        value="None",
         detail=f"{_format_pct(cache_hit)} cached-input share in the selected window.",
     )
 
@@ -1462,44 +1459,21 @@ def _build_advisor_recommendations(
     *,
     audit_findings: list[Any] | None = None,
 ) -> list[AdvisorRecommendation]:
-    """Surface the highest-value arbitrage and efficiency recommendations.
+    """Surface the highest-value recommendations in canonical rank order.
 
-    Composes two streams: the arbitrage engine (sibling-model routing
-    hints) and :mod:`caliper.efficiency` (the quantified inefficiency
-    finders). Both produce dollar-anchored guidance; the dashboard
-    advisor slot renders them as a single ranked list.
+    Single source of truth: the same quantified-inefficiency engine
+    (:func:`caliper.efficiency.run_audit` + ``rank_recommendations``) that
+    powers ``caliper recommend`` / ``caliper exec``, so the dashboard
+    verdict's "top fix" and "Fixable $X" reconcile with those commands.
+
+    The arbitrage re-pricing sweep (``caliper advise`` / ``caliper whatif``)
+    is deliberately *not* merged here: its events carry no stable ids, so
+    folding it in would double-count dollars against the finders above.
+    Rows are returned already ranked; callers must not re-sort by savings.
     """
     if not result.events:
         return []
-    rows: list[AdvisorRecommendation] = []
-    for rec in recommend_arbitrage(result.events, rate_card, threshold=0.6, limit=5):
-        savings = float(Decimal(rec.estimated_savings_usd_exact or "0"))
-        tone = "good" if savings > 0 else "neutral"
-        rows.append(
-            AdvisorRecommendation(
-                title=rec.title,
-                value=_format_money(savings),
-                detail=rec.detail,
-                action=rec.next_command or rec.action,
-                confidence=rec.confidence,
-                events=rec.events,
-                sessions=rec.sessions,
-                tone=tone,
-                savings_usd=savings,
-                alternatives=tuple(
-                    AdvisorAlternative(
-                        model=item.model,
-                        vendor=item.vendor,
-                        projected_cost_usd=float(Decimal(item.projected_cost_usd_exact or "0")),
-                        savings_usd=float(Decimal(item.estimated_savings_usd_exact or "0")),
-                        events=item.events,
-                    )
-                    for item in rec.alternatives
-                ),
-            )
-        )
-    rows.extend(_efficiency_advisor_rows(result, rate_card, options, audit_findings=audit_findings))
-    return sorted(rows, key=lambda row: (-row.savings_usd, -row.confidence, -row.events))
+    return _efficiency_advisor_rows(result, rate_card, options, audit_findings=audit_findings)
 
 
 def _efficiency_advisor_rows(

@@ -7,6 +7,7 @@ dashboard can present a single, ranked "what stands out" list.
 
 from __future__ import annotations
 
+import bisect
 import datetime as dt
 import statistics
 from collections import Counter
@@ -57,12 +58,83 @@ class _Observation:
     dedupe_key: str
 
 
-def _mad(values: list[float], center: float) -> float:
-    """Median absolute deviation. Resilient fallback when stdev is 0."""
-    if not values:
+def _median_of_sorted(values: list[float]) -> float:
+    """``statistics.median`` for an already-sorted, non-empty list, in O(1).
+
+    Byte-identical to :func:`statistics.median`: the median of a multiset is
+    its middle order statistic(s), independent of how the input was ordered.
+    """
+    n = len(values)
+    mid = n // 2
+    if n % 2:
+        return values[mid]
+    return (values[mid - 1] + values[mid]) / 2
+
+
+def _merge_sorted(left: list[float], right: list[float]) -> list[float]:
+    """Merge two ascending lists into one ascending list (stable, O(n+m))."""
+    out: list[float] = []
+    i = j = 0
+    n, m = len(left), len(right)
+    while i < n and j < m:
+        if left[i] <= right[j]:
+            out.append(left[i])
+            i += 1
+        else:
+            out.append(right[j])
+            j += 1
+    if i < n:
+        out.extend(left[i:])
+    if j < m:
+        out.extend(right[j:])
+    return out
+
+
+def _mad_of_sorted(sorted_base: list[float], center: float) -> float:
+    """MAD over an already-sorted base, without re-sorting the deviations.
+
+    The absolute deviations ``|v - center|`` are V-shaped around ``center``:
+    descending for ``v < center`` then ascending for ``v >= center``. Each
+    side is monotone, so reversing the left side and merging yields the same
+    sorted deviation multiset that ``sorted(abs(v - center) ...)`` would —
+    and IEEE subtraction guarantees ``center - v == abs(v - center)`` exactly
+    — so the median is byte-identical to the previous implementation while
+    dropping the per-step ``O(n log n)`` sort to ``O(n)``.
+    """
+    if not sorted_base:
         return 0.0
-    deviations = sorted(abs(value - center) for value in values)
-    return statistics.median(deviations)
+    split = bisect.bisect_left(sorted_base, center)
+    left_dev = [center - v for v in reversed(sorted_base[:split])]
+    right_dev = [v - center for v in sorted_base[split:]]
+    return _median_of_sorted(_merge_sorted(left_dev, right_dev))
+
+
+def _baseline_stats_from_sorted(sorted_all: list[float]) -> tuple[float, float]:
+    """``_baseline_stats`` for an already-sorted value series.
+
+    This is the hot path: :func:`_score_observations` maintains the prior
+    window pre-sorted (via ``bisect.insort``) so the per-row baseline costs
+    ``O(n)`` instead of the old three full sorts. Because the active subset
+    (``v >= ACTIVE_DAY_THRESHOLD``) is a contiguous suffix of the sorted
+    window, it's found with one ``bisect``. Output is identical to
+    :func:`_baseline_stats` — proven byte-for-byte in
+    ``tests/test_anomaly_equivalence.py``.
+    """
+    n = len(sorted_all)
+    if n < MIN_SAMPLES_FOR_DETECTION:
+        return 0.0, 0.0
+    active_start = bisect.bisect_left(sorted_all, ACTIVE_DAY_THRESHOLD)
+    active_count = n - active_start
+    base = sorted_all[active_start:] if active_count >= MIN_SAMPLES_FOR_DETECTION else sorted_all
+    median = _median_of_sorted(base)
+    mad_scale = _mad_of_sorted(base, median) * 1.4826
+    iqr_scale = 0.0
+    if len(base) >= 4:
+        # ``method="exclusive"`` matches the classic Tukey quartile definition;
+        # quantiles re-sorts internally, which is O(n) on already-sorted input.
+        q1, _q2, q3 = statistics.quantiles(base, n=4, method="exclusive")
+        iqr_scale = max(0.0, (q3 - q1) / 1.349)
+    return median, max(mad_scale, iqr_scale, median * 0.10, 1.0)
 
 
 def _baseline_stats(values: list[float]) -> tuple[float, float]:
@@ -91,23 +163,12 @@ def _baseline_stats(values: list[float]) -> tuple[float, float]:
 
     Returns ``(0.0, 0.0)`` only when there are too few samples to
     compute statistics at all.
+
+    Thin wrapper over :func:`_baseline_stats_from_sorted` (one sort here for
+    callers passing an unsorted series; the hot path keeps the window sorted
+    and calls the sorted core directly). Output is unchanged.
     """
-    if len(values) < MIN_SAMPLES_FOR_DETECTION:
-        return 0.0, 0.0
-    active = [v for v in values if v >= ACTIVE_DAY_THRESHOLD]
-    base = active if len(active) >= MIN_SAMPLES_FOR_DETECTION else values
-    median = statistics.median(base)
-    mad_scale = _mad(base, median) * 1.4826
-    iqr_scale = 0.0
-    if len(base) >= 4:
-        # ``method="exclusive"`` matches the classic Tukey quartile
-        # definition (linear interpolation between order statistics)
-        # and avoids degenerate cases for very small samples.
-        q1, _q2, q3 = statistics.quantiles(base, n=4, method="exclusive")
-        iqr_scale = max(0.0, (q3 - q1) / 1.349)
-    # 1.0 floor: σ is meaningless once scale drops below a dollar; this
-    # converts "huge σ on sparse data" into a bounded one-dollar gate.
-    return median, max(mad_scale, iqr_scale, median * 0.10, 1.0)
+    return _baseline_stats_from_sorted(sorted(values))
 
 
 def _z(value: float, mean: float, scale: float) -> float:
@@ -136,6 +197,26 @@ def _qualifies(
     if fold < FOLD_CHANGE_MIN:
         return False, z
     return True, min(z, SIGMA_DISPLAY_CAP)
+
+
+def human_label(observed: float, baseline_center: float, z_score: float) -> str:
+    """A plain-English gloss for an anomaly's magnitude.
+
+    ``σ=20.0`` means nothing to a non-engineer; "≈20× your typical spend"
+    does. Derived only from fields already on the anomaly (no new stats), so
+    CLI and dashboard stay in lockstep. JSON keeps the raw ``z_score`` /
+    ``impact_usd_exact`` for scripting; this is a display aid only.
+    """
+    # At the display cap the fold-change is a math artifact (near-zero
+    # baseline), so a precise "≈3887×" reads as noise — say "extreme" instead.
+    if z_score >= SIGMA_DISPLAY_CAP:
+        return "extreme — far above your typical spend for this cohort"
+    if baseline_center < ACTIVE_DAY_THRESHOLD:
+        return "far above near-zero typical spend for this cohort"
+    fold = observed / baseline_center
+    if fold >= 100:
+        return "far above your typical spend for this cohort"
+    return f"≈{fold:.0f}× your typical spend for this cohort"
 
 
 def _sort_key(item: Anomaly) -> tuple[Decimal, float, str, str]:
@@ -178,12 +259,17 @@ def _score_observations(
 
     anomalies: list[Anomaly] = []
     for rows in by_cohort.values():
-        prior_values: list[float] = []
+        # Keep the expanding prior window pre-sorted so each row's baseline is
+        # O(n) (one bisect + linear stats) instead of three full sorts. Output
+        # is identical to scoring against the unsorted window — see
+        # tests/test_anomaly_equivalence.py.
+        sorted_prior: list[float] = []
         for row in sorted(rows, key=lambda r: (r.order, r.timestamp, r.label)):
-            center, scale = _baseline_stats(prior_values)
+            center, scale = _baseline_stats_from_sorted(sorted_prior)
             if scale > 0:
                 ok, z = _qualifies(row.observed, center, scale, sigma_threshold)
                 if ok:
+                    sample_count = len(sorted_prior)
                     impact = Decimal(str(max(0.0, row.observed - center)))
                     impact_percent = _impact_percent(row.observed, center)
                     anomalies.append(
@@ -197,20 +283,20 @@ def _score_observations(
                             z_score=z,
                             impact_usd_exact=impact,
                             comparison_scope=row.comparison_scope,
-                            baseline_sample_count=len(prior_values),
+                            baseline_sample_count=sample_count,
                             cohort_key=row.cohort_key,
                             cohort_label=row.cohort_label,
                             reason=_scope_reason(
                                 row.observed,
                                 center,
-                                len(prior_values),
+                                sample_count,
                                 impact_percent,
                             ),
                             dedupe_key=row.dedupe_key,
                             impact_percent=impact_percent,
                         )
                     )
-            prior_values.append(row.observed)
+            bisect.insort(sorted_prior, row.observed)
     return sorted(anomalies, key=_sort_key)
 
 
@@ -491,4 +577,5 @@ __all__ = [
     "detect_model_anomalies",
     "detect_project_daily_anomalies",
     "detect_session_anomalies",
+    "human_label",
 ]

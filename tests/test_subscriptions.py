@@ -41,6 +41,8 @@ def test_subscription_cost_caveat_labels_known_plans_as_api_equivalent() -> None
     assert caveat is not None
     assert "ChatGPT Pro" in caveat
     assert "API-equivalent" in caveat
+    # The unmissable "not your bill" framing must lead the caveat.
+    assert "not your bill" in caveat
     # No recognized plan (metered API use, or nothing) → the total is the bill.
     assert subscription_cost_caveat(set()) is None
     assert subscription_cost_caveat({"totally-unknown-plan"}) is None

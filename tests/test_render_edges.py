@@ -103,7 +103,7 @@ def test_render_table_footer_and_warning_paths(tmp_path: Path) -> None:
     assert "Vendors: openai-codex" in text
     assert "parser warning" in text
     assert "Subscription:" in text
-    assert "Cache savings:" in text
+    assert "Cache discount:" in text
     assert "Service-tier sources: logged=1" in text
     assert "Plan types: free" in text
 

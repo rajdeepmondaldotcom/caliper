@@ -37,6 +37,51 @@ def test_contributing_dependency_and_coverage_contract_matches_package() -> None
         assert dep in contributing
 
 
+def _dist_name(spec: str) -> str:
+    import re
+
+    match = re.match(r"[A-Za-z0-9._-]+", spec.strip())
+    return match.group(0).replace("_", "-").lower() if match else ""
+
+
+def test_every_directly_imported_third_party_package_is_declared() -> None:
+    """Guard against the 0.0.59 regression: ``click`` was imported directly in
+    caliper.cli but only declared transitively via Typer. When Typer 0.26
+    dropped its click dependency, fresh installs crashed on ``import click``.
+    Any third-party package imported in the source must be a declared
+    dependency (or live behind an optional extra)."""
+    import ast
+    import sys
+    import tomllib
+
+    meta = tomllib.loads(PYPROJECT.read_text())["project"]
+    declared = {_dist_name(s) for s in meta.get("dependencies", [])}
+    for extra_specs in meta.get("optional-dependencies", {}).values():
+        declared.update(_dist_name(s) for s in extra_specs)
+
+    # import-name -> distribution-name, where they differ.
+    import_to_dist = {"prometheus_client": "prometheus-client"}
+    stdlib = set(sys.stdlib_module_names)
+
+    roots: set[str] = set()
+    for path in Path("src/caliper").rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                roots.add(node.module.split(".")[0])
+
+    for root in sorted(roots):
+        if root in stdlib or root in {"caliper", "__future__"}:
+            continue
+        dist = import_to_dist.get(root, root).replace("_", "-").lower()
+        assert dist in declared, (
+            f"`{root}` is imported in src/caliper but `{dist}` is not a declared "
+            f"dependency in pyproject.toml (declared: {sorted(declared)})"
+        )
+
+
 def test_local_publish_script_does_not_upload_to_pypi() -> None:
     script = PUBLISH_SCRIPT.read_text()
 
