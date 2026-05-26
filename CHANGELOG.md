@@ -12,7 +12,7 @@ All notable changes to Caliper. Newest on top.
 
 ## 0.0.60 - 2026-05-27
 
-Hotfix: a fresh install of 0.0.59 crashed on startup with
+Hotfix: a fresh install of 0.0.59 failed to launch with
 `ModuleNotFoundError: No module named 'click'`.
 
 - **Declare `click` as a direct dependency.** `caliper.cli` imports `click`
