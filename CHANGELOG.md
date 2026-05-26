@@ -2,6 +2,14 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.61 - 2026-05-27
+
+- **Default window is now 30 days** (a billing month), up from 14. `caliper
+  dashboard` and the CLI commands share one window knob (`DEFAULT_WINDOW_DAYS`)
+  so their numbers still reconcile; both now default to the last 30 days when no
+  `--since/--until/--days` or `default_days` config is set. Override per-run with
+  `--days N`, or pin `default_days` in `.caliper.toml`.
+
 ## 0.0.60 - 2026-05-27
 
 Hotfix: a fresh install of 0.0.59 crashed on startup with

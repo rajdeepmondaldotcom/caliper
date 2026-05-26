@@ -91,10 +91,11 @@ VALID_DASHBOARD_DENSITIES = ("comfortable", "compact")
 VALID_DASHBOARD_PRIVACY = ("off", "print-only", "always")
 
 # The default rolling window (in days) when neither a flag nor config pins
-# one. Single source of truth: the CLI window fallback, the [dashboard]
-# section default, and the written config templates all read this, so every
-# surface agrees out of the box.
-DEFAULT_WINDOW_DAYS = 14
+# one — a billing month, matching the dashboard's "last 30 days" framing.
+# Single source of truth: the CLI window fallback, the [dashboard] section
+# default, and the written config templates all read this, so the dashboard
+# and the CLI commands agree out of the box.
+DEFAULT_WINDOW_DAYS = 30
 
 
 @dataclass(frozen=True)
@@ -294,7 +295,7 @@ open_after = true             # auto-open the generated file in a browser
 interactive = true
 
 # Data window
-default_days = 14
+default_days = 30
 """
 
 

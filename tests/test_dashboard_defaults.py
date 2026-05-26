@@ -35,7 +35,7 @@ def test_dashboard_config_defaults_when_section_missing() -> None:
     # visibly tagged and local-only exports stay clean.
     assert "{privacy_suffix}" in cfg.filename_template
     assert cfg.open_after is True
-    assert cfg.default_days == 14
+    assert cfg.default_days == 30
     assert cfg.interactive is True
 
 
