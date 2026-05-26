@@ -2,6 +2,21 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.60 - 2026-05-27
+
+Hotfix: a fresh install of 0.0.59 crashed on startup with
+`ModuleNotFoundError: No module named 'click'`.
+
+- **Declare `click` as a direct dependency.** `caliper.cli` imports `click`
+  directly but only got it transitively through Typer. Typer 0.26 dropped its
+  hard `click` dependency, so `uv tool install` / `pip install` of 0.0.59
+  resolved Typer without `click` and the CLI couldn't import. `click>=8.1` is
+  now declared explicitly.
+- **Regression guard.** A new test statically scans `src/caliper` for
+  third-party imports and fails if any isn't a declared dependency (or behind
+  an optional extra), so a directly-imported package can never again ship
+  undeclared. No other gaps found.
+
 ## 0.0.59 - 2026-05-26
 
 A trust-and-depth polish pass from a second round of critical-user testing.
