@@ -677,7 +677,7 @@ def _build_output_summary(
     else:
         caveat = (
             "Cost per commit divides git-linked spend by commits touched. It is "
-            "a unit-economics proxy, not a per-commit invoice. Unlinked spend is "
+            "a rough unit cost, not a per-commit invoice. Unlinked spend is "
             "exploration, planning, or work that never reached a commit, not "
             "automatically waste."
         )

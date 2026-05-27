@@ -2,6 +2,21 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.63 - 2026-05-27
+
+A clarity pass on every word a reader sees, plus refreshed screenshots.
+
+- **Plainer copy, end to end.** Tightened the README and the dashboard so each
+  line says one true thing in the fewest words. The masthead reads "what your
+  AI coding cost and produced," the cost-per-commit note calls itself a rough
+  unit cost rather than a unit-economics proxy, and the remaining em-dashes and
+  semicolons are gone from prose.
+- **One call to action, up front.** The README leads with the zero-risk demo on
+  built-in sample data, so a reader sees the full report before installing
+  anything or touching their own logs. The same command repeats at the end.
+- **Screenshots regenerated and version-pinned.** Every README image now matches
+  the shipped dashboard and points at the `v0.0.63` tag.
+
 ## 0.0.62 - 2026-05-27
 
 An honesty pass on the cost framing, plus the first cut of the leverage view.

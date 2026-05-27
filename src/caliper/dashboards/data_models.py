@@ -726,7 +726,7 @@ class OutputSummary:
     - ``commits_touched`` counts distinct git commit SHAs that were checked
       out while AI events were recorded.
     - ``cost_per_commit_usd`` divides the cost of those git-linked events by
-      that count. It is a unit-economics proxy, not a per-commit invoice.
+      that count. It is a rough unit cost, not a per-commit invoice.
     - ``linked_cost_pct`` is the share of window cost recorded inside a git
       repo at a known commit. Unlinked spend is exploration, planning, or work
       that never reached a commit. It is **not** automatically waste.

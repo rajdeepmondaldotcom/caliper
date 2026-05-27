@@ -598,7 +598,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             has_git=True,
             caveat=(
                 "Cost per commit divides git-linked spend by commits touched. It is "
-                "a unit-economics proxy, not a per-commit invoice. Unlinked spend is "
+                "a rough unit cost, not a per-commit invoice. Unlinked spend is "
                 "exploration, planning, or work that never reached a commit, not "
                 "automatically waste."
             ),
