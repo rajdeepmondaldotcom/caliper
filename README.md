@@ -23,7 +23,7 @@ uvx --isolated --from caliper-ai caliper dashboard --demo --open
 
 </div>
 
-![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/hero.png)
+![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.63/docs/screenshots/hero.png)
 
 <p align="center"><sub>Safe Share mode: paths, projects, and session labels are redacted while costs, evidence status, and next actions stay visible.</sub></p>
 
@@ -69,7 +69,7 @@ every team is now asking out loud: **is this working, and where?**
 The dashboard opens with a short, honest answer to that question, built from the
 git history and tool calls already on your machine:
 
-![What this produced: commits touched, cost per commit, share of spend linked to a commit, and the edit-vs-diagnose ratio](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/output.png)
+![What this produced: commits touched, cost per commit, share of spend linked to a commit, and the edit-vs-diagnose ratio](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.63/docs/screenshots/output.png)
 
 - **Commits touched.** How many distinct commits were checked out while the AI
   was working.
@@ -123,20 +123,20 @@ Avoidable: $176.64 across 3 recommendations. Reproduce with `caliper recommend`.
 Theme: dark · local-only · re-render: caliper dashboard --open
 ```
 
-If Caliper detects a flat-rate subscription, the headline cost is labeled
-**API-equivalent value, not a bill** right where you'd read it — so nobody
-mistakes "what your usage is worth" for "what you owe."
+If Caliper detects a flat-rate subscription, it labels the headline cost
+**API-equivalent value, not a bill**, right where you read it. Nobody mistakes
+what your usage is worth for what you owe.
 
 Every KPI on the page has a **"show the math"** disclosure: the formula, the
 rate card date, and the sample size. Evidence, anomalies, avoidable spend, and
-session rows show the source quality behind each number instead of forcing you
-to trust an unexplained total.
+session rows show the source quality behind each number, so you never trust an
+unexplained total.
 
-Large first runs may spend a moment indexing local log history; later runs reuse
-the local parse cache. Inspect it with `caliper cache status`, clear it with
+Large first runs spend a moment indexing your local log history. Later runs
+reuse the parse cache. Inspect it with `caliper cache status`, clear it with
 `caliper cache clear`, or relocate it with `CALIPER_CACHE_DIR`.
 
-### Rate cards stay current — on your terms
+### Rate cards stay current, on your terms
 
 Costs are priced from a rate card embedded at release time. See exactly which
 card is active and how old it is:
@@ -163,15 +163,15 @@ real report layout without exposing local paths or session identities.
 
 | Next actions | Spend drivers |
 |---|---|
-| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/usage-mix.png"> |
+| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.63/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.63/docs/screenshots/usage-mix.png"> |
 
 | Anomalies | Avoidable spend |
 |---|---|
-| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/anomalies.png"> | <img alt="Ranked avoidable-spend findings, detected inefficiencies, and cache reuse panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/inefficiencies.png"> |
+| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.63/docs/screenshots/anomalies.png"> | <img alt="Ranked avoidable-spend findings, detected inefficiencies, and cache reuse panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.63/docs/screenshots/inefficiencies.png"> |
 
 | Session drilldown | Attribution and evidence |
 |---|---|
-| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/attribution.png"> |
+| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.63/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.63/docs/screenshots/attribution.png"> |
 
 ## How it's different
 
@@ -231,8 +231,8 @@ how you pay:
   actual bill, and avoidable-spend findings are real money you would stop
   spending.
 - **Flat-rate subscription** (a fixed monthly plan). The cost total is the
-  **API-equivalent value** of your usage — what the same work would cost on the
-  meter. It is not an invoice, and a flat plan has nothing to refund. Avoidable
+  **API-equivalent value** of your usage, what the same work would cost on the
+  meter. It's not an invoice, and a flat plan has nothing to refund. Avoidable
   spend here means wasted tokens, slower loops, and rate-limit pressure, not
   cash back. Caliper labels this everywhere it shows the number.
 
@@ -257,7 +257,7 @@ never pretends a flat-plan total is a bill.
 
 The privacy invariant is enforced in CI. The generated HTML contains zero
 external resources, zero `<script src>`, zero `fetch`/`XMLHttpRequest`/`import()`.
-Interactive dashboards use one inline UI script and one JSON data block; pass
+Interactive dashboards use one inline UI script and one JSON data block. Pass
 `--no-interactive` for script-free HTML.
 
 The parse cache is not telemetry and is never uploaded. It stores parsed usage
