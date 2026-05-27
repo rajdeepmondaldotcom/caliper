@@ -49,6 +49,7 @@ from caliper.dashboards.data_models import (
     ModelRow,
     Outlook,
     OutlookHorizon,
+    OutputSummary,
     ProjectRow,
     QualityScore,
     QualitySignal,
@@ -585,6 +586,23 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "good",
             ),
         ],
+        output_summary=OutputSummary(
+            commits_touched=37,
+            cost_per_commit_usd=33.59,
+            linked_cost_usd=1243.0,
+            linked_cost_pct=0.82,
+            edit_share=0.41,
+            diagnostic_share=0.34,
+            exploration_share=0.25,
+            classified_tool_calls=2480,
+            has_git=True,
+            caveat=(
+                "Cost per commit divides git-linked spend by commits touched. It is "
+                "a unit-economics proxy, not a per-commit invoice. Unlinked spend is "
+                "exploration, planning, or work that never reached a commit, not "
+                "automatically waste."
+            ),
+        ),
         command_center=[
             CommandCenterCard(
                 "Budget posture",
@@ -1154,7 +1172,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
         billboard=BillboardCard(
             kind="fix",
             headline="BIGGEST FIX",
-            value="$612/mo saveable",
+            value="$612/mo avoidable",
             rationale=(
                 "320 short-context Opus events would price cheaper on Sonnet 4.6. "
                 "Validate quality before switching — Caliper measures cost, not output quality."

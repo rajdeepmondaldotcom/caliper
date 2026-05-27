@@ -17,6 +17,8 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import json
+from collections import defaultdict
+from decimal import Decimal
 from typing import Any
 
 from caliper.aggregation import (
@@ -89,6 +91,7 @@ from caliper.dashboards.data_models import (
     ModelRow,
     Outlook,
     OutlookHorizon,
+    OutputSummary,
     ProjectRow,
     QualityScore,
     QualitySignal,
@@ -399,6 +402,7 @@ def build_handoff_dashboard(
     long_context_histogram = _build_long_context_histogram(result, rate_card)
     cohort_deltas = _build_cohort_deltas(result, options, rate_card, total) if with_deltas else []
     budgets = _build_budget_rows(result, options, rate_card, budget_config)
+    output_summary = _build_output_summary(result, rate_card, shape_report)
     _advance_build(progress, "forecasts")
 
     # v2 design: the verdict strip shows up to 4 findings sorted by tone, so
@@ -431,6 +435,7 @@ def build_handoff_dashboard(
         evidence=evidence,
         usage_windows=usage_windows,
         impact_cards=impact_cards,
+        output_summary=output_summary,
         command_center=command_center,
         advisor_recommendations=advisor_recommendations,
         top_sessions=top_sessions,
@@ -560,7 +565,7 @@ def _build_billboard(
         return BillboardCard(
             kind="fix",
             headline="BIGGEST FIX",
-            value=f"{_fmt_money_compact(best_advisor.savings_usd)} saveable",
+            value=f"{_fmt_money_compact(best_advisor.savings_usd)} avoidable",
             rationale=_first_sentence(best_advisor.detail) or best_advisor.title,
             cta_label="Investigate",
             cta_anchor="inefficiencies",
@@ -586,7 +591,7 @@ def _build_billboard(
         return BillboardCard(
             kind="fix",
             headline="BIGGEST FIX",
-            value=f"{_fmt_money_compact(best_ineff.impact_usd)} saveable",
+            value=f"{_fmt_money_compact(best_ineff.impact_usd)} avoidable",
             rationale=_first_sentence(best_ineff.detail) or best_ineff.title,
             cta_label="Investigate",
             cta_anchor="inefficiencies",
@@ -603,7 +608,7 @@ def _build_billboard(
         headline="YOU'RE TIDY",
         value=f"{_fmt_money_compact(totals.cost_usd)} spend",
         rationale=(
-            f"No fixable waste detected in the {window.label.lower()}. "
+            f"No avoidable spend detected in the {window.label.lower()}. "
             "Keep an eye on the trajectory below."
         ),
         cta_label="Open evidence" if has_evidence else "",
@@ -611,6 +616,83 @@ def _build_billboard(
         confidence_pct=None,
         command="",
         tone="good",
+    )
+
+
+def _build_output_summary(
+    result: LoadResult,
+    rate_card: RateCard,
+    shape_report: SessionShapeReport,
+) -> OutputSummary | None:
+    """Answer "what did this spend produce?" from local git + tool evidence.
+
+    Returns ``None`` when there is neither git linkage nor classified tool
+    activity, so the renderer drops the section rather than showing zeros.
+    Every figure is sourced from logs already on disk. The function is pure:
+    no network, no git shell-out (git SHAs are read from parsed events).
+    """
+    if not result.events:
+        return None
+
+    commit_cost: dict[str, Decimal] = defaultdict(Decimal)
+    linked = Decimal("0")
+    total = Decimal("0")
+    for event in result.events:
+        cost, _, _ = event_cost(rate_card, event)
+        total += cost.cost_usd
+        sha = event.thread.git_sha
+        if sha:
+            commit_cost[sha] += cost.cost_usd
+            linked += cost.cost_usd
+
+    commits_touched = len(commit_cost)
+    has_git = commits_touched > 0
+    cost_per_commit = float(linked / commits_touched) if commits_touched else 0.0
+    linked_pct = float(linked / total) if total > 0 else 0.0
+
+    edits = diagnostics = exploration = classified = 0
+    for name, count in shape_report.tool_use.per_tool:
+        if name in EXECUTION_TOOLS:
+            edits += count
+            classified += count
+        elif name in DIAGNOSTIC_TOOLS:
+            diagnostics += count
+            classified += count
+        elif name in EXPLORATION_TOOLS:
+            exploration += count
+            classified += count
+
+    if not has_git and classified == 0:
+        return None
+
+    def _share(part: int) -> float:
+        return (part / classified) if classified else 0.0
+
+    if not has_git:
+        caveat = (
+            "No git history recorded in this window, so spend can't be tied to "
+            "commits. The edit-vs-diagnostic mix below is still measured from "
+            "tool calls."
+        )
+    else:
+        caveat = (
+            "Cost per commit divides git-linked spend by commits touched. It is "
+            "a unit-economics proxy, not a per-commit invoice. Unlinked spend is "
+            "exploration, planning, or work that never reached a commit, not "
+            "automatically waste."
+        )
+
+    return OutputSummary(
+        commits_touched=commits_touched,
+        cost_per_commit_usd=cost_per_commit,
+        linked_cost_usd=float(linked),
+        linked_cost_pct=linked_pct,
+        edit_share=_share(edits),
+        diagnostic_share=_share(diagnostics),
+        exploration_share=_share(exploration),
+        classified_tool_calls=classified,
+        has_git=has_git,
+        caveat=caveat,
     )
 
 
@@ -2763,15 +2845,15 @@ def _build_command_center(
             metric="trend",
         ),
         CommandCenterCard(
-            label="Largest savings candidate",
+            label="Largest avoidable spend",
             value=_format_money(largest_candidate),
             detail=(
-                "Largest savings finding"
+                "Largest avoidable-spend finding"
                 if inefficiencies
                 else (
                     "Largest advisor recommendation"
                     if advisor_recommendations
-                    else "No savings candidate crossed thresholds."
+                    else "No avoidable spend crossed thresholds."
                 )
             ),
             tone="good" if largest_candidate > 0 else "neutral",
@@ -3122,12 +3204,9 @@ def _build_decision_queue(
     savings = max((row.savings_usd for row in advisor_recommendations), default=0.0)
     if savings > 0:
         add(
-            "Review estimated savings",
-            f"Largest advisor recommendation is {_format_money(savings)}.",
-            (
-                "Review Savings opportunities, then validate quality and latency "
-                "before changing routing."
-            ),
+            "Review avoidable spend",
+            f"Largest advisor recommendation is {_format_money(savings)} at API rates.",
+            ("Open Avoidable spend, then validate quality and latency before changing routing."),
             f"{len(advisor_recommendations):,} recommendations",
             tone="good",
             anchor="inefficiencies",
@@ -3137,7 +3216,7 @@ def _build_decision_queue(
     if inefficiencies:
         top_finding = max(inefficiencies, key=lambda row: row.impact_usd)
         add(
-            "Review savings finding",
+            "Review avoidable-spend finding",
             top_finding.detail,
             top_finding.action,
             f"{_format_money(top_finding.impact_usd)} · {top_finding.evidence_status}",
@@ -3261,7 +3340,7 @@ def _build_executive_brief(
         )
     elif good_count:
         title = "No warning-level issue surfaced"
-        verdict = "Review estimated savings candidates when convenient."
+        verdict = "Review avoidable-spend candidates when convenient."
     else:
         title = "No priority issue surfaced"
         verdict = "No generated cost, reliability, or evidence issue needs immediate action."

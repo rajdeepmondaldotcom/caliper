@@ -44,7 +44,7 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
     assert "api-server" in html
     # New design chrome
     assert "CALIPER-" in html  # build id in masthead
-    assert "Cost layer for AI-assisted development" in html
+    assert "What your AI coding cost and produced" in html
     # Verdict strip label is "Verdict" (CSS uppercases it for display).
     assert ">Verdict</span>" in html
     assert dashboard.advisor_recommendations

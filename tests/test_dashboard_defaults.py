@@ -304,7 +304,7 @@ def test_interactive_embeds_only_requested_rhythm(demo_dashboard) -> None:
     assert 'class="cal-rhythm-receipt"' in html
     assert 'class="cal-rhythm-terminal"' not in html
     assert 'data-rhythm="receipt"' in html
-    assert "Cost layer for AI-assisted development" in html
+    assert "What your AI coding cost and produced" in html
     # The Terminal toggle no longer appears in the tweaks panel.
     assert 'data-toggle="rhythm"' not in html
     assert ">Terminal<" not in html

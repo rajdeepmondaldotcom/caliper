@@ -2,7 +2,38 @@
 
 All notable changes to Caliper. Newest on top.
 
-## 0.0.61 - 2026-05-27
+## 0.0.62 - 2026-05-27
+
+An honesty pass on the cost framing, plus the first cut of the leverage view.
+
+- **New dashboard section: "What this produced."** Above the fold, Caliper now
+  answers the question cost alone can't: is this working? It reports commits
+  touched, cost per commit, the share of spend linked to a commit, and the
+  edit-vs-diagnose ratio, all built from the git SHAs and tool calls already in
+  your local logs. No network, no new data source. Every figure is labeled with
+  its assumption: cost per commit is a unit cost, not an invoice; unlinked spend
+  is exploration or planning, not automatically waste; and Caliper measures cost
+  and effort, never whether the code was good.
+- **No more "savings" promise.** On a flat-rate plan there is nothing to save,
+  so calling the numbers "saveable" was a false promise. Every surface now says
+  **avoidable spend** instead: the dashboard billboard, the hero verdict
+  (`AVOIDABLE` in place of `FIXABLE`), the "Avoidable spend" section (was
+  "Savings opportunities"), the command-center and verdict cards, and the
+  `audit` / `recommend` / `dashboard` CLI output. The math is unchanged. Only
+  the wording is.
+- **"Value, not a bill" leads the verdict.** When a flat-rate subscription is
+  detected, the hero verdict now labels the headline cost as API-equivalent
+  value at API token rates, not an invoiced amount, right where you read it.
+- **README rewritten around what Caliper truly does.** It is the private,
+  offline receipt for your AI coding: what your usage is worth at API rates,
+  attributed to your projects, PRs, models, and sessions. A new "What the
+  dollar figures mean" section spells out the metered-versus-flat distinction
+  so the headline number is never mistaken for a bill.
+- **Known gap:** flat-plan detection currently covers Codex/ChatGPT plan types
+  only. Claude and Cursor subscription usage is still priced at API-equivalent
+  rates but not yet auto-labeled as flat-rate. Tracked as a follow-up.
+
+
 
 - **Default window is now 30 days** (a billing month), up from 14. `caliper
   dashboard` and the CLI commands share one window knob (`DEFAULT_WINDOW_DAYS`)

@@ -151,7 +151,7 @@ def _top_waste_insight(
         return None
     return Insight(
         severity="warn" if top.severity != "info" else "info",
-        title=f"${impact:,.2f} of waste is fixable",
+        title=f"${impact:,.2f} of spend is avoidable",
         detail=top.detail,
         action=top.payback_action,
         scope=SCOPE_HOME,
@@ -161,7 +161,7 @@ def _top_waste_insight(
         priority=95,
         confidence=top.confidence,
         impact_usd_exact=decimal_string(top.impact_usd_exact),
-        impact_label=f"${impact:,.2f} fixable",
+        impact_label=f"${impact:,.2f} avoidable",
         evidence_metrics=dict(top.evidence_metrics),
         commands=top.commands or ("caliper audit", "caliper recommend"),
     )
