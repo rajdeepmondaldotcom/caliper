@@ -4,23 +4,21 @@
 
 ### The private receipt for your AI coding.
 
-AI writes more of your code every month. You can't see what it costs, or whether
-it's working. Caliper can. It reads the logs **already on your disk** and shows
-two things: what your AI coding cost at API rates, broken down by project, PR,
-model, and session, and what that spend produced.
+See what your AI coding actually costs, and whether it's working. Caliper reads
+the logs **already on your disk** and prices every project, PR, model, and
+session at API rates. Fully offline.
 
-Nothing leaves your machine.
-
-**Offline by default. No account. No upload. No telemetry.**
+**No account. No upload. No telemetry. Nothing leaves your machine.**
 
 [![CI](https://github.com/rajdeepmondaldotcom/caliper/actions/workflows/ci.yml/badge.svg)](https://github.com/rajdeepmondaldotcom/caliper/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/caliper-ai.svg)](https://pypi.org/project/caliper-ai/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+See the full report right now, on built-in sample data. No install, nothing of yours touched:
+
 ```bash
-uv tool install caliper-ai
-caliper dashboard
+uvx --isolated --from caliper-ai caliper dashboard --demo --open
 ```
 
 </div>
@@ -395,6 +393,21 @@ on every commit.
 
 **Is there a hosted version?** No. There is no hosted version on the roadmap.
 Caliper is intentionally a tool you run, not a service you log into.
+
+## See it for yourself
+
+One command, on built-in sample data. No install, nothing of yours touched:
+
+```bash
+uvx --isolated --from caliper-ai caliper dashboard --demo --open
+```
+
+Then point it at your own logs:
+
+```bash
+uv tool install caliper-ai
+caliper dashboard
+```
 
 ## Development
 
