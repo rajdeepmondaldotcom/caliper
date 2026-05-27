@@ -2,6 +2,20 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.67 - 2026-05-28
+
+Remove the dead code behind the pruned dashboard.
+
+- **Deleted the unused data pipeline** for the sections cut in 0.0.66: the
+  builders, dataclasses, and `Dashboard` fields for the billboard, forecast,
+  outlook, seasonality, heatmap, recap, session-shape, spend-mix, rolling
+  windows, and command-center are gone. The data contract now holds only what
+  the renderer reads.
+- **Removed the dead render and chart helpers** they relied on, and the dead
+  `.cal-billboard` / `.cal-secondary-verdict` CSS from both style files.
+- **Insights only render when there's usage.** An empty window shows the
+  verdict and "no events," not an insights section about nothing.
+
 ## 0.0.66 - 2026-05-27
 
 Only what earns its place.

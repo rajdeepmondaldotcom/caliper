@@ -5,8 +5,6 @@ from __future__ import annotations
 import datetime as dt
 import json
 
-import pytest
-
 from caliper.config import build_options
 from caliper.dashboards.adapter import (
     _SHAPE_NAME_MAP,
@@ -15,7 +13,6 @@ from caliper.dashboards.adapter import (
     _build_model_rows,
     _build_project_rows,
     _build_rate_limit_pressure,
-    _build_session_shape,
     build_handoff_dashboard,
     tool_category,
 )
@@ -27,10 +24,7 @@ from caliper.models import (
     CostTotals,
     LoadResult,
     RateLimitSample,
-    ThreadMeta,
     TokenTotals,
-    Usage,
-    UsageEvent,
 )
 from caliper.parser import load_usage
 
@@ -145,25 +139,6 @@ def test_shape_name_map_is_total_for_categories() -> None:
 # ----- _build_session_shape -----
 
 
-def test_build_session_shape_assigns_categories(monkeypatch, tmp_path) -> None:
-    _write_session(tmp_path, [_row(i=i) for i in range(1, 4)])
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
-    result = load_usage(_options(tmp_path))
-
-    from caliper.analysis.session_shape import compute_session_shape
-
-    report = compute_session_shape(result)
-    shape = _build_session_shape(report)
-
-    assert shape.total_sessions == 1
-    # Top tools tagged with category
-    names = {t.name: t.category for t in shape.top_tools}
-    assert names.get("Read") == "explore"
-    assert names.get("Edit") == "execute"
-    # Categories share sums to ~1
-    assert abs(sum(c.share for c in shape.categories) - 1.0) < 1e-9
-
-
 # ----- build_handoff_dashboard (end-to-end) -----
 
 
@@ -180,14 +155,11 @@ def test_build_handoff_dashboard_decimal_to_float(monkeypatch, tmp_path) -> None
     assert len(d.totals.daily_cost_sparkline) == len(d.daily)
     assert len(d.totals.daily_token_sparkline) == len(d.daily)
     assert len(d.totals.daily_session_sparkline) == len(d.daily)
-    assert d.command_center
     assert d.top_sessions
     assert d.top_sessions[0].label == "10:01 am, Tuesday 12 May 2026"
     assert "s1" not in d.top_sessions[0].label
-    assert d.usage_mix
     assert d.rate_limit_pressure is not None
     assert d.quality_score is not None
-    assert {row.dimension for row in d.usage_mix} >= {"vendor", "model/tier", "tier", "source"}
 
 
 def test_build_handoff_dashboard_reuses_expensive_inputs_and_reports_progress(
@@ -232,59 +204,6 @@ def test_build_handoff_dashboard_reuses_expensive_inputs_and_reports_progress(
     assert progress.details[:3] == ["totals", "daily shape", "models"]
     assert "insights" in progress.details
     assert "forecasts" in progress.details
-
-
-def test_usage_mix_keeps_codex_fast_reasoning_tiers_costed(tmp_path) -> None:
-    def event(*, service_tier: str, reasoning_effort: str = "") -> UsageEvent:
-        return UsageEvent(
-            timestamp=dt.datetime(2026, 5, 12, 10, 0, tzinfo=dt.UTC),
-            path=tmp_path / "session.jsonl",
-            session_id=f"codex-{service_tier}-{reasoning_effort or 'default'}",
-            usage=Usage(
-                input_tokens=1000, cached_input_tokens=0, output_tokens=100, total_tokens=1100
-            ),
-            model="gpt-5.5",
-            service_tier=service_tier,
-            tier_source="logged",
-            thread=ThreadMeta(
-                cwd="/tmp/project-alpha",
-                model="gpt-5.5",
-                source="cli",
-                reasoning_effort=reasoning_effort,
-            ),
-            vendor=VENDOR_OPENAI_CODEX,
-        )
-
-    options = build_options(
-        since="2026-05-12",
-        until="2026-05-13",
-        timezone="UTC",
-        session_root=tmp_path / "missing-sessions",
-        state_db=tmp_path / "missing-state.sqlite",
-        codex_config=tmp_path / "missing-config.toml",
-        vendors=[VENDOR_OPENAI_CODEX],
-        no_parse_cache=True,
-    )
-    result = LoadResult(
-        events=[
-            event(service_tier="standard"),
-            event(service_tier="fast", reasoning_effort="x-high"),
-        ],
-        duplicates=0,
-        tier_sources={"logged": 2},
-        plan_types=set(),
-        rate_limit_samples=[],
-        warnings=[],
-    )
-
-    d = build_handoff_dashboard(result, options, with_deltas=False)
-    model_tiers = {row.label: row for row in d.usage_mix if row.dimension == "model/tier"}
-
-    assert "gpt-5.5 · standard" in model_tiers
-    assert "gpt-5.5 · fast · xhigh" in model_tiers
-    assert model_tiers["gpt-5.5 · fast · xhigh"].cost_usd == pytest.approx(
-        model_tiers["gpt-5.5 · standard"].cost_usd * 2.5
-    )
 
 
 def test_build_handoff_dashboard_zero_fills_daily(monkeypatch, tmp_path) -> None:
@@ -348,45 +267,7 @@ def test_build_project_rows_are_sorted_by_cost_then_activity(tmp_path) -> None:
     assert [row.name for row in rows] == ["project-a", "project-c", "project-b"]
 
 
-def test_build_handoff_dashboard_adds_rolling_usage_windows(monkeypatch, tmp_path) -> None:
-    rows = [
-        _row(i=1, timestamp="2026-05-12T10:01:00.000Z"),
-        _row(i=2, timestamp="2026-04-20T10:02:00.000Z"),
-    ]
-    _write_session(tmp_path, rows)
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
-    selected_options = _options(tmp_path)
-    rolling_options = build_options(
-        since="2026-02-12",
-        until="2026-05-13",
-        timezone="UTC",
-        session_root=tmp_path / "missing-codex",
-        state_db=tmp_path / "missing-state.sqlite",
-        codex_config=tmp_path / "missing-config.toml",
-        vendors=[VENDOR_CLAUDE_CODE],
-        no_parse_cache=True,
-    )
-    selected = load_usage(selected_options)
-    rolling = load_usage(rolling_options)
-
-    d = build_handoff_dashboard(
-        selected,
-        selected_options,
-        with_deltas=False,
-        rolling_result=rolling,
-        rolling_options=rolling_options,
-        budget_config={},
-    )
-
-    assert d.totals.events == 1
-    by_label = {window.label: window for window in d.usage_windows}
-    assert list(by_label) == ["Last 7 days", "Last 30 days", "Last 90 days"]
-    assert by_label["Last 7 days"].events == 1
-    assert by_label["Last 30 days"].events == 2
-    assert by_label["Last 90 days"].events == 2
-
-
-def test_build_handoff_dashboard_empty_window_onboards_with_doctor_and_demo(tmp_path) -> None:
+def test_build_handoff_dashboard_empty_window_onboards_with_doctor(tmp_path) -> None:
     dashboard = build_handoff_dashboard(
         _empty_load_result(),
         _options(tmp_path),
@@ -394,9 +275,11 @@ def test_build_handoff_dashboard_empty_window_onboards_with_doctor_and_demo(tmp_
         budget_config={},
     )
 
-    actions = {item.title: item.action for item in dashboard.decision_queue}
-    assert actions["Connect usage data"] == "Run caliper doctor and verify vendor log locations."
-    assert actions["Explore demo data"] == "Run caliper dashboard --demo --open."
+    assert dashboard.executive_brief is not None
+    titles = {f.title for f in dashboard.executive_brief.findings}
+    assert "Verify data sources" in titles
+    details = " ".join(f.detail for f in dashboard.executive_brief.findings)
+    assert "caliper doctor" in details
 
 
 def test_build_handoff_dashboard_adds_project_tracking_and_anomalies(monkeypatch, tmp_path) -> None:
@@ -447,43 +330,6 @@ def test_build_handoff_dashboard_adds_project_tracking_and_anomalies(monkeypatch
     session_spike = next(row for row in d.anomalies if row.kind == "Session spike")
     assert "huge" not in session_spike.label
     assert "2026" in session_spike.label
-
-
-def test_build_handoff_dashboard_rolling_windows_are_deduped(monkeypatch, tmp_path) -> None:
-    duplicate = _row(i=1)
-    _write_session(tmp_path, [duplicate, duplicate])
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
-    options = _options(tmp_path)
-    result = load_usage(options)
-
-    d = build_handoff_dashboard(result, options, with_deltas=False, budget_config={})
-
-    assert result.duplicates == 1
-    assert d.usage_windows[0].events == 1
-    dedupe = next(card for card in d.impact_cards if card.label == "Dedupe")
-    assert dedupe.value == "1 skipped"
-
-
-def test_build_handoff_dashboard_impact_cards_include_budget_states(monkeypatch, tmp_path) -> None:
-    _write_session(tmp_path, [_row(i=1)])
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
-    options = _options(tmp_path)
-    result = load_usage(options)
-
-    no_budget = build_handoff_dashboard(result, options, with_deltas=False, budget_config={})
-    assert next(card for card in no_budget.impact_cards if card.label == "Budget risk").value == (
-        "No budgets"
-    )
-
-    with_budget = build_handoff_dashboard(
-        result,
-        options,
-        with_deltas=False,
-        budget_config={"budgets": {"monthly_tokens": 10}},
-    )
-    budget = next(card for card in with_budget.impact_cards if card.label == "Budget risk")
-    assert budget.tone == "critical"
-    assert budget.value.endswith("%")
 
 
 def test_build_handoff_dashboard_severity_mapping(monkeypatch, tmp_path) -> None:
@@ -594,8 +440,6 @@ def test_build_banner_returns_none_when_healthy(monkeypatch, tmp_path) -> None:
     # Manually fabricate "two vendors" by tagging one event with a different
     # vendor. UsageEvent is frozen; replace via dataclasses.replace.
     import dataclasses
-
-    from caliper.models import VENDOR_OPENAI_CODEX
 
     second_event = dataclasses.replace(result.events[0], vendor=VENDOR_OPENAI_CODEX)
     result_two_vendors = dataclasses.replace(result, events=[*result.events, second_event])

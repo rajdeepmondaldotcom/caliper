@@ -16,20 +16,17 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
-import json
 from collections import defaultdict
 from decimal import Decimal
 from typing import Any
 
 from caliper.aggregation import (
     aggregate_daily,
-    aggregate_many,
     aggregate_model_mode,
     aggregate_overview_windows,
     aggregate_projects,
     aggregate_sessions,
     aggregate_total,
-    budget_impact_sort_key,
     event_cost,
 )
 from caliper.analysis.session_shape import (
@@ -42,7 +39,6 @@ from caliper.analysis.session_shape import (
     EXECUTION_TOOLS,
     EXPLORATION_TOOLS,
     SessionShapeReport,
-    category_label,
     compute_session_shape,
 )
 from caliper.anomaly import detect_actionable_anomalies
@@ -68,50 +64,34 @@ from caliper.dashboards.data_models import (
     BudgetRow,
     CacheLeverageRow,
     CaliperMeta,
-    CategoryCount,
     CohortDeltaRow,
-    CommandCenterCard,
     ComparisonSignal,
     DailyPoint,
     Dashboard,
     DecisionQueueItem,
     EvidenceRow,
     ExecutiveBrief,
-    Forecast,
-    ForecastDriverRow,
-    HeatCell,
-    HourCell,
     ImpactCard,
     InefficiencyRow,
     Insight,
     LongContextHistogram,
-    MixRow,
-    ModelForecastRow,
     ModelRow,
-    Outlook,
-    OutlookHorizon,
     OutputSummary,
     ProjectRow,
     QualityScore,
     QualitySignal,
     RateLimitForecastBand,
     RateLimitPressure,
-    Recap,
-    RecapStat,
-    SeasonalitySection,
     SessionRow,
-    SessionShape,
     SkillRow,
     TierProvenance,
     ToolCount,
     Totals,
     UsageWindow,
     WindowMeta,
-    YearlyHeatmap,
 )
 from caliper.efficiency import rank_recommendations, run_audit
 from caliper.evidence import evidence_dimensions
-from caliper.forecasts import project as project_forecast
 from caliper.health import rate_card_age_days
 from caliper.humanize import human_datetime as _format_human_datetime
 from caliper.humanize import session_label_lookup
@@ -120,11 +100,8 @@ from caliper.insights import _inefficiency_insight, build_insights_from
 from caliper.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions
 from caliper.parser import load_usage
 from caliper.predict import (
-    decompose_seasonality,
-    forecast_per_model,
     forecast_project_burn,
     forecast_rate_limits,
-    total_outlook,
 )
 from caliper.pricing import MODELS_BY_NAME, RateCard, load_rate_card, model_vendor, normalize_model
 from caliper.subscriptions import subscription_cost_caveat
@@ -227,7 +204,6 @@ def build_handoff_dashboard(
         deltas=deltas,
     )
 
-    shape = _build_session_shape(shape_report)
     _advance_build(progress, "daily shape")
     model_daily_cost = _daily_cost_sparkline_by_key(
         result,
@@ -267,11 +243,8 @@ def build_handoff_dashboard(
         rate_card=rate_card,
         daily_aggregates=daily_aggregates,
     )
-    forecast = _build_forecast(daily_points, options)
     evidence = _build_evidence(result, total)
     banner = _build_banner(result, options)
-    heatmap = _build_yearly_heatmap(result, options)
-    recap = _build_recap(result, options, total, by_model)
     _advance_build(progress, "signals")
     audit_findings = run_audit(result, options, rate_card) if result.events else []
     agent_attributions = build_agent_attributions(result, rate_card)
@@ -322,7 +295,6 @@ def build_handoff_dashboard(
         rate_card,
         session_aggregates=session_aggregates,
     )
-    usage_mix = _build_usage_mix(result, options, rate_card)
     _advance_build(progress, "usage mix")
     agent_rows = _build_agent_rows(
         result,
@@ -339,26 +311,8 @@ def build_handoff_dashboard(
         findings=inefficiency_findings,
     )
     _advance_build(progress, "attribution")
-    forecast_drivers = _build_forecast_drivers(
-        by_project=by_project,
-        by_model=by_model,
-        agents=agent_rows,
-        skills=skill_rows,
-        options=options,
-    )
     rate_limit_pressure = _build_rate_limit_pressure(result)
     quality_score = _build_quality_score(result, total, evidence)
-    command_center = _build_command_center(
-        total=total,
-        usage_windows=usage_windows,
-        impact_cards=impact_cards,
-        advisor_recommendations=advisor_recommendations,
-        inefficiencies=inefficiency_rows,
-        anomalies=anomalies,
-        top_sessions=top_sessions,
-        rate_limit_pressure=rate_limit_pressure,
-        quality_score=quality_score,
-    )
     comparisons = _build_comparisons(
         totals=totals,
         usage_windows=usage_windows,
@@ -388,10 +342,7 @@ def build_handoff_dashboard(
         decision_queue=decision_queue,
         comparisons=comparisons,
     )
-    seasonality = _build_seasonality(result, options, rate_card)
     tier_provenance = _build_tier_provenance(result)
-    outlook = _build_outlook(daily_points)
-    model_forecasts = _build_model_forecasts(result, options, rate_card, by_model)
     cache_leverage = _build_cache_leverage(
         result,
         options,
@@ -418,38 +369,24 @@ def build_handoff_dashboard(
         generated_at=(generated_at or dt.datetime.now(tz=dt.UTC)).isoformat(timespec="seconds"),
         totals=totals,
         daily=daily_points,
-        shape=shape,
         by_model=by_model,
         by_project=by_project,
         anomalies=anomalies,
         insights=insights,
-        forecast=forecast,
         evidence=evidence,
-        usage_windows=usage_windows,
-        impact_cards=impact_cards,
         output_summary=output_summary,
-        command_center=command_center,
         advisor_recommendations=advisor_recommendations,
         top_sessions=top_sessions,
-        usage_mix=usage_mix,
         agents=agent_rows,
         skills=skill_rows,
         inefficiencies=inefficiency_rows,
-        forecast_drivers=forecast_drivers,
         rate_limit_pressure=rate_limit_pressure,
         quality_score=quality_score,
         executive_brief=executive_brief,
-        decision_queue=decision_queue,
-        comparisons=comparisons,
-        heatmap=heatmap,
-        recap=recap,
         banner=banner,
         show_paths=options.show_paths,
-        seasonality=seasonality,
         tier_provenance=tier_provenance,
         cost_note=subscription_cost_caveat(result.plan_types) or "",
-        outlook=outlook,
-        model_forecasts=model_forecasts,
         cache_leverage=cache_leverage,
         long_context_histogram=long_context_histogram,
         cohort_deltas=cohort_deltas,
@@ -880,15 +817,6 @@ def _scoped_result(result: LoadResult, *, start: dt.datetime, end: dt.datetime) 
     return dataclasses.replace(result, events=events, rate_limit_samples=samples)
 
 
-def _daily_window_sparklines(
-    result: LoadResult,
-    options: RuntimeOptions,
-    rate_card: RateCard,
-) -> tuple[list[float], list[float]]:
-    daily_by_day = {agg.label: agg for agg in aggregate_daily(result, options, rate_card=rate_card)}
-    return _daily_window_sparklines_from_aggregates(daily_by_day, options)
-
-
 def _daily_window_sparklines_from_aggregates(
     daily_by_day: dict[str, Aggregate],
     options: RuntimeOptions,
@@ -936,33 +864,6 @@ def _active_day_count(events, options: RuntimeOptions) -> int:
 # ---------------------------------------------------------------------------
 # Session shape (handoff version)
 # ---------------------------------------------------------------------------
-
-
-def _build_session_shape(report: SessionShapeReport) -> SessionShape:
-    total = report.total_sessions or 1
-    top_tools = [
-        ToolCount(name=name, count=count, category=tool_category(name))  # type: ignore[arg-type]
-        for name, count in report.tool_use.per_tool[:10]
-    ]
-    categories = [
-        CategoryCount(
-            category=_SHAPE_NAME_MAP.get(cat, "no-tools"),  # type: ignore[arg-type]
-            label=category_label(cat),
-            sessions=count,
-            share=count / total,
-        )
-        for cat, count in report.category_counts
-    ]
-    return SessionShape(
-        total_sessions=report.total_sessions,
-        total_turns=report.total_turns,
-        tool_use_total=report.tool_use.total_calls,
-        tools_per_turn=report.tools_per_turn,
-        coverage_events=report.coverage_events,
-        coverage_total_events=report.coverage_total_events,
-        top_tools=top_tools,
-        categories=categories,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1571,131 +1472,6 @@ def _human_datetime(
     return _format_human_datetime(value, timezone, fallback=fallback)
 
 
-def _reasoning_effort_label(event: Any) -> str:
-    effort = str(getattr(getattr(event, "thread", None), "reasoning_effort", "") or "")
-    effort = effort.strip().lower().replace("_", "-")
-    if effort == "x-high":
-        return "xhigh"
-    return effort
-
-
-def _tier_with_reasoning_label(event: Any) -> str:
-    tier = str(getattr(event, "service_tier", "") or "unknown").strip() or "unknown"
-    effort = _reasoning_effort_label(event)
-    if effort and effort not in {tier, "none", "default"}:
-        return f"{tier} / {effort}"
-    return tier
-
-
-def _human_source_label(raw: str, event: Any) -> str:
-    text = (raw or "").strip()
-    thread = getattr(event, "thread", None)
-    role = str(getattr(thread, "agent_role", "") or "").strip()
-    nickname = str(getattr(thread, "agent_nickname", "") or "").strip()
-    if text.startswith("{"):
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            payload = {}
-        if isinstance(payload, dict):
-            role = str(payload.get("agent_role") or role).strip()
-            nickname = str(payload.get("agent_nickname") or nickname).strip()
-            if payload.get("subagent") or role or nickname:
-                if role and nickname:
-                    return f"Subagent: {nickname} ({role})"
-                if role:
-                    return f"Subagent: {role}"
-                if nickname:
-                    return f"Subagent: {nickname}"
-                return "Subagent"
-    if role or nickname:
-        if role and nickname:
-            return f"Subagent: {nickname} ({role})"
-        return f"Subagent: {role or nickname}"
-    lowered = text.lower()
-    return {
-        "cli": "CLI",
-        "local": "Local CLI",
-        "openai-codex": "Codex CLI",
-        "claude-code": "Claude Code",
-        "cursor": "Cursor",
-        "aider": "Aider",
-        "copilot": "Copilot",
-        "unknown": "Unknown",
-        "": "Unknown",
-    }.get(lowered, text if len(text) <= 64 else f"{text[:61]}...")
-
-
-def _build_usage_mix(
-    result: LoadResult,
-    options: RuntimeOptions,
-    rate_card: RateCard,
-) -> list[MixRow]:
-    if not result.events:
-        return []
-
-    def tier_key(event) -> tuple[str, str]:
-        tier = _tier_with_reasoning_label(event)
-        return tier, tier
-
-    def source_key(event) -> tuple[str, str]:
-        source = event.thread.source or event.thread.thread_source or event.vendor or "unknown"
-        label = _human_source_label(source, event)
-        return label, label
-
-    def vendor_key(event) -> tuple[str, str]:
-        vendor = event.vendor or "unknown"
-        return vendor, vendor
-
-    def model_tier_key(event) -> tuple[str, str]:
-        model = event.model or "unknown model"
-        tier = _tier_with_reasoning_label(event)
-        return f"{model}\0{tier}", f"{model} / {tier}"
-
-    vendor_aggs, model_tier_aggs, tier_aggs, source_aggs = aggregate_many(
-        result.events,
-        [vendor_key, model_tier_key, tier_key, source_key],
-        options,
-        rate_card=rate_card,
-    )
-    dimensions = [
-        ("vendor", sorted(vendor_aggs, key=budget_impact_sort_key), vendor_key),
-        ("model/tier", sorted(model_tier_aggs, key=budget_impact_sort_key), model_tier_key),
-        ("tier", sorted(tier_aggs, key=budget_impact_sort_key), tier_key),
-        ("source", sorted(source_aggs, key=budget_impact_sort_key), source_key),
-    ]
-    total_cost = sum(float(agg.costs.cost_usd) for _, aggs, _ in dimensions[:1] for agg in aggs)
-    if total_cost <= 0:
-        total_cost = float(aggregate_total(result, options, rate_card=rate_card).costs.cost_usd)
-
-    rows: list[MixRow] = []
-    for dimension, aggregates, key_fn in dimensions:
-        daily_by_key = _daily_cost_sparkline_by_key(result, options, rate_card, key_fn)
-        ordered = sorted(
-            [agg for agg in aggregates if agg.totals.events],
-            key=lambda agg: (
-                -float(agg.costs.cost_usd),
-                -agg.totals.total_tokens,
-                -agg.totals.events,
-                agg.label,
-            ),
-        )[:5]
-        for agg in ordered:
-            cost = float(agg.costs.cost_usd)
-            rows.append(
-                MixRow(
-                    dimension=dimension,
-                    label=agg.label.replace(" / ", " · "),
-                    cost_usd=cost,
-                    total_tokens=agg.totals.total_tokens,
-                    events=agg.totals.events,
-                    share=(cost / total_cost) if total_cost > 0 else 0.0,
-                    daily_cost_sparkline=daily_by_key.get(agg.key, []),
-                )
-            )
-    return rows
-
-
 def _build_agent_rows(
     result: LoadResult,
     rate_card: RateCard,
@@ -2120,61 +1896,6 @@ def _anomaly_label(kind: str, label: str, *, show_paths: bool) -> str:
     return f"{project_name_from_path(project)} / {day}"
 
 
-def _build_forecast_drivers(
-    *,
-    by_project: list[ProjectRow],
-    by_model: list[ModelRow],
-    agents: list[AgentRow],
-    skills: list[SkillRow],
-    options: RuntimeOptions,
-) -> list[ForecastDriverRow]:
-    window_days = max((options.end - options.start).total_seconds() / 86_400.0, 1.0)
-    multiplier = 30.0 / window_days
-    candidates: list[ForecastDriverRow] = []
-
-    def add(
-        dimension: str,
-        label: str,
-        cost: float,
-        evidence_status: str,
-        driver: str,
-    ) -> None:
-        if cost <= 0:
-            return
-        projected = cost * multiplier
-        candidates.append(
-            ForecastDriverRow(
-                dimension=dimension,
-                label=label,
-                evidence_status=_evidence_literal(evidence_status),
-                projected_30d_cost_usd=projected,
-                daily_mean_cost_usd=cost / window_days,
-                share=0.0,
-                driver=driver,
-            )
-        )
-
-    for row in by_project[:5]:
-        add("project", row.name, row.cost_usd, "exact", f"{row.events:,} events")
-    for row in by_model[:5]:
-        add("model", _humanize_model(row.model), row.cost_usd, "exact", row.tier)
-    for row in agents[:5]:
-        add("agent", row.agent_id, row.cost_usd, row.evidence_status, row.source_category)
-    for row in skills[:5]:
-        add("skill", row.name, row.estimated_cost_usd, row.evidence_status, row.attribution_method)
-
-    total = sum(row.projected_30d_cost_usd for row in candidates)
-    if total <= 0:
-        return []
-    with_share = [
-        dataclasses.replace(row, share=row.projected_30d_cost_usd / total) for row in candidates
-    ]
-    return sorted(
-        with_share,
-        key=lambda row: (-row.projected_30d_cost_usd, row.dimension, row.label),
-    )[:16]
-
-
 def _evidence_literal(value: str):
     if value in {"exact", "estimated", "partial", "unsupported"}:
         return value
@@ -2285,197 +2006,14 @@ def _build_rate_limit_forecast_bands(
 # ---------------------------------------------------------------------------
 
 
-def _build_seasonality(
-    result: LoadResult,
-    options: RuntimeOptions,
-    rate_card: RateCard,
-) -> SeasonalitySection | None:
-    """Cost-weighted hour-of-day + day-of-week distribution."""
-    if not result.events:
-        return None
-    profile = decompose_seasonality(result.events, rate_card, options.timezone)
-    total = float(sum(profile.by_hour_cost_usd))
-    if total <= 0:
-        return None
-    matrix = _hour_dow_cost_matrix(result.events, rate_card, options.timezone)
-    return SeasonalitySection(
-        by_hour_cost_usd=tuple(profile.by_hour_cost_usd),
-        by_dow_cost_usd=tuple(profile.by_dow_cost_usd),
-        by_dow_hour_cost_usd=matrix,
-        peak_hour=profile.peak_hour,
-        peak_dow=profile.peak_dow,
-        off_peak_share=profile.off_peak_share,
-        timezone=profile.timezone,
-        total_cost_usd=total,
-    )
-
-
-def _hour_dow_cost_matrix(
-    events: list,
-    rate_card: RateCard,
-    timezone: str,
-) -> tuple[tuple[float, ...], ...]:
-    """7×24 cost matrix in local TZ — Mon=0..Sun=6."""
-    from caliper.timeutil import load_timezone
-
-    tz = load_timezone(timezone)
-    grid = [[0.0] * 24 for _ in range(7)]
-    for event in events:
-        cost, _, _ = event_cost(rate_card, event)
-        local = event.timestamp.astimezone(tz)
-        grid[local.weekday()][local.hour] += float(cost.cost_usd)
-    return tuple(tuple(row) for row in grid)
-
-
 # ---------------------------------------------------------------------------
 # Portfolio 30/90-day outlook — P4 power-up
 # ---------------------------------------------------------------------------
 
 
-def _build_outlook(daily_points: list[DailyPoint]) -> Outlook | None:
-    """Dual-horizon 30-day + 90-day forward outlook on portfolio spend.
-
-    Uses the same selected-window daily cost series ``Forecast`` already
-    consumes, but projects forward by two fixed horizons regardless of
-    ``options.end`` so stakeholders can compare near-term vs medium-term.
-    Returns ``None`` when there is not enough history for a useful band.
-    """
-    series = [float(point.cost_usd) for point in daily_points]
-    if len(series) < 3:
-        return None
-    horizons = total_outlook(series)
-    h30 = horizons["30d"]
-    h90 = horizons["90d"]
-    return Outlook(
-        days_analyzed=h30.days_analyzed,
-        daily_mean=h30.daily_mean,
-        daily_stdev=h30.daily_stdev,
-        horizon_30d=OutlookHorizon(
-            days=30,
-            linear_total=h30.linear_total,
-            linear_low=h30.linear_low,
-            linear_high=h30.linear_high,
-            ewma_total=h30.ewma_total,
-        ),
-        horizon_90d=OutlookHorizon(
-            days=90,
-            linear_total=h90.linear_total,
-            linear_low=h90.linear_low,
-            linear_high=h90.linear_high,
-            ewma_total=h90.ewma_total,
-        ),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Per-model forecast strip — P2 power-up
 # ---------------------------------------------------------------------------
-
-
-def _build_model_forecasts(
-    result: LoadResult,
-    options: RuntimeOptions,
-    rate_card: RateCard,
-    by_model: list[ModelRow],
-    *,
-    top_n: int = 8,
-) -> list[ModelForecastRow]:
-    """Top-N model OLS demand forecasts wrapped with per-model bands.
-
-    Pulls per-model token slope from ``predict.forecast_per_model`` and
-    cost-projection band from ``forecasts.project`` over the per-model
-    daily cost series. Returns ``[]`` when there is no history.
-    """
-    if not by_model or result is None or not result.events:
-        return []
-    demand = {f.model: f for f in forecast_per_model(result.events, rate_card, options.timezone)}
-    cost_by_model = _per_model_daily_cost_series(result, rate_card, options)
-    ranked = sorted(by_model, key=lambda row: -row.cost_usd)[:top_n]
-    rows: list[ModelForecastRow] = []
-    for row in ranked:
-        forecast = demand.get(row.model)
-        if forecast is None:
-            continue
-        series = cost_by_model.get(row.model, [])
-        if len(series) < 3:
-            # Stable: surface the row even without a band.
-            rows.append(
-                ModelForecastRow(
-                    vendor=row.vendor,
-                    model=row.model,
-                    days_analyzed=forecast.days_analyzed,
-                    daily_mean_cost_usd=forecast.daily_mean_cost_usd,
-                    projected_30d_cost_usd=forecast.projected_cost_30d_usd,
-                    projected_30d_low=0.0,
-                    projected_30d_high=0.0,
-                    ewma_30d_cost_usd=0.0,
-                    trend_label="needs 3d history",
-                    trend_tone="neutral",
-                    daily_cost_sparkline=list(row.daily_cost_sparkline),
-                    growing=forecast.growing,
-                )
-            )
-            continue
-        proj = project_forecast(series, 30, unit="cost_usd")
-        trend_label, trend_tone = _slope_trend_label(
-            forecast.trend_slope_tokens_per_day,
-            forecast.growing,
-        )
-        rows.append(
-            ModelForecastRow(
-                vendor=row.vendor,
-                model=row.model,
-                days_analyzed=forecast.days_analyzed,
-                daily_mean_cost_usd=proj.daily_mean,
-                projected_30d_cost_usd=proj.linear_total,
-                projected_30d_low=max(0.0, proj.linear_low),
-                projected_30d_high=proj.linear_high,
-                ewma_30d_cost_usd=proj.ewma_total,
-                trend_label=trend_label,
-                trend_tone=trend_tone,  # type: ignore[arg-type]
-                daily_cost_sparkline=list(row.daily_cost_sparkline),
-                growing=forecast.growing,
-            )
-        )
-    return rows
-
-
-def _per_model_daily_cost_series(
-    result: LoadResult,
-    rate_card: RateCard,
-    options: RuntimeOptions,
-) -> dict[str, list[float]]:
-    """Dense per-model daily cost series indexed by model name."""
-    from caliper.timeutil import load_timezone
-
-    tz = load_timezone(options.timezone)
-    per_model: dict[str, dict[dt.date, float]] = {}
-    for event in result.events:
-        if not event.model:
-            continue
-        cost, _, _ = event_cost(rate_card, event)
-        local = event.timestamp.astimezone(tz).date()
-        bucket = per_model.setdefault(event.model, {})
-        bucket[local] = bucket.get(local, 0.0) + float(cost.cost_usd)
-    out: dict[str, list[float]] = {}
-    for model, by_day in per_model.items():
-        if not by_day:
-            continue
-        start, end = min(by_day), max(by_day)
-        days = (end - start).days + 1
-        series = [0.0] * days
-        for day, value in by_day.items():
-            series[(day - start).days] = value
-        out[model] = series
-    return out
-
-
-def _slope_trend_label(slope_tokens_per_day: float, growing: bool) -> tuple[str, str]:
-    if slope_tokens_per_day == 0:
-        return "flat", "neutral"
-    direction = "↑" if growing else "↓"
-    tone = "warn" if growing else "good"
-    return f"{direction} {abs(slope_tokens_per_day):,.0f} tok/d slope", tone
 
 
 # ---------------------------------------------------------------------------
@@ -2644,121 +2182,6 @@ def _build_quality_score(
             )
         )
     return QualityScore(score=score, grade=grade, signals=signals, tone=tone)  # type: ignore[arg-type]
-
-
-def _build_command_center(
-    *,
-    total: Aggregate,
-    usage_windows: list[UsageWindow],
-    impact_cards: list[ImpactCard],
-    advisor_recommendations: list[AdvisorRecommendation],
-    inefficiencies: list[InefficiencyRow],
-    anomalies: list[AnomalyRow],
-    top_sessions: list[SessionRow],
-    rate_limit_pressure: RateLimitPressure,
-    quality_score: QualityScore,
-) -> list[CommandCenterCard]:
-    windows_by_days = {window.days: window for window in usage_windows}
-    seven = windows_by_days.get(7)
-    thirty = windows_by_days.get(30)
-    velocity = (seven.cost_usd / seven.days) if seven else 0.0
-    thirty_velocity = (thirty.cost_usd / thirty.days) if thirty else 0.0
-    velocity_delta = (
-        ((velocity - thirty_velocity) / thirty_velocity) if thirty_velocity > 0 else None
-    )
-    velocity_tone = "warn" if velocity_delta is not None and velocity_delta >= 0.25 else "neutral"
-    budget = next((card for card in impact_cards if card.label == "Budget risk"), None)
-    advisor_savings = max((row.savings_usd for row in advisor_recommendations), default=0.0)
-    inefficiency_savings = max((row.impact_usd for row in inefficiencies), default=0.0)
-    largest_candidate = max(advisor_savings, inefficiency_savings)
-    top_anomaly = anomalies[0] if anomalies else None
-    top_session = top_sessions[0] if top_sessions else None
-    peak_limit = max(
-        [
-            value
-            for value in (
-                rate_limit_pressure.peak_primary_pct,
-                rate_limit_pressure.peak_secondary_pct,
-            )
-            if value is not None
-        ],
-        default=None,
-    )
-    return [
-        CommandCenterCard(
-            label="Budget posture",
-            value=budget.value if budget else "No budgets",
-            detail=budget.detail if budget else "Add budgets to track spend risk.",
-            tone=budget.tone if budget else "neutral",
-            metric="control",
-        ),
-        CommandCenterCard(
-            label="Spend velocity",
-            value=f"{_format_money(velocity)}/day" if seven else "No 7d usage",
-            detail=(
-                f"{_format_signed_pct(velocity_delta)} vs 30d/day"
-                if velocity_delta is not None
-                else "Needs 30d history for trend."
-            ),
-            tone=velocity_tone,  # type: ignore[arg-type]
-            metric="trend",
-        ),
-        CommandCenterCard(
-            label="Largest avoidable spend",
-            value=_format_money(largest_candidate),
-            detail=(
-                "Largest avoidable-spend finding"
-                if inefficiencies
-                else (
-                    "Largest advisor recommendation"
-                    if advisor_recommendations
-                    else "No avoidable spend crossed thresholds."
-                )
-            ),
-            tone="good" if largest_candidate > 0 else "neutral",
-            metric="savings",
-        ),
-        CommandCenterCard(
-            label="Anomaly findings",
-            value=f"{len(anomalies):,}" if anomalies else "None",
-            detail=(
-                f"{top_anomaly.kind} · observed {_format_money(top_anomaly.observed_usd)}"
-                if top_anomaly
-                else "No spike crossed the detector thresholds."
-            ),
-            tone=top_anomaly.tone if top_anomaly else "neutral",
-            metric="audit",
-        ),
-        CommandCenterCard(
-            label="Highest-cost session",
-            value=_format_money(top_session.cost_usd) if top_session else "None",
-            detail=(
-                f"{top_session.reason} · {_format_tokens(top_session.total_tokens)} tokens"
-                if top_session
-                else "No selected usage sessions."
-            ),
-            tone="warn" if top_session and top_session.cost_usd > 0 else "neutral",
-            metric="drilldown",
-        ),
-        CommandCenterCard(
-            label="Peak rate-limit usage",
-            value=_format_pct_round(peak_limit) if peak_limit is not None else "No samples",
-            detail=(
-                f"{rate_limit_pressure.reached_count:,} reached events"
-                if rate_limit_pressure.reached_count
-                else f"{rate_limit_pressure.sample_count:,} limit samples"
-            ),
-            tone=rate_limit_pressure.tone,
-            metric="reliability",
-        ),
-        CommandCenterCard(
-            label="Evidence quality",
-            value=f"{quality_score.score}/100",
-            detail=quality_score.grade,
-            tone=quality_score.tone,
-            metric="evidence",
-        ),
-    ]
 
 
 def _build_comparisons(
@@ -3283,30 +2706,6 @@ def _stringify_reset(value: object) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_forecast(daily_points: list[DailyPoint], options: RuntimeOptions) -> Forecast | None:
-    if not daily_points:
-        return None
-    values = [float(p.cost_usd) for p in daily_points]
-    end = options.end.astimezone(dt.UTC)
-    last_of_month = (end.replace(day=1) + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(
-        days=1
-    )
-    days_remaining = max(0, (last_of_month.date() - end.date()).days)
-    if days_remaining == 0:
-        return None
-    projection = project_forecast(values, days_remaining=days_remaining, unit="cost_usd")
-    return Forecast(
-        days_analyzed=projection.days_analyzed,
-        days_remaining=projection.days_remaining,
-        daily_mean=projection.daily_mean,
-        daily_stdev=projection.daily_stdev,
-        linear_total=projection.linear_total,
-        linear_low=projection.linear_low,
-        linear_high=projection.linear_high,
-        ewma_total=projection.ewma_total,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Evidence
 # ---------------------------------------------------------------------------
@@ -3409,240 +2808,9 @@ _MONTH_NAMES = (
 )
 
 
-def _level_for(value: int, thresholds: tuple[int, int, int, int]) -> int:
-    """5-bin heat level: 0 = empty, 1..4 = quartile bins of non-zero values."""
-    if value <= 0:
-        return 0
-    t1, t2, t3, t4 = thresholds
-    if value >= t4:
-        return 4
-    if value >= t3:
-        return 3
-    if value >= t2:
-        return 2
-    return 1
-
-
-def _quartile_thresholds(values: list[int]) -> tuple[int, int, int, int]:
-    """Four upper bin edges for non-zero values. Returns (t1, t2, t3, t4)."""
-    non_zero = sorted(v for v in values if v > 0)
-    if not non_zero:
-        return (1, 1, 1, 1)
-    n = len(non_zero)
-
-    def pick(p: float) -> int:
-        i = max(0, min(n - 1, int(p * (n - 1))))
-        return non_zero[i]
-
-    return (pick(0.20), pick(0.45), pick(0.70), pick(0.90))
-
-
-def _streaks(values: list[int]) -> tuple[int, int]:
-    """Return (longest_streak, current_streak) of consecutive active days.
-
-    `values` is the daily series oldest→newest. A day is active if value > 0.
-    """
-    longest = 0
-    run = 0
-    for v in values:
-        if v > 0:
-            run += 1
-            longest = max(longest, run)
-        else:
-            run = 0
-    # Current streak walks backward from the last day.
-    current = 0
-    for v in reversed(values):
-        if v > 0:
-            current += 1
-        else:
-            break
-    return longest, current
-
-
-def _build_yearly_heatmap(result: LoadResult, options: RuntimeOptions) -> YearlyHeatmap | None:
-    """Compute a 365-day contribution grid ending at the window end.
-
-    Metric: total tool calls per day (Claude Code only today; other vendors
-    contribute 0 until their parsers learn tool-use extraction). Falls back
-    to event count when no turn-facts data is present.
-    """
-    from collections import Counter
-
-    from caliper.timeutil import load_timezone
-
-    tz = load_timezone(options.timezone)
-    end_day = options.end.astimezone(tz).date()
-    start_day = end_day - dt.timedelta(days=364)  # 365 cells total
-
-    daily_tool_calls: dict[str, int] = {}
-    daily_events: dict[str, int] = {}
-    for event in result.events:
-        local_date = event.timestamp.astimezone(tz).date()
-        if local_date < start_day or local_date > end_day:
-            continue
-        key = local_date.isoformat()
-        daily_events[key] = daily_events.get(key, 0) + 1
-        if event.turn_facts and event.turn_facts.tool_use_count:
-            daily_tool_calls[key] = daily_tool_calls.get(key, 0) + event.turn_facts.tool_use_count
-
-    using_tools = sum(daily_tool_calls.values()) > 0
-    daily_series = daily_tool_calls if using_tools else daily_events
-    metric_label = "AI tool calls" if using_tools else "AI events"
-
-    if not daily_series and not result.events:
-        return None
-
-    # Build cells day-by-day.
-    cells: list[HeatCell] = []
-    day = start_day
-    values_in_order: list[int] = []
-    while day <= end_day:
-        v = daily_series.get(day.isoformat(), 0)
-        values_in_order.append(v)
-        day = day + dt.timedelta(days=1)
-
-    thresholds = _quartile_thresholds(values_in_order)
-    day = start_day
-    for v in values_in_order:
-        cells.append(HeatCell(date=day.isoformat(), value=v, level=_level_for(v, thresholds)))
-        day = day + dt.timedelta(days=1)
-
-    total = sum(values_in_order)
-    longest, current = _streaks(values_in_order)
-
-    # Most active month — group cell totals by calendar month.
-    month_totals: Counter[int] = Counter()
-    for cell in cells:
-        if cell.value <= 0:
-            continue
-        month_idx = int(cell.date[5:7])
-        month_totals[month_idx] += cell.value
-    most_active_month = "—"
-    if month_totals:
-        top_month_idx = max(month_totals.items(), key=lambda kv: kv[1])[0]
-        most_active_month = _MONTH_NAMES[top_month_idx - 1]
-
-    # Most active day — highest single-day value.
-    most_active_day = "—"
-    if total > 0:
-        peak = max(cells, key=lambda c: c.value)
-        peak_date = dt.date.fromisoformat(peak.date)
-        most_active_day = peak_date.strftime("%b %d, %Y").replace(" 0", " ")
-
-    return YearlyHeatmap(
-        metric_label=metric_label,
-        metric_total=total,
-        cells=cells,
-        most_active_month=most_active_month,
-        most_active_day=most_active_day,
-        longest_streak=longest,
-        current_streak=current,
-        legend_values=thresholds,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Recap card — hour-of-week heatmap + 2x4 stat grid + comparison
 # ---------------------------------------------------------------------------
-
-
-def _build_recap(
-    result: LoadResult,
-    options: RuntimeOptions,
-    total: Aggregate,
-    by_model: list[ModelRow],
-) -> Recap | None:
-    """Compute the recap card payload.
-
-    Hour-of-week heat: 7 days × 24 hours, value = event count per cell.
-    Stats: sessions, messages, total tokens, active days, current/longest
-    streaks, peak hour, favourite model. Comparison: total tokens vs a
-    well-known reference book.
-    """
-    from caliper.timeutil import load_timezone
-
-    if not result.events:
-        return None
-
-    tz = load_timezone(options.timezone)
-    hour_counts: dict[tuple[int, int], int] = {}
-    active_days: set[str] = set()
-    daily_event_counts: dict[str, int] = {}
-    hour_of_day: dict[int, int] = {}
-    for event in result.events:
-        local = event.timestamp.astimezone(tz)
-        dow = local.weekday()  # 0 = Monday
-        hour = local.hour
-        hour_counts[(dow, hour)] = hour_counts.get((dow, hour), 0) + 1
-        hour_of_day[hour] = hour_of_day.get(hour, 0) + 1
-        date_key = local.date().isoformat()
-        active_days.add(date_key)
-        daily_event_counts[date_key] = daily_event_counts.get(date_key, 0) + 1
-
-    values = list(hour_counts.values())
-    thresholds = _quartile_thresholds(values)
-    hours: list[HourCell] = []
-    for dow in range(7):
-        for hour in range(24):
-            v = hour_counts.get((dow, hour), 0)
-            hours.append(
-                HourCell(day_of_week=dow, hour=hour, value=v, level=_level_for(v, thresholds))
-            )
-
-    # Streaks across the contiguous daily series.
-    start_day = options.start.astimezone(tz).date()
-    end_day = options.end.astimezone(tz).date()
-    streak_series: list[int] = []
-    day = start_day
-    while day < end_day:
-        streak_series.append(daily_event_counts.get(day.isoformat(), 0))
-        day = day + dt.timedelta(days=1)
-    longest, current = _streaks(streak_series)
-
-    # Peak hour
-    peak_hour_label = "—"
-    if hour_of_day:
-        peak = max(hour_of_day.items(), key=lambda kv: kv[1])[0]
-        peak_hour_label = _format_hour_12(peak)
-
-    # Favorite model — by event count
-    fav_model = "—"
-    if by_model:
-        top = max(by_model, key=lambda m: m.events)
-        fav_model = _humanize_model(top.model)
-
-    # Token comparison
-    tokens = total.totals.total_tokens
-    if tokens == 0:
-        comparison = "No tokens to compare yet."
-    else:
-        ratio = tokens / _PRIDE_AND_PREJUDICE_TOKENS
-        if ratio < 1:
-            comparison = (
-                f"You've used about {ratio * 100:.0f}% of the tokens in Pride and Prejudice."
-            )
-        else:
-            comparison = f"You've used ~{ratio:.0f}× more tokens than Pride and Prejudice."
-
-    stats = [
-        RecapStat(label="Sessions", value=f"{len(total.session_ids):,}"),
-        RecapStat(label="Events", value=f"{total.totals.events:,}"),
-        RecapStat(label="Total tokens", value=_format_tokens(tokens)),
-        RecapStat(label="Active days", value=str(len(active_days))),
-        RecapStat(label="Current streak", value=f"{current}d"),
-        RecapStat(label="Longest streak", value=f"{longest}d"),
-        RecapStat(label="Peak hour", value=peak_hour_label),
-        RecapStat(label="Favorite model", value=fav_model),
-    ]
-
-    return Recap(
-        title="Caliper recap",
-        stats=stats,
-        hours=hours,
-        comparison=comparison,
-        legend_values=thresholds,
-    )
 
 
 def _format_hour_12(hour: int) -> str:

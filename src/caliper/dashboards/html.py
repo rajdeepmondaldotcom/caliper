@@ -642,7 +642,6 @@ section[id] { scroll-margin-top: 36px; }
     padding: 8px 12px !important;
   }
   .cal-card-formula > summary { min-height: 44px; }
-  .cal-secondary-verdict-summary { min-height: 44px; }
 }
 
 /* Mobile viewport: render at 390px wide in a phone-shaped frame */
@@ -1109,17 +1108,6 @@ body[data-interactive="true"] .cal-terminal-main {
   }
   .cal-palette-hints { font-size: 10px; padding: 10px 16px; }
 
-  /* Billboard — full-width CTA tap target. */
-  .cal-billboard-cta {
-    display: flex !important;
-    width: 100%;
-    justify-content: center;
-    padding: 14px 18px !important;
-    min-height: 48px;
-  }
-  .cal-billboard { padding: 20px 18px 22px !important; }
-  .cal-billboard-value { font-size: 26px !important; }
-
   /* Source chips — slightly more compact so 4 chips fit two-up. */
   .cal-source-chip { padding: 3px 7px !important; font-size: 11px !important; }
   .cal-source-row {
@@ -1141,38 +1129,7 @@ body[data-interactive="true"] .cal-terminal-main {
 @media print {
   .cal-real { display: none !important; }
   .cal-redacted { display: inline !important; }
-}
-
-/* ============================================================================
-   Phase 1 UX overhaul — billboard + appendix + canonical severity token
-
-   These components apply Krug-1 ("don't make me think"), Peak-End Rule,
-   Von Restorff, and Progressive Disclosure. Visual rules:
-
-   * Billboard is the page peak — one number, one action.
-   * Appendix collapses everything diagnostic behind a single <details>.
-   * Severity is colour + glyph + label (never colour alone). Critical
-     gets a 1-shot pulse; everything else is calm.
-   * All animations gated by prefers-reduced-motion.
-   ============================================================================ */
-
-.cal-billboard {
-  box-shadow: inset 0 0 0 1px var(--hairline);
-}
-.cal-billboard-cta {
-  transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
-}
-.cal-billboard-cta:hover {
-  background: var(--accent-strong) !important;
-  text-decoration: none;
-}
-.cal-billboard-cta:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-@media (prefers-reduced-motion: reduce) {
-  .cal-billboard-cta { transition: none; }
-}
+}@media (prefers-reduced-motion: reduce) {}
 
 /* Appendix block — single progressive disclosure that hides every
    non-actionable section behind one click. <details> is a native
@@ -1228,44 +1185,7 @@ body[data-interactive="true"] .cal-terminal-main {
   display: grid;
   gap: 40px;
   margin-top: var(--sp-m);
-}
-/* Secondary verdict — when a billboard owns the fold, the multi-finding
-   verdict strip is demoted into this collapsed disclosure. Mirrors the
-   appendix summary pattern. */
-.cal-secondary-verdict { margin: 0; }
-.cal-secondary-verdict-summary {
-  list-style: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0;
-  color: var(--mute);
-  text-transform: uppercase;
-  font-weight: 600;
-  user-select: none;
-  min-height: 40px;
-  padding: 8px 0;
-}
-.cal-secondary-verdict-summary::marker,
-.cal-secondary-verdict-summary::-webkit-details-marker { display: none; }
-.cal-secondary-verdict-summary:hover { color: var(--ink-2); }
-.cal-secondary-verdict-chev {
-  display: inline-block;
-  font-size: 10px;
-  color: var(--ghost);
-  transition: transform 140ms ease-out;
-  width: 8px;
-}
-.cal-secondary-verdict[open] .cal-secondary-verdict-chev { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) {
-  .cal-appendix,
-  .cal-appendix-chev,
-  .cal-card-chev,
-  .cal-secondary-verdict-chev { transition: none; }
-}
+}@media (prefers-reduced-motion: reduce) {}
 
 /* Canonical severity token — one shape per level. Pair the colour with
    a glyph and label so colour-blind users still parse the signal. */
@@ -1753,14 +1673,7 @@ _SHAPE_COLORS: dict[str, str] = {
 
 def _has_rich_operator_findings(d: Dashboard) -> bool:
     """Return true when richer, more actionable sections supersede Insights."""
-    return bool(
-        d.decision_queue
-        or d.advisor_recommendations
-        or d.inefficiencies
-        or d.anomalies
-        or d.usage_mix
-        or d.top_sessions
-    )
+    return bool(d.advisor_recommendations or d.inefficiencies or d.anomalies or d.top_sessions)
 
 
 def _rate_limit_is_actionable(d: Dashboard) -> bool:
@@ -1795,7 +1708,7 @@ def _should_render(section_id: str, d: Dashboard) -> bool:
     if section_id == "rate-limits":
         return _rate_limit_is_actionable(d)
     if section_id == "insights":
-        return bool(d.insights) and not _has_rich_operator_findings(d)
+        return d.totals.events > 0 and bool(d.insights) and not _has_rich_operator_findings(d)
     if section_id == "evidence":
         return bool(d.evidence)
     return False
@@ -2889,11 +2802,8 @@ def _verdict_strip(d: Dashboard, rhythm: str) -> str:
 def _verdict_block(d: Dashboard, rhythm: str, *, margin: str = "margin-top:18px") -> str:
     """Place the multi-finding verdict strip in the summary band.
 
-    When a billboard is present it owns the first viewport (single headline,
-    Krug billboard test); the verdict strip — which repeats the verdict plus up
-    to four finding chips — is demoted into a collapsed disclosure so it stops
-    competing for the fold. Without a billboard (legacy payloads) the strip
-    renders inline as before. ``margin`` matches the host layout's spacing
+    The strip repeats the verdict plus up to four finding chips and renders
+    inline under the hero verdict. ``margin`` matches the host layout's spacing
     convention (receipt uses ``margin-top``; terminal uses ``margin-bottom``).
     """
     eb = d.executive_brief
@@ -4361,7 +4271,7 @@ def _anomaly_tone_word(tone: str) -> str:
 
 
 # ----------------------------------------------------------------------------
-# Billboard — single above-the-fold "biggest fix" peak (Peak-End Rule)
+# Output — "what did this spend produce?" section
 # ----------------------------------------------------------------------------
 
 
@@ -4578,8 +4488,8 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         "What your AI coding cost and produced · offline, no login</div></div>"
         '<div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end;min-width:0">'
         f'<div style="display:flex;gap:8px;align-items:center">{evidence_badge}{_window_badge(d.window)}</div>'
-        # Baseline spend, above the fold: the billboard leads on an avoidable-spend
-        # figure, so the window total needs to be legible without scrolling to §Overview.
+        # Baseline spend, above the fold: the window total must be legible in the
+        # masthead without scrolling to the Overview section.
         '<div style="font-size:15px;color:var(--ink);font-weight:600;font-family:var(--mono)">'
         f"{fmt_money(d.totals.cost_usd)} "
         '<span style="color:var(--mute);font-weight:400;font-size:11px;font-family:var(--font)">'

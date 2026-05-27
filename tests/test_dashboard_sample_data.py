@@ -32,10 +32,6 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
     assert dashboard.caliper.version == __version__
     assert dashboard.caliper.schema_version == DASHBOARD_SCHEMA_VERSION
     assert dashboard.show_paths is True
-    assert dashboard.heatmap is not None
-    assert len(dashboard.heatmap.cells) == 365
-    assert dashboard.recap is not None
-    assert len(dashboard.recap.hours) == 168
     assert dashboard.executive_brief is not None
 
     html = render_dashboard(dashboard)
@@ -50,7 +46,6 @@ def test_sample_dashboard_uses_current_version_and_renders_variants() -> None:
     assert dashboard.advisor_recommendations
     assert dashboard.top_sessions
     assert dashboard.inefficiencies
-    assert dashboard.model_forecasts
     assert dashboard.agents
     assert dashboard.skills
     assert dashboard.rate_limit_pressure is not None

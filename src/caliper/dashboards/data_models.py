@@ -129,15 +129,6 @@ class BudgetRow:
 
 
 @dataclass(frozen=True)
-class CommandCenterCard:
-    label: str
-    value: str
-    detail: str
-    tone: ImpactTone = "neutral"
-    metric: str = ""
-
-
-@dataclass(frozen=True)
 class MetricContext:
     """Human-readable definition metadata for dashboard metrics."""
 
@@ -225,17 +216,6 @@ class SessionRow:
     tool_calls: int
     models: list[str]
     reason: str
-
-
-@dataclass(frozen=True)
-class MixRow:
-    dimension: str
-    label: str
-    cost_usd: float
-    total_tokens: int
-    events: int
-    share: float
-    daily_cost_sparkline: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -330,17 +310,6 @@ class LongContextHistogram:
 
 
 @dataclass(frozen=True)
-class ForecastDriverRow:
-    dimension: str
-    label: str
-    evidence_status: EvidenceStatus
-    projected_30d_cost_usd: float
-    daily_mean_cost_usd: float
-    share: float
-    driver: str
-
-
-@dataclass(frozen=True)
 class RateLimitForecastBand:
     """Time-to-exhaustion projection for one rate-limit window.
 
@@ -425,18 +394,6 @@ class CategoryCount:
     share: float  # 0..1
 
 
-@dataclass(frozen=True)
-class SessionShape:
-    total_sessions: int
-    total_turns: int
-    tool_use_total: int
-    tools_per_turn: float
-    coverage_events: int
-    coverage_total_events: int
-    top_tools: list[ToolCount]
-    categories: list[CategoryCount]
-
-
 # ---------------------------------------------------------------------------
 # Tables
 # ---------------------------------------------------------------------------
@@ -515,62 +472,6 @@ class Insight:
 
 
 @dataclass(frozen=True)
-class Forecast:
-    days_analyzed: int
-    days_remaining: int
-    daily_mean: float
-    daily_stdev: float
-    linear_total: float
-    linear_low: float  # -1σ
-    linear_high: float  # +1σ
-    ewma_total: float
-
-
-@dataclass(frozen=True)
-class OutlookHorizon:
-    """One horizon of the dual 30/90-day portfolio outlook."""
-
-    days: int  # 30 or 90
-    linear_total: float
-    linear_low: float
-    linear_high: float
-    ewma_total: float
-
-
-@dataclass(frozen=True)
-class Outlook:
-    """Stakeholder-grade 30/90-day spend outlooks side-by-side.
-
-    Distinct from ``Forecast`` (single-horizon, days_remaining-bounded)
-    — ``Outlook`` is forward-looking from "today" by 30 and 90 days.
-    """
-
-    days_analyzed: int
-    daily_mean: float
-    daily_stdev: float
-    horizon_30d: OutlookHorizon
-    horizon_90d: OutlookHorizon
-
-
-@dataclass(frozen=True)
-class ModelForecastRow:
-    """One card in the per-model forecast strip (top N by cost)."""
-
-    vendor: str
-    model: str
-    days_analyzed: int
-    daily_mean_cost_usd: float
-    projected_30d_cost_usd: float
-    projected_30d_low: float
-    projected_30d_high: float
-    ewma_30d_cost_usd: float
-    trend_label: str
-    trend_tone: ImpactTone = "neutral"
-    daily_cost_sparkline: list[float] = field(default_factory=list)
-    growing: bool = False
-
-
-@dataclass(frozen=True)
 class EvidenceRow:
     label: str
     status: EvidenceStatus
@@ -591,80 +492,14 @@ class TierProvenance:
     total_events: int
 
 
-@dataclass(frozen=True)
-class SeasonalitySection:
-    """Cost-weighted hour-of-day + day-of-week distribution.
-
-    Distinct from ``Recap.hours`` (event-count grid): values here are USD,
-    computed via ``predict.decompose_seasonality``.
-    """
-
-    by_hour_cost_usd: tuple[float, ...]  # 24 entries, Mon..Sun summed
-    by_dow_cost_usd: tuple[float, ...]  # 7 entries, Mon=0..Sun=6
-    by_dow_hour_cost_usd: tuple[tuple[float, ...], ...]  # 7×24 matrix
-    peak_hour: int  # 0..23
-    peak_dow: int  # 0..6
-    off_peak_share: float  # cost fraction in lower-spend half of hours
-    timezone: str
-    total_cost_usd: float
-
-
 # ---------------------------------------------------------------------------
 # Activity heatmap — GitHub-style yearly contribution grid
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class HeatCell:
-    """One cell in the yearly heatmap. `level` is 0..4 (5 bins, 0 = empty)."""
-
-    date: str  # ISO YYYY-MM-DD
-    value: int
-    level: int  # 0..4
-
-
-@dataclass(frozen=True)
-class YearlyHeatmap:
-    metric_label: str  # "AI events" / "Tool calls" / "Tokens"
-    metric_total: int  # total over the whole window (the big headline number)
-    cells: list[HeatCell]  # 365 / 366 cells, oldest first, contiguous
-    most_active_month: str  # "July" — full month name
-    most_active_day: str  # "Feb 4, 2026" — short, display-formatted
-    longest_streak: int  # consecutive active days
-    current_streak: int  # consecutive active days ending today (or window end)
-    legend_values: tuple[int, int, int, int]  # thresholds for levels 1..4 (inclusive)
-
-
 # ---------------------------------------------------------------------------
 # Recap card — hour-of-week heatmap + stat grid + comparison line
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class HourCell:
-    """One cell in the 7×24 hour-of-week heatmap. `level` is 0..4."""
-
-    day_of_week: int  # 0 = Monday, 6 = Sunday
-    hour: int  # 0..23, local-tz
-    value: int
-    level: int  # 0..4
-
-
-@dataclass(frozen=True)
-class RecapStat:
-    label: str
-    value: str  # display string (already formatted)
-
-
-@dataclass(frozen=True)
-class Recap:
-    """Personal recap card — modelled after a year-in-review summary."""
-
-    title: str  # e.g. "What's up next, Rajdeep?" or "Caliper recap"
-    stats: list[RecapStat]  # exactly 8 stats in a 4x2 grid
-    hours: list[HourCell]  # 168 cells (7×24), ordered by (day_of_week, hour)
-    comparison: str  # e.g. "You've used ~39× more tokens than Pride and Prejudice."
-    legend_values: tuple[int, int, int, int]  # thresholds for hour levels 1..4
 
 
 # ---------------------------------------------------------------------------
@@ -739,50 +574,30 @@ class Dashboard:
 
     totals: Totals
     daily: list[DailyPoint]
-    shape: SessionShape
     by_model: list[ModelRow]
     by_project: list[ProjectRow]
     anomalies: list[AnomalyRow]
     insights: list[Insight]
-    forecast: Forecast | None
     evidence: list[EvidenceRow]
-
-    # Rolling, overlapping usage windows. These are intentionally separate
-    # from `totals`, which remains the selected report window.
-    usage_windows: list[UsageWindow] = field(default_factory=list)
-    impact_cards: list[ImpactCard] = field(default_factory=list)
 
     # "What did this produce?" — the leverage view, built from local git +
     # tool evidence. Optional so legacy/lean payloads still build.
     output_summary: OutputSummary | None = None
 
-    # Richer analysis report sections. The renderer treats these as optional
-    # so lean/legacy dashboard payloads still work.
-    command_center: list[CommandCenterCard] = field(default_factory=list)
     advisor_recommendations: list[AdvisorRecommendation] = field(default_factory=list)
     top_sessions: list[SessionRow] = field(default_factory=list)
-    usage_mix: list[MixRow] = field(default_factory=list)
     agents: list[AgentRow] = field(default_factory=list)
     skills: list[SkillRow] = field(default_factory=list)
     inefficiencies: list[InefficiencyRow] = field(default_factory=list)
-    forecast_drivers: list[ForecastDriverRow] = field(default_factory=list)
     rate_limit_pressure: RateLimitPressure | None = None
     quality_score: QualityScore | None = None
+    # Feeds the top verdict strip (the "items to review" triage). Built from
+    # the comparison/decision pipeline; not rendered as its own section.
     executive_brief: ExecutiveBrief | None = None
-    decision_queue: list[DecisionQueueItem] = field(default_factory=list)
-    comparisons: list[ComparisonSignal] = field(default_factory=list)
-    default_lens: DashboardLens = "executive"
-
-    # New visual hero sections (yearly heatmap + recap card).
-    # Optional so older fixtures continue to render.
-    heatmap: YearlyHeatmap | None = None
-    recap: Recap | None = None
 
     banner: Banner | None = None
     show_paths: bool = False
 
-    # Phase 1 power-ups: cost-weighted seasonality + tier provenance.
-    seasonality: SeasonalitySection | None = None
     tier_provenance: TierProvenance | None = None
 
     # API-equivalent caveat when usage runs under a flat subscription (e.g.
@@ -790,17 +605,12 @@ class Dashboard:
     # rather than an invoice. Empty when usage is genuinely metered.
     cost_note: str = ""
 
-    # Phase 2 power-ups: per-model forecast strip + portfolio 30/90d outlook.
-    model_forecasts: list[ModelForecastRow] = field(default_factory=list)
-    outlook: Outlook | None = None
-
-    # Phase 3 power-ups: cache leverage by session + long-context histogram.
+    # Cache reuse by session + long-context histogram (Avoidable spend + Attribution).
     cache_leverage: list[CacheLeverageRow] = field(default_factory=list)
     long_context_histogram: LongContextHistogram | None = None
 
-    # Phase 4 power-ups: cohort delta table (compare lens) + agent sparklines.
+    # Cohort delta table (Attribution).
     cohort_deltas: list[CohortDeltaRow] = field(default_factory=list)
 
-    # v2 redesign: dedicated budget burn rows (daily / weekly / monthly).
-    # Optional so older fixtures that omit this field still build.
+    # Budget burn rows (daily / weekly / monthly).
     budgets: list[BudgetRow] = field(default_factory=list)
