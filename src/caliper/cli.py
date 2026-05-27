@@ -2255,7 +2255,7 @@ def _print_dashboard_verdict(
         if span:
             reproduce = f"caliper recommend --days {span}"
         typer.echo(
-            f"Fixable: {rec_str} across {rec_count} recommendation{plural}. "
+            f"Avoidable: {rec_str} across {rec_count} recommendation{plural}. "
             f"Reproduce with `{reproduce}`."
         )
 
@@ -6229,12 +6229,12 @@ def audit(
         ),
     ] = 10.0,
 ) -> None:
-    """Quantified inefficiency audit. Every finding quotes a dollar saving.
+    """Quantified inefficiency audit. Every finding quotes a dollar impact.
 
     Exit codes: 0 = no findings; 1 = findings present; 2 = a fail-severity
-    finding, or (with --strict) total waste over --waste-threshold-usd. The
+    finding, or (with --strict) total impact over --waste-threshold-usd. The
     exit-1-on-findings gate makes `caliper audit && deploy` fail when there is
-    fixable waste; use `caliper recommend` for the same findings without it.
+    avoidable spend; use `caliper recommend` for the same findings without it.
     """
     from decimal import Decimal as _Decimal
 
@@ -6306,9 +6306,10 @@ def _audit_markdown(payload: dict[str, Any]) -> str:
         "",
         f"**Sum of retained finding impacts**: ${float(payload['total_savings_usd']):,.2f} "
         f"({payload['waste_share_of_spend']:.0%} of spend). "
-        f"**Projected monthly savings**: ${float(payload['monthly_projected_savings_usd']):,.2f}.",
+        f"**Projected monthly avoidable spend**: "
+        f"${float(payload['monthly_projected_savings_usd']):,.2f}.",
         "",
-        "| Code | Severity | Title | Impact | Monthly save | Confidence | Action |",
+        "| Code | Severity | Title | Impact | Monthly avoidable | Confidence | Action |",
         "| --- | --- | --- | ---: | ---: | --- | --- |",
     ]
     for item in payload["findings"]:
@@ -6319,7 +6320,7 @@ def _audit_markdown(payload: dict[str, Any]) -> str:
             f"{item['confidence']} | {item['payback_action']} |"
         )
     if not payload["findings"]:
-        lines.append("| — | — | _No quantified waste detected._ | $0 | $0 | — | — |")
+        lines.append("| — | — | _No avoidable spend detected._ | $0 | $0 | — | — |")
     return "\n".join(lines) + "\n"
 
 
@@ -6330,16 +6331,17 @@ def _audit_table(payload: dict[str, Any]) -> str:
     local_console.print(
         f"Retained finding impacts: [bold]${float(payload['total_savings_usd']):,.2f}[/bold] "
         f"({payload['waste_share_of_spend']:.0%} of spend). "
-        f"Projected monthly savings: ${float(payload['monthly_projected_savings_usd']):,.2f}."
+        f"Projected monthly avoidable spend: "
+        f"${float(payload['monthly_projected_savings_usd']):,.2f}."
     )
     if not payload["findings"]:
-        local_console.print("[green]No quantified waste detected.[/green]")
+        local_console.print("[green]No avoidable spend detected.[/green]")
         return buffer.getvalue()
     table = Table(show_lines=False, expand=False)
     table.add_column("Code")
     table.add_column("Severity")
     table.add_column("Impact", justify="right")
-    table.add_column("Monthly save", justify="right")
+    table.add_column("Monthly avoidable", justify="right")
     table.add_column("Action")
     for item in payload["findings"]:
         table.add_row(
@@ -6464,8 +6466,8 @@ def _recommend_markdown(payload: dict[str, Any]) -> str:
             lines.append(f"_Window: {window}._")
             lines.append("")
         lines.append(
-            f"**Window spend**: ${spend:,.2f} • **Top {count} fixes recover**: ${shown:,.2f} "
-            f"({share:.0%} of spend) • **Monthly savings if implemented**: ${monthly_shown:,.2f}."
+            f"**Window spend**: ${spend:,.2f} • **Top {count} fixes avoid**: ${shown:,.2f} "
+            f"({share:.0%} of spend) • **Monthly avoidable if implemented**: ${monthly_shown:,.2f}."
         )
         lines.append("")
         lines.append("## Top actions")
@@ -6474,11 +6476,11 @@ def _recommend_markdown(payload: dict[str, Any]) -> str:
         if window:
             lines.append(f"_Window: {window}._")
     if not payload["recommendations"]:
-        lines.append("_No actionable savings opportunities in this window._")
+        lines.append("_No avoidable spend found in this window._")
         return "\n".join(lines) + "\n"
     for rec in payload["recommendations"]:
         lines.append(
-            f"{rec['rank']}. **{rec['payback_action']}** — saves "
+            f"{rec['rank']}. **{rec['payback_action']}** avoids "
             f"${float(rec['impact_usd_exact']):,.2f} "
             f"(${float(rec['monthly_projected_savings_usd']):,.2f}/month if implemented, "
             f"confidence {rec['confidence']})."
@@ -6487,7 +6489,8 @@ def _recommend_markdown(payload: dict[str, Any]) -> str:
     if total_findings > count:
         lines.append("")
         lines.append(
-            f"_Full audit: ${full_total:,.2f} across {total_findings} findings — `caliper audit`._"
+            f"_Full audit: ${full_total:,.2f} across {total_findings} findings. "
+            "Run `caliper audit`._"
         )
     return "\n".join(lines) + "\n"
 
@@ -6505,17 +6508,17 @@ def _recommend_table(payload: dict[str, Any]) -> str:
     if window:
         local_console.print(f"Window: {window}")
     local_console.print(
-        f"Top {count} fixes recover: [bold]${shown:,.2f}[/bold]. "
-        f"Monthly savings if implemented: ${monthly_shown:,.2f}."
+        f"Top {count} fixes avoid: [bold]${shown:,.2f}[/bold]. "
+        f"Monthly avoidable if implemented: ${monthly_shown:,.2f}."
     )
     if not payload["recommendations"]:
-        local_console.print("[green]No actionable savings in this window.[/green]")
+        local_console.print("[green]No avoidable spend in this window.[/green]")
         return buffer.getvalue()
     table = Table(show_lines=False, expand=False)
     table.add_column("#", justify="right")
     table.add_column("Action")
-    table.add_column("Saving", justify="right")
-    table.add_column("Monthly save", justify="right")
+    table.add_column("Avoidable", justify="right")
+    table.add_column("Monthly avoidable", justify="right")
     table.add_column("Confidence")
     for rec in payload["recommendations"]:
         table.add_row(

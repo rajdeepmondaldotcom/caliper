@@ -2,10 +2,14 @@
 
 # Caliper
 
-### The local cost ledger for AI-assisted development.
+### The private receipt for your AI coding.
 
-Run one command. Get a private HTML dashboard showing what your AI coding
-actually cost — by project, PR, model, vendor, and session.
+AI writes more of your code every month. You can't see what it costs, or whether
+it's working. Caliper can. It reads the logs **already on your disk** and shows
+two things: what your AI coding cost at API rates, broken down by project, PR,
+model, and session, and what that spend produced.
+
+Nothing leaves your machine.
 
 **Offline by default. No account. No upload. No telemetry.**
 
@@ -23,26 +27,82 @@ caliper dashboard
 
 ![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/hero.png)
 
-<p align="center"><sub>Safe Share mode screenshot: paths, projects, and session labels are redacted while costs, evidence status, and recommendations stay visible.</sub></p>
+<p align="center"><sub>Safe Share mode: paths, projects, and session labels are redacted while costs, evidence status, and next actions stay visible.</sub></p>
 
 ---
 
-## Why it exists
+## The honest pitch
 
-AI coding tools are good at spending tokens and bad at explaining the bill.
-Vendor dashboards are per-tool, per-account, and behind logins. They don't
-know your local git history, your PRs, or which project caused the spend.
+On a flat $200/month plan, you're flying blind. Did you pull $4,000 of
+API-equivalent coding out of that subscription last month, or $60? You can't
+tell. You can't see which project ate the tokens, which PR was expensive, or
+whether one runaway session blew the week.
 
-Caliper reads the logs **already on your disk** from Codex CLI, Claude Code,
-Cursor, and Aider, prices them with sourced rate cards, and answers questions
-those dashboards can't:
+**Caliper won't save you money on a fixed plan. There's nothing to save.** It
+does something more useful. It shows where your tokens went and what they were
+worth, priced at real API rates and tied to your real work.
+
+If you're on metered API usage, those same numbers are your actual bill, and the
+avoidable-spend findings are real money.
+
+Either way, the answer never leaves your machine.
+
+## Why this matters
+
+AI now writes a large and growing share of the code shipped every day, and
+almost nobody can measure whether it's helping. You can see your cloud bill,
+your error rate, and your test coverage. You can't see what your AI coding
+produced: which PRs it shipped, which projects it sped up, and where it spun in
+debug loops and burned tokens for nothing.
+
+The numbers that do exist come from the tools selling you the tokens. There's no
+independent meter. Caliper is built to be that meter, and it earns the word
+"independent" honestly. It runs on the logs already on your disk, answers to no
+account, and never phones home, so its numbers have no reason to flatter the
+spend.
+
+Today it answers the first half rigorously: what each PR, project, model, and
+session cost, and where that spend is avoidable, every figure graded by the
+evidence behind it. That is the groundwork for the question every engineer and
+every team is now asking out loud: **is this working, and where?**
+
+## What your spend produced
+
+The dashboard opens with a short, honest answer to that question, built from the
+git history and tool calls already on your machine:
+
+- **Commits touched.** How many distinct commits were checked out while the AI
+  was working.
+- **Cost per commit.** Git-linked spend divided by commits touched. A unit cost,
+  not an invoice.
+- **Linked to a commit.** The share of spend recorded at a known commit. The
+  rest is exploration, planning, or work that never reached a commit. That is
+  not automatically waste, and Caliper says so.
+- **Edits vs. diagnose/run.** The share of tool calls that changed files versus
+  ran shells and tests. A lot of diagnosing and very little editing is the rough
+  shape of a session that spun instead of shipped.
+
+These are signals, not a verdict, and every one is labeled with the assumption
+behind it. Caliper measures cost and effort. It does not grade whether the code
+was good. You still decide that. But for the first time you can see, privately,
+where your AI spend turned into commits and where it just turned into tokens.
+
+## What it answers
+
+AI coding tools are good at spending tokens and bad at explaining the spend.
+Vendor dashboards are per-tool, per-account, behind a login, and metered plans
+hide the per-token reality behind a flat price. None of them know your local
+git history, your PRs, or which project caused the work.
+
+Caliper reads the local trails from Codex CLI, Claude Code, Cursor, and Aider,
+prices them with dated, sourced rate cards, and answers questions those
+dashboards can't:
 
 - What did this PR cost?
-- Which project is driving the bill?
-- How much did cache reuse save?
+- Which project is driving the spend?
+- Where is spend avoidable, and how confident is that?
+- Am I getting my money's worth out of a flat subscription?
 - Are these numbers exact, estimated, partial, or unsupported?
-
-The answer never leaves your machine.
 
 ## The first 30 seconds
 
@@ -53,20 +113,24 @@ caliper dashboard
 No logs yet? Run `caliper dashboard --demo` to explore the full report with
 built-in sample data before pointing Caliper at your own usage.
 
-Opens a self-contained HTML file in your browser. The verdict sits above the
-fold — period, cost, trend, and the top fix Caliper found:
+It opens a self-contained HTML file in your browser. The verdict sits above the
+fold: period, cost, trend, and the top fix it found.
 
 ```text
-Caliper · Last 14 days · $1,243 · trend +8.2% · top fix: Move low-output fast
-                                                tier calls to standard ($96.40)
-Fixable: $176.64 across 3 recommendations. Inspect with `caliper advise --strict`.
+Caliper · Last 30 days · $1,243 · trend +8.2% · top fix: Move low-output
+                                  fast tier calls to standard ($96.40)
+Avoidable: $176.64 across 3 recommendations. Reproduce with `caliper recommend`.
 Theme: dark · local-only · re-render: caliper dashboard --open
 ```
 
-Every KPI on the page has a **"show the math"** disclosure — the formula, the
-rate card date, and the sample size. Evidence, anomalies, savings, and session
-rows show the source quality behind the number instead of forcing you to trust
-an unexplained total.
+If Caliper detects a flat-rate subscription, the headline cost is labeled
+**API-equivalent value, not a bill** right where you'd read it — so nobody
+mistakes "what your usage is worth" for "what you owe."
+
+Every KPI on the page has a **"show the math"** disclosure: the formula, the
+rate card date, and the sample size. Evidence, anomalies, avoidable spend, and
+session rows show the source quality behind each number instead of forcing you
+to trust an unexplained total.
 
 Large first runs may spend a moment indexing local log history; later runs reuse
 the local parse cache. Inspect it with `caliper cache status`, clear it with
@@ -94,16 +158,16 @@ disclosures expand the formula and sample size on top of it.
 
 ## Dashboard tour
 
-These screenshots are generated from `caliper dashboard --safe-share`, so they
-show the real report layout without exposing local paths or session identities.
+These screenshots come from `caliper dashboard --safe-share`, so they show the
+real report layout without exposing local paths or session identities.
 
 | Next actions | Spend drivers |
 |---|---|
 | <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/usage-mix.png"> |
 
-| Anomalies | Savings opportunities |
+| Anomalies | Avoidable spend |
 |---|---|
-| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/anomalies.png"> | <img alt="Recommended savings, detected waste, and cache leverage panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/inefficiencies.png"> |
+| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/anomalies.png"> | <img alt="Ranked avoidable-spend findings, detected inefficiencies, and cache reuse panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/v0.0.58/docs/screenshots/inefficiencies.png"> |
 
 | Session drilldown | Attribution and evidence |
 |---|---|
@@ -120,15 +184,15 @@ show the real report layout without exposing local paths or session identities.
 | Per-PR / per-project cost | Yes — local git attribution | If you instrument it |
 | Works with WiFi off | Yes | No |
 
-Caliper is the receipt from evidence already on your machine. If you need a
-request-path proxy, use one of those. If you want to know what last month
-actually cost — without sending prompts to a third party — use this.
+Caliper is the receipt built from evidence already on your machine. If you need
+a request-path proxy, use one of those. If you want to know what last month
+actually cost, without sending prompts to a third party, use this.
 
 ## What you get
 
 | Surface | Command | Purpose |
 |---|---|---|
-| Browser dashboard | `caliper dashboard` | Next actions, spend drivers, savings, anomalies, sessions, evidence. |
+| Browser dashboard | `caliper dashboard` | Next actions, what your spend produced, spend drivers, avoidable spend, anomalies, sessions, evidence. |
 | PR receipt | `caliper pr 42` | Cost of events that recorded the PR's commit SHAs (it states how much of window spend that covers). |
 | Overview | `caliper overview` | Rolling 7 / 30 / 90 day spend. |
 | Project rollup | `caliper project` | Spend by repository or folder. |
@@ -157,6 +221,23 @@ Caliper · PR #42
 
 Missing git attribution is surfaced as **partial evidence** instead of being
 silently treated as exact.
+
+## What the dollar figures mean
+
+Caliper is precise about what its numbers are, because the framing changes with
+how you pay:
+
+- **Metered API usage** (API keys, usage-based billing). The cost total is your
+  actual bill, and avoidable-spend findings are real money you would stop
+  spending.
+- **Flat-rate subscription** (a fixed monthly plan). The cost total is the
+  **API-equivalent value** of your usage — what the same work would cost on the
+  meter. It is not an invoice, and a flat plan has nothing to refund. Avoidable
+  spend here means wasted tokens, slower loops, and rate-limit pressure, not
+  cash back. Caliper labels this everywhere it shows the number.
+
+Pricing math is identical in both modes. Only the label changes, and Caliper
+never pretends a flat-plan total is a bill.
 
 ## Trust model
 
@@ -283,6 +364,21 @@ UV_NO_CACHE=1 uv tool install --force caliper-ai
 
 ## FAQ
 
+**Will Caliper save me money?** Not on a flat plan. There's nothing to save.
+It gives you visibility: what your usage is worth at API rates, where it goes,
+and where it's avoidable. On metered API usage, the avoidable-spend findings
+are real money.
+
+**What does the cost number mean on a subscription?** It's the API-equivalent
+value of your usage, not a bill. Caliper labels it that way everywhere it shows
+the number. Run `caliper evidence` for the full breakdown.
+
+**Does it measure whether AI is actually making me productive?** It measures the
+honest, local half of that: cost per commit, how much spend linked to a commit
+at all, and the ratio of editing to diagnosing. It does not judge whether the
+code was good, and it never claims a commit equals value. Those are signals to
+read, not a score to trust blindly.
+
 **Does it work with Cursor today?** Yes, when Cursor's local data includes
 token-bearing records. Some Cursor files are transcript-only. `caliper doctor`
 reports which.
@@ -292,8 +388,8 @@ allow. Run `caliper evidence` to see which dimensions are exact, estimated,
 partial, or unsupported.
 
 **Does Caliper upload prompts?** No. Default usage analysis is local-only and
-redacts prompt-like fields from normal output. CI tests the privacy
-invariant on every commit.
+redacts prompt-like fields from normal output. CI tests the privacy invariant
+on every commit.
 
 **Is there a hosted version?** No. There is no hosted version on the roadmap.
 Caliper is intentionally a tool you run, not a service you log into.
@@ -313,7 +409,9 @@ parsers, schema changes, and release hygiene.
 
 [Rajdeep Mondal](https://github.com/rajdeepmondaldotcom). I had a four-figure
 AI coding bill, a strong hunch about which work caused it, and no offline way
-to prove it. The first version paid for itself in one PR review.
+to prove it. Then I moved heavy work onto a flat plan and realized I now had
+the opposite problem: no idea what I was actually getting. Caliper answers both
+questions from the logs already on your disk, without sending anything anywhere.
 
 ## License
 

@@ -204,7 +204,7 @@ class BillboardCard:
 
     kind: Literal["fix", "tidy"]
     headline: str  # "BIGGEST FIX" | "YOU'RE TIDY"
-    value: str  # "$182/mo saveable" | "$1,243 spend · last 14 days"
+    value: str  # "$182/mo avoidable" | "$1,243 spend · last 14 days"
     rationale: str  # one-line plain-English explanation
     cta_label: str  # "Investigate" | "Open savings"
     cta_anchor: str  # section id (no '#'), e.g. "inefficiencies"
@@ -713,6 +713,42 @@ class FilterPill:
 
 
 # ---------------------------------------------------------------------------
+# Output summary — "what did this spend produce?" (the leverage question)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OutputSummary:
+    """What the window's AI spend produced, from local git + tool evidence.
+
+    Honest by construction. Every figure comes from logs already on disk:
+
+    - ``commits_touched`` counts distinct git commit SHAs that were checked
+      out while AI events were recorded.
+    - ``cost_per_commit_usd`` divides the cost of those git-linked events by
+      that count. It is a unit-economics proxy, not a per-commit invoice.
+    - ``linked_cost_pct`` is the share of window cost recorded inside a git
+      repo at a known commit. Unlinked spend is exploration, planning, or work
+      that never reached a commit. It is **not** automatically waste.
+    - ``edit_share`` / ``diagnostic_share`` / ``exploration_share`` are the
+      fractions of classified tool calls that edit files, run/inspect, or read.
+      A high diagnostic share with few edits is the rough "spinning, not
+      shipping" signal.
+    """
+
+    commits_touched: int
+    cost_per_commit_usd: float
+    linked_cost_usd: float
+    linked_cost_pct: float  # 0..1
+    edit_share: float  # 0..1 of classified tool calls
+    diagnostic_share: float  # 0..1
+    exploration_share: float  # 0..1
+    classified_tool_calls: int
+    has_git: bool
+    caveat: str = ""
+
+
+# ---------------------------------------------------------------------------
 # Top-level
 # ---------------------------------------------------------------------------
 
@@ -737,6 +773,10 @@ class Dashboard:
     # from `totals`, which remains the selected report window.
     usage_windows: list[UsageWindow] = field(default_factory=list)
     impact_cards: list[ImpactCard] = field(default_factory=list)
+
+    # "What did this produce?" — the leverage view, built from local git +
+    # tool evidence. Optional so legacy/lean payloads still build.
+    output_summary: OutputSummary | None = None
 
     # Richer analysis report sections. The renderer treats these as optional
     # so lean/legacy dashboard payloads still work.

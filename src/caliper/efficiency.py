@@ -412,8 +412,8 @@ def find_model_overselection(
     # quoting the top pick while a bigger saver sits on the same line.
     best_by_savings = max(alternatives, key=lambda item: Decimal(item.estimated_savings_usd_exact))
     choices = ", ".join(
-        f"{item.model} ({item.vendor}, saves "
-        f"{_format_money_exact(item.estimated_savings_usd_exact)})"
+        f"{item.model} ({item.vendor}, "
+        f"{_format_money_exact(item.estimated_savings_usd_exact)} cheaper)"
         for item in alternatives
     )
     detail = (
@@ -424,9 +424,9 @@ def find_model_overselection(
         Decimal(best_by_savings.estimated_savings_usd_exact) > total_saving
     ):
         detail += (
-            f" {top_alternative.model} is the lower-risk pick here; "
-            f"{best_by_savings.model} saves the most "
-            f"({_format_money_exact(best_by_savings.estimated_savings_usd_exact)})."
+            f" {top_alternative.model} is the lower-risk pick here. "
+            f"{best_by_savings.model} is the cheapest "
+            f"({_format_money_exact(best_by_savings.estimated_savings_usd_exact)} lower)."
         )
     return [
         Finding(

@@ -588,8 +588,8 @@ def _target_phrase(
 ) -> str:
     if alternatives:
         choices = ", ".join(
-            f"{item.model} ({item.vendor}, saves "
-            f"{_format_money_exact(item.estimated_savings_usd_exact)})"
+            f"{item.model} ({item.vendor}, "
+            f"{_format_money_exact(item.estimated_savings_usd_exact)} cheaper)"
             for item in alternatives
         )
         return f"Test current alternatives: {choices}."

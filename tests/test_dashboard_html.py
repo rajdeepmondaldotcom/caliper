@@ -201,7 +201,7 @@ def test_dashboard_renders_terminal_rhythm(monkeypatch, tmp_path) -> None:
 def test_dashboard_renders_receipt_rhythm(monkeypatch, tmp_path) -> None:
     html = _render(monkeypatch, tmp_path, rhythm="receipt")
     # Receipt masthead carries the wordmark + subtitle, not the OFFLINE ticker.
-    assert "Cost layer for AI-assisted development" in html
+    assert "What your AI coding cost and produced" in html
     _assert_private_html(html)
 
 
@@ -669,6 +669,7 @@ def test_dashboard_section_numbers_are_stable() -> None:
         "inefficiencies": "17",
         "outlook": "18",
         "attribution": "19",
+        "output": "20",
     }
 
 
@@ -679,8 +680,8 @@ def test_dashboard_section_numbers_are_stable() -> None:
 
 def test_hero_verdict_renders_period_cost_trend_and_fixable() -> None:
     """Legacy hero verdict fallback (no billboard) carries the period,
-    headline cost, trend chip, fixable sum, and the top advisor action —
-    all readable in one glance.
+    headline cost, trend chip, avoidable-spend sum, and the top advisor
+    action — all readable in one glance.
 
     Phase 1 UX overhaul: when ``dashboard.billboard`` is populated, the
     billboard supplants the hero verdict as the page peak. The hero
@@ -700,8 +701,8 @@ def test_hero_verdict_renders_period_cost_trend_and_fixable() -> None:
     # Trend chip: +8.2% with the prior-window label.
     assert "+8.2%" in html_text
     assert "vs prior" in html_text
-    # Fixable sum: top-3 advisor recs = $96.40 + $61.24 + $19.00 = $176.64.
-    assert "FIXABLE" in html_text
+    # Avoidable sum: top-3 advisor recs = $96.40 + $61.24 + $19.00 = $176.64.
+    assert "AVOIDABLE" in html_text
     assert "$176.64" in html_text
     # The top action title appears verbatim.
     assert "Move low-output fast tier calls to standard" in html_text
@@ -733,7 +734,7 @@ def test_hero_verdict_renders_in_terminal_rhythm() -> None:
 def test_billboard_renders_above_the_fold_with_headline_value_and_cta() -> None:
     """When ``dashboard.billboard`` is populated, the renderer emits a
     single above-the-fold peak with the BIGGEST FIX headline, the
-    saveable amount, confidence chip, and the investigate CTA. This
+    avoidable amount, confidence chip, and the investigate CTA. This
     supplants the legacy hero verdict strip."""
     html_text = render_dashboard(sample_dashboard())
     _assert_private_html(html_text)
@@ -741,12 +742,12 @@ def test_billboard_renders_above_the_fold_with_headline_value_and_cta() -> None:
     # selection (fix vs tidy fallback).
     assert 'class="cal-billboard"' in html_text
     assert 'data-billboard-kind="fix"' in html_text
-    # Headline label + saveable value.
+    # Headline label + avoidable value.
     assert "BIGGEST FIX" in html_text
-    assert "$612/mo saveable" in html_text
+    assert "$612/mo avoidable" in html_text
     # Confidence chip rendered as a percentage.
     assert "92% confidence" in html_text
-    # CTA anchors back to the savings section so a click lands on detail.
+    # CTA anchors back to the avoidable-spend section so a click lands on detail.
     assert 'href="#inefficiencies"' in html_text
     # When the billboard is present the legacy hero verdict is suppressed.
     assert 'class="cal-hero-verdict"' not in html_text

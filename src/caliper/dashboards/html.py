@@ -1716,6 +1716,7 @@ SECTION_NUMBERS: dict[str, str] = {
     "inefficiencies": "17",
     "outlook": "18",
     "attribution": "19",
+    "output": "20",
 }
 
 _SECTION_TITLES: dict[str, str] = {
@@ -1736,9 +1737,10 @@ _SECTION_TITLES: dict[str, str] = {
     "evidence": "Trust & evidence",
     "usage-windows": "Spend windows",
     "usage-mix": "Spend drivers",
-    "inefficiencies": "Savings opportunities",
+    "inefficiencies": "Avoidable spend",
     "outlook": "Outlook drivers",
     "attribution": "Attribution",
+    "output": "What this produced",
 }
 
 # Map session-shape categories to CSS color tokens.
@@ -1811,6 +1813,8 @@ def _should_render(section_id: str, d: Dashboard) -> bool:
     """Hide sections unless they add action, explanation, or audit value."""
     if section_id == "action-center":
         return _has_operator_brief(d)
+    if section_id == "output":
+        return d.output_summary is not None
     if section_id == "overview":
         return True
     if section_id == "shape":
@@ -1832,7 +1836,7 @@ def _should_render(section_id: str, d: Dashboard) -> bool:
             d.forecast or d.outlook or d.model_forecasts or d.forecast_drivers or d.seasonality
         )
     if section_id == "advisor":
-        # Advisor recommendations are rendered inside Savings opportunities
+        # Advisor recommendations are rendered inside Avoidable spend
         # so the same savings claim is not repeated in two sections.
         return False
     if section_id == "rate-limits":
@@ -2927,6 +2931,7 @@ def _hero_verdict_data(d: Dashboard) -> dict[str, Any] | None:
         "period_label": d.window.label,
         "period_range": d.window.range,
         "cost": fmt_money(t.cost_usd),
+        "cost_note": d.cost_note,
         "delta_pct": delta,
         "delta_text": delta_text,
         "delta_tone": delta_tone,
@@ -2973,7 +2978,7 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
             '<div class="cal-hero-savings" style="display:flex;align-items:baseline;gap:10px;'
             'flex-wrap:wrap;margin-top:8px">'
             f'<span style="color:var(--ok);font-family:var(--mono);font-size:11px;'
-            'letter-spacing:0;text-transform:uppercase;font-weight:600">FIXABLE</span>'
+            'letter-spacing:0;text-transform:uppercase;font-weight:600">AVOIDABLE</span>'
             f'<span style="color:var(--ink);font-size:14px;font-weight:600">'
             f'{_esc(data["recoverable_text"])}<span style="color:var(--mute);'
             f'font-weight:400;margin-left:6px">across {rec_count} '
@@ -2982,6 +2987,21 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
         )
     else:
         recoverable_html = ""
+
+    if data["cost_note"]:
+        cost_note_html = (
+            '<div class="cal-hero-cost-note" '
+            f'title="{_esc(data["cost_note"])}" '
+            'style="margin-top:6px;font-size:11px;color:var(--mute);font-family:var(--font)">'
+            '<span style="font-family:var(--mono);font-size:10px;letter-spacing:0;'
+            "text-transform:uppercase;font-weight:600;color:var(--mute);"
+            "border:1px solid var(--border);border-radius:999px;padding:1px 7px;"
+            'margin-right:8px">API-equivalent</span>'
+            "You're on a flat-rate plan, so this is value at API rates, not a bill."
+            "</div>"
+        )
+    else:
+        cost_note_html = ""
 
     if data["top_action_title"]:
         conf = data["top_action_confidence"]
@@ -3036,6 +3056,7 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
         f'font-weight:600;letter-spacing:0">{_esc(data["cost"])}</span>'
         f"{delta_html}"
         "</div>"
+        f"{cost_note_html}"
         f"{recoverable_html}"
         f"{top_action_html}"
         "</div>"
@@ -3539,7 +3560,7 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
             ]
         )
     cache = (
-        _small_table(["Cache leverage", "Savings", "Hit rate", "Cached tokens"], cache_rows)
+        _small_table(["Session", "Cache discount", "Hit rate", "Cached tokens"], cache_rows)
         if cache_rows
         else ""
     )
@@ -3552,7 +3573,7 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
     )
     total_savings = sum(row.savings_usd for row in d.advisor_recommendations)
     if total_savings > 0:
-        meta = f"{fmt_money(total_savings)} estimated savings"
+        meta = f"{fmt_money(total_savings)} estimated avoidable spend"
     else:
         meta = f"{len(finding_rows)} findings · {len(cache_rows)} cache rows"
     return _section_wrap("inefficiencies", rhythm=rhythm, body=body, meta=meta)
@@ -4601,7 +4622,7 @@ def _section_advisor(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
         '<div style="padding:10px 16px;background:var(--panel-2);'
         "border-bottom:1px solid var(--border);display:flex;"
         'justify-content:space-between;font-size:12px;color:var(--mute)">'
-        f"<span>{len(rows)} recommendations · estimated total savings</span>"
+        f"<span>{len(rows)} recommendations · estimated avoidable spend</span>"
         f'<span style="color:var(--ok);font-family:var(--mono);font-weight:600">{fmt_money(total)}</span>'
         "</div>"
     )
@@ -4819,6 +4840,7 @@ def _section_evidence(d: Dashboard, *, dense: bool, rhythm: str) -> str:
 
 _SECTION_ORDER: list[str] = [
     "action-center",
+    "output",
     "overview",
     "cost",
     "usage-windows",
@@ -4854,6 +4876,7 @@ _SECTION_ORDER: list[str] = [
 
 _SECTION_TIER: dict[str, str] = {
     "action-center": "decisions",
+    "output": "decisions",
     "inefficiencies": "decisions",
     "anomalies": "decisions",
     "budgets": "decisions",
@@ -5241,11 +5264,101 @@ def _render_billboard(card: BillboardCard, rhythm: str) -> str:
     )
 
 
+def _section_output(d: Dashboard, *, rhythm: str) -> str:
+    """The leverage view: what the window's spend actually produced.
+
+    Built entirely from local evidence the adapter already parsed (git SHAs
+    on events plus tool-call counts). No interactivity, no new data sources.
+    """
+    o = d.output_summary
+    if o is None:
+        return ""
+
+    def _tile(value: str, label: str, detail: str, *, tone: str = "neutral") -> str:
+        color = _tone_color(tone, "var(--ink)")
+        return (
+            '<div style="flex:1 1 150px;min-width:140px;background:var(--bg-2);'
+            'border:1px solid var(--border);border-radius:var(--r-md);padding:14px 16px">'
+            f'<div style="font-size:22px;font-weight:600;color:{color};'
+            f'font-family:var(--mono);letter-spacing:0">{_esc(value)}</div>'
+            f'<div style="font-size:11px;color:var(--mute);text-transform:uppercase;'
+            f'letter-spacing:0;margin-top:4px;font-family:var(--mono)">{_esc(label)}</div>'
+            f'<div style="font-size:12px;color:var(--ghost);margin-top:6px;'
+            f'line-height:1.4">{_esc(detail)}</div>'
+            "</div>"
+        )
+
+    tiles: list[str] = []
+    if o.has_git:
+        tiles.append(
+            _tile(
+                f"{o.commits_touched:,}",
+                "Commits touched",
+                "Distinct commits checked out while AI was working.",
+            )
+        )
+        tiles.append(
+            _tile(
+                fmt_money(o.cost_per_commit_usd),
+                "Cost per commit",
+                "Git-linked spend divided by commits touched.",
+            )
+        )
+        tiles.append(
+            _tile(
+                fmt_pct(o.linked_cost_pct, 0),
+                "Linked to a commit",
+                "Share of spend recorded at a known commit.",
+            )
+        )
+    if o.classified_tool_calls:
+        spinning = o.diagnostic_share >= 0.5 and o.edit_share < 0.25
+        tiles.append(
+            _tile(
+                fmt_pct(o.edit_share, 0),
+                "Edits",
+                "Tool calls that changed files.",
+                tone="good" if o.edit_share >= 0.25 else "neutral",
+            )
+        )
+        tiles.append(
+            _tile(
+                fmt_pct(o.diagnostic_share, 0),
+                "Diagnose / run",
+                "Bash, tests, and orchestration.",
+                tone="warn" if spinning else "neutral",
+            )
+        )
+
+    if not tiles:
+        return ""
+
+    subhead = (
+        "What your AI spend turned into, read from the git history and tool calls "
+        "on your machine. The honest start of an answer to whether this is working."
+    )
+    grid = '<div style="display:flex;flex-wrap:wrap;gap:12px">' + "".join(tiles) + "</div>"
+    caveat_html = (
+        '<p style="font-size:12px;color:var(--mute);margin:14px 0 0;'
+        f'line-height:1.5">{_esc(o.caveat)}</p>'
+        if o.caveat
+        else ""
+    )
+    body = (
+        '<p style="font-size:13px;color:var(--ink-2);margin:0 0 14px;'
+        f'line-height:1.5">{_esc(subhead)}</p>'
+        f"{grid}{caveat_html}"
+    )
+    return _section_wrap("output", rhythm=rhythm, body=body)
+
+
 def _render_section(
     section_id: str, d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap
 ) -> str:
     if section_id == "action-center":
         return _section_action_center(d, rhythm=rhythm, pm=pm)
+    if section_id == "output":
+        return _section_output(d, rhythm=rhythm)
     if section_id == "overview":
         return _section_overview(d, dense=dense, rhythm=rhythm)
     if section_id == "usage-windows":
@@ -5377,11 +5490,11 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         f'Caliper <span style="color:var(--mute);font-size:12px;font-family:var(--mono);font-weight:400;margin-left:6px">v{_esc(d.caliper.version)}</span>'
         "</h1></div>"
         '<div style="color:var(--mute);font-size:12px">'
-        "Cost layer for AI-assisted development · offline, auditable, no login</div></div>"
+        "What your AI coding cost and produced · offline, no login</div></div>"
         '<div style="text-align:right;display:flex;flex-direction:column;gap:8px;align-items:flex-end;min-width:0">'
         f'<div style="display:flex;gap:8px;align-items:center">{evidence_badge}{_window_badge(d.window)}</div>'
-        # Baseline spend, above the fold: the billboard leads on a saving, so the
-        # total this window needs to be legible without scrolling to §Overview.
+        # Baseline spend, above the fold: the billboard leads on an avoidable-spend
+        # figure, so the window total needs to be legible without scrolling to §Overview.
         '<div style="font-size:15px;color:var(--ink);font-weight:600;font-family:var(--mono)">'
         f"{fmt_money(d.totals.cost_usd)} "
         '<span style="color:var(--mute);font-weight:400;font-size:11px;font-family:var(--font)">'

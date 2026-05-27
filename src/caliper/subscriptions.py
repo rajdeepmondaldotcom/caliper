@@ -134,7 +134,7 @@ def subscription_cost_caveat(plan_types: set[str]) -> str | None:
         return None
     labels = ", ".join(sorted({str(item["label"]) for item in known}))
     return (
-        f"Usage value, not your bill — {labels} is a flat-rate plan, so this total is the "
-        "API-equivalent value of your metered usage, not an invoiced amount. "
-        "Pricing is unchanged; only the label is."
+        f"Value, not your bill. {labels} is a flat-rate plan, so this total is the "
+        "API-equivalent value of your usage, not an invoiced amount. It's what the "
+        "same work would cost on the meter. Pricing is unchanged. Only the label is."
     )
