@@ -2,6 +2,18 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.64 - 2026-05-27
+
+Reads like documentation, not a pitch.
+
+- **Plain README.** Rewrote the front page to state what Caliper is, what it
+  does, and how to run it. Removed the pitch and manifesto sections, the
+  rhetorical questions, and the repeated call to action. Kept the facts: what
+  the numbers mean, the trust model, and the accuracy notes.
+- **Plain dashboard.** The "What this produced" subhead now states where the
+  numbers come from instead of asking whether the work is working.
+- **Screenshots** regenerated and pinned to the `v0.0.64` tag.
+
 ## 0.0.63 - 2026-05-27
 
 A clarity pass on every word a reader sees, plus refreshed screenshots.
