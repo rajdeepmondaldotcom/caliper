@@ -22,7 +22,6 @@ from caliper.dashboards.data_models import (
     AgentRow,
     AnomalyRow,
     Banner,
-    BillboardCard,
     BriefFinding,
     BudgetRow,
     CacheLeverageRow,
@@ -1169,20 +1168,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             BudgetRow(period="weekly", spent=412.0, cap=500.0, warn=400.0, tone="warn"),
             BudgetRow(period="monthly", spent=1640.0, cap=2000.0, warn=1600.0, tone="warn"),
         ],
-        billboard=BillboardCard(
-            kind="fix",
-            headline="BIGGEST FIX",
-            value="$612/mo avoidable",
-            rationale=(
-                "320 short-context Opus events would price cheaper on Sonnet 4.6. "
-                "Validate quality before switching — Caliper measures cost, not output quality."
-            ),
-            cta_label="Investigate",
-            cta_anchor="inefficiencies",
-            confidence_pct=92,
-            command="caliper whatif --hypothetical-model claude-sonnet-4-6",
-            tone="warn",
-        ),
     )
 
 

@@ -38,21 +38,16 @@ from contextvars import ContextVar
 from typing import Any
 
 from .data_models import (
-    AdvisorRecommendation,
     AgentRow,
     Banner,
-    BillboardCard,
     BriefFinding,
     Dashboard,
-    Forecast,
     Insight,
     ModelRow,
     ProjectRow,
     QualityScore,
     RateLimitPressure,
-    Recap,
     SessionRow,
-    SessionShape,
     Totals,
     WindowMeta,
 )
@@ -1768,32 +1763,6 @@ def _has_rich_operator_findings(d: Dashboard) -> bool:
     )
 
 
-def _command_card_is_useful(card: Any) -> bool:
-    value = str(getattr(card, "value", "")).lower()
-    label = str(getattr(card, "label", ""))
-    tone = str(getattr(card, "tone", "neutral"))
-    if value in {"none", "no budgets", "no samples", "$0.00"}:
-        return False
-    return not (label == "Evidence quality" and tone in {"neutral", "good"})
-
-
-def _has_operator_brief(d: Dashboard) -> bool:
-    return bool(
-        d.decision_queue
-        or any(_command_card_is_useful(card) for card in d.command_center)
-        or d.impact_cards
-    )
-
-
-def _shape_is_useful(d: Dashboard) -> bool:
-    shape = d.shape
-    if not shape or not shape.top_tools or not shape.total_sessions:
-        return False
-    if shape.coverage_total_events <= 0:
-        return bool(shape.tool_use_total)
-    return (shape.coverage_events / shape.coverage_total_events) >= 0.25
-
-
 def _rate_limit_is_actionable(d: Dashboard) -> bool:
     pressure = d.rate_limit_pressure
     if pressure is None:
@@ -1801,62 +1770,34 @@ def _rate_limit_is_actionable(d: Dashboard) -> bool:
     return pressure.tone in {"critical", "warn"} or pressure.reached_count > 0
 
 
-def _heatmap_is_useful(d: Dashboard) -> bool:
-    if d.recap is None or not d.recap.hours:
-        return False
-    # The hour grid earns its space when it helps plan around reliability or
-    # spend rhythm; otherwise it is diagnostic noise for the default operator.
-    return _rate_limit_is_actionable(d) or d.seasonality is not None
-
-
 def _should_render(section_id: str, d: Dashboard) -> bool:
-    """Hide sections unless they add action, explanation, or audit value."""
-    if section_id == "action-center":
-        return _has_operator_brief(d)
-    if section_id == "output":
-        return d.output_summary is not None
+    """Hide sections unless they add explanation, a real flag, or audit value."""
     if section_id == "overview":
         return True
-    if section_id == "shape":
-        return _shape_is_useful(d)
-    if section_id == "insights":
-        return bool(d.insights) and not _has_rich_operator_findings(d)
+    if section_id == "output":
+        return d.output_summary is not None
     if section_id == "cost":
         return bool(d.daily)
     if section_id == "models":
         return bool(d.by_model)
     if section_id == "projects":
         return bool(d.by_project)
+    if section_id == "sessions":
+        return bool(d.top_sessions)
     if section_id == "anomalies":
         return bool(d.anomalies)
     if section_id == "budgets":
         return bool(d.budgets)
-    if section_id == "forecast":
-        return bool(
-            d.forecast or d.outlook or d.model_forecasts or d.forecast_drivers or d.seasonality
-        )
-    if section_id == "advisor":
-        # Advisor recommendations are rendered inside Avoidable spend
-        # so the same savings claim is not repeated in two sections.
-        return False
-    if section_id == "rate-limits":
-        return _rate_limit_is_actionable(d)
-    if section_id == "heatmap":
-        return _heatmap_is_useful(d)
-    if section_id == "sessions":
-        return bool(d.top_sessions)
-    if section_id == "evidence":
-        return bool(d.evidence)
-    if section_id == "usage-windows":
-        return bool(d.usage_windows)
-    if section_id == "usage-mix":
-        return bool(d.usage_mix)
     if section_id == "inefficiencies":
         return bool(d.advisor_recommendations or d.inefficiencies or d.cache_leverage)
-    if section_id == "outlook":
-        return False
     if section_id == "attribution":
         return bool(d.agents or d.skills or d.tier_provenance or d.long_context_histogram)
+    if section_id == "rate-limits":
+        return _rate_limit_is_actionable(d)
+    if section_id == "insights":
+        return bool(d.insights) and not _has_rich_operator_findings(d)
+    if section_id == "evidence":
+        return bool(d.evidence)
     return False
 
 
@@ -2275,29 +2216,6 @@ def _budget_bar(spent: float, cap: float, warn: float) -> str:
     )
 
 
-def _stacked_bar(
-    segments: Sequence[tuple[str, float, str]],
-    *,
-    height: int = 14,
-    gap: int = 2,
-    radius: int = 3,
-) -> str:
-    """Horizontal stacked bar; segments are (label, value, color)."""
-    total = sum(v for _, v, _ in segments) or 1.0
-    parts = [
-        f'<div style="display:flex;gap:{gap}px;width:100%;height:{height}px;'
-        f'border-radius:{radius}px;overflow:hidden;background:var(--bar-ghost)">'
-    ]
-    for label, value, color in segments:
-        share = (value / total) * 100
-        parts.append(
-            f'<span title="{_esc(label)} · {round((value / total) * 100)}%" '
-            f'style="flex-basis:{share:.2f}%;background:{color};height:100%"></span>'
-        )
-    parts.append("</div>")
-    return "".join(parts)
-
-
 def _shape_strip(daily: Sequence[Any], *, height: int = 10) -> str:
     """One block per day, colored by dominant session shape."""
     if not daily:
@@ -2464,124 +2382,6 @@ def _bar_chart(
             f'fill="var(--accent)" font-weight="600">peak {_esc(fmt_money(peak_value))}</text>'
         )
     parts.append("</svg>")
-    return "".join(parts)
-
-
-def _heatmap_7x24(recap: Recap) -> str:
-    """7×24 (day-of-week × hour) heatmap. Day 0 = Monday."""
-    if not recap.hours:
-        return ""
-    day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    grid: list[list[int]] = [[0] * 24 for _ in range(7)]
-    for c in recap.hours:
-        d = max(0, min(6, c.day_of_week))
-        h = max(0, min(23, c.hour))
-        grid[d][h] = c.value
-    flat = [v for row in grid for v in row]
-    mx = max(flat, default=0) or 1
-    cell_size = 14
-    gap = 2
-    # Screen readers can't read opacity; give the grid a role + summary so it
-    # isn't silent. (WCAG 1.1.1 / 1.4.1 — value is otherwise colour-only.)
-    peak_v = peak_d = peak_h = 0
-    for dd in range(7):
-        for hh in range(24):
-            if grid[dd][hh] > peak_v:
-                peak_v, peak_d, peak_h = grid[dd][hh], dd, hh
-    heatmap_summary = (
-        f"Activity heatmap by day of week and hour. Busiest: "
-        f"{day_labels[peak_d]} {peak_h:02d}:00 with {peak_v} calls."
-        if peak_v
-        else "Activity heatmap by day of week and hour."
-    )
-    parts = [
-        f'<div role="img" aria-label="{_esc(heatmap_summary)}" '
-        'style="display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start">',
-        f'<div style="display:grid;grid-template-rows:repeat(7,{cell_size}px);'
-        f'gap:{gap}px;font-size:10px;color:var(--mute);padding-top:14px">',
-    ]
-    for label in day_labels:
-        parts.append(
-            f'<span style="line-height:{cell_size}px;text-align:right;padding-right:4px">{label}</span>'
-        )
-    parts.append("</div>")
-    # cal-heatmap-scroll lets the grid scroll horizontally on phones (CSS pins
-    # cal-heatmap-cols to a fixed cell size there) instead of squishing the
-    # 24 hour columns into unreadable slivers.
-    parts.append('<div class="cal-heatmap-scroll">')
-    parts.append(
-        f'<div class="cal-heatmap-cols" style="display:grid;grid-template-columns:repeat(24,1fr);column-gap:{gap}px;'
-        f'margin-bottom:4px;font-size:10px;color:var(--mute)">'
-    )
-    for h in range(24):
-        vis = "visible" if h % 3 == 0 else "hidden"
-        parts.append(f'<span style="text-align:center;visibility:{vis}">{h:02d}</span>')
-    parts.append("</div>")
-    parts.append(
-        f'<div style="display:grid;grid-template-rows:repeat(7,{cell_size}px);gap:{gap}px">'
-    )
-    for d in range(7):
-        parts.append(
-            f'<div class="cal-heatmap-cols" style="display:grid;grid-template-columns:repeat(24,1fr);gap:{gap}px">'
-        )
-        for h in range(24):
-            v = grid[d][h]
-            if v == 0:
-                bg = "var(--bar-ghost)"
-                op = 1.0
-            else:
-                bg = "var(--accent)"
-                op = 0.18 + (v / mx) * 0.82
-            parts.append(
-                f'<span class="cal-heatmap-cell" '
-                f'title="{day_labels[d]} {h:02d}:00 · {v} calls" '
-                f'style="background:{bg};opacity:{op:.2f};border-radius:2px;'
-                f'border:1px solid var(--hairline)"></span>'
-            )
-        parts.append("</div>")
-    parts.append("</div>")
-    parts.append(
-        '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;'
-        'margin-top:8px;font-size:11px;color:var(--mute)"><span>less</span>'
-    )
-    for op in (0, 0.3, 0.55, 0.8, 1.0):
-        bg = "var(--bar-ghost)" if op == 0 else "var(--accent)"
-        op_str = "1" if op == 0 else f"{op:.2f}"
-        parts.append(
-            f'<span style="width:12px;height:12px;background:{bg};opacity:{op_str};'
-            f'border-radius:2px;border:1px solid var(--hairline)"></span>'
-        )
-    parts.append("<span>more</span></div>")
-    parts.append("</div></div>")
-    return "".join(parts)
-
-
-def _ranked_bars(items: Sequence[Any]) -> str:
-    """Ranked horizontal bars; items expose ``name``, ``count``, ``category``."""
-    if not items:
-        return ""
-    counts = [int(it.count) for it in items]
-    mx = max(counts) if counts else 1
-    parts = ['<ul style="display:grid;gap:8px;list-style:none;padding:0;margin:0">']
-    for it in items:
-        cat = getattr(it, "category", None) or "accent"
-        color = f"var(--{cat})"
-        dot = (
-            f'<span style="width:8px;height:8px;border-radius:2px;background:{color};'
-            f'display:inline-block"></span>'
-        )
-        parts.append(
-            '<li style="display:grid;grid-template-columns:auto 1fr auto;align-items:center;'
-            'gap:12px;font-size:13px">'
-            f'<span style="display:inline-flex;align-items:center;gap:8px;min-width:96px">'
-            f"{dot}"
-            f'<span style="color:var(--ink);font-weight:500">{_esc(it.name)}</span>'
-            "</span>"
-            f"{_meter(it.count, mx, color=color)}"
-            '<span style="color:var(--ink-2);min-width:32px;text-align:right;font-size:12px">'
-            f"{_esc(fmt_int(it.count))}</span></li>"
-        )
-    parts.append("</ul>")
     return "".join(parts)
 
 
@@ -2971,23 +2771,6 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
         else ""
     )
 
-    if data["recoverable_text"]:
-        rec_count = data["rec_count"]
-        plural = "" if rec_count == 1 else "s"
-        recoverable_html = (
-            '<div class="cal-hero-savings" style="display:flex;align-items:baseline;gap:10px;'
-            'flex-wrap:wrap;margin-top:8px">'
-            f'<span style="color:var(--ok);font-family:var(--mono);font-size:11px;'
-            'letter-spacing:0;text-transform:uppercase;font-weight:600">AVOIDABLE</span>'
-            f'<span style="color:var(--ink);font-size:14px;font-weight:600">'
-            f'{_esc(data["recoverable_text"])}<span style="color:var(--mute);'
-            f'font-weight:400;margin-left:6px">across {rec_count} '
-            f"recommendation{plural}</span></span>"
-            "</div>"
-        )
-    else:
-        recoverable_html = ""
-
     if data["cost_note"]:
         cost_note_html = (
             '<div class="cal-hero-cost-note" '
@@ -3002,41 +2785,6 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
         )
     else:
         cost_note_html = ""
-
-    if data["top_action_title"]:
-        conf = data["top_action_confidence"]
-        conf_chip = (
-            f' · <span style="color:var(--mute)">{int(round((conf or 0) * 100))}% confidence</span>'
-            if conf is not None
-            else ""
-        )
-        value_chip = (
-            f' · <span style="color:var(--ok);font-weight:500">{_esc(data["top_action_value"])}</span>'
-            if data["top_action_value"]
-            else ""
-        )
-        command_html = (
-            '<div class="cal-hero-action-command" style="font-family:var(--mono);'
-            "font-size:11px;color:var(--accent);margin-top:6px;"
-            'overflow-wrap:anywhere;word-break:break-word">'
-            f'<span style="color:var(--ghost)">$ </span>'
-            f"{_esc(data['top_action_command'])}</div>"
-            if data["top_action_command"]
-            else ""
-        )
-        top_action_html = (
-            '<div class="cal-hero-action" style="margin-top:10px;padding-top:10px;'
-            'border-top:1px solid var(--border)">'
-            '<span style="color:var(--mute);font-family:var(--mono);font-size:10px;'
-            'letter-spacing:0;text-transform:uppercase">Top fix</span>'
-            f'<div style="color:var(--ink);font-size:13px;font-weight:500;margin-top:4px">'
-            f"{_esc(data['top_action_title'])}{value_chip}{conf_chip}"
-            "</div>"
-            f"{command_html}"
-            "</div>"
-        )
-    else:
-        top_action_html = ""
 
     return (
         '<div class="cal-hero-verdict" '
@@ -3057,8 +2805,6 @@ def _hero_verdict_strip(d: Dashboard, rhythm: str) -> str:
         f"{delta_html}"
         "</div>"
         f"{cost_note_html}"
-        f"{recoverable_html}"
-        f"{top_action_html}"
         "</div>"
     )
 
@@ -3156,18 +2902,7 @@ def _verdict_block(d: Dashboard, rhythm: str, *, margin: str = "margin-top:18px"
     strip = _verdict_strip(d, rhythm)
     if not strip:
         return ""
-    if d.billboard is None:
-        return f'<div style="{margin}">{strip}</div>'
-    shown = len(list(eb.findings)[:4])
-    return (
-        f'<details class="cal-secondary-verdict" style="{margin}">'
-        '<summary class="cal-secondary-verdict-summary">'
-        f"Review findings ({shown})"
-        '<span class="cal-secondary-verdict-chev" aria-hidden="true">▸</span>'
-        "</summary>"
-        f'<div style="margin-top:12px">{strip}</div>'
-        "</details>"
-    )
+    return f'<div style="{margin}">{strip}</div>'
 
 
 def _caliper_footer(d: Dashboard) -> str:
@@ -3215,47 +2950,6 @@ def _section_wrap(section_id: str, *, rhythm: str, body: str, meta: str | None =
 # ============================================================================
 # Operator-first section primitives
 # ============================================================================
-
-
-def _value_card(
-    *,
-    label: str,
-    value: str,
-    detail: str,
-    tone: str = "neutral",
-    foot: str = "",
-    href: str | None = None,
-    pm: _PrivacyMap | None = None,
-) -> str:
-    accent = _tone_color(tone, "var(--accent)")
-    detail_html = _private_text(detail, pm) if pm else _esc(detail)
-    foot_html = (
-        f'<div style="font-size:11px;color:var(--ghost);margin-top:8px">{_esc(foot)}</div>'
-        if foot
-        else ""
-    )
-    open_tag = (
-        f'<a class="cal-card-link" href="#{_esc(_anchor_id(href))}" '
-        'style="text-decoration:none;color:inherit;display:block">'
-        if href
-        else ""
-    )
-    close_tag = "</a>" if href else ""
-    return (
-        f"{open_tag}"
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        f"border-left:3px solid {accent};border-radius:var(--r-md);padding:14px 15px;"
-        'min-width:0;display:flex;flex-direction:column;gap:6px">'
-        '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">'
-        f'<span style="font-size:11px;letter-spacing:0;text-transform:uppercase;'
-        f'color:var(--mute);font-weight:600">{_esc(label)}</span>'
-        f"{_pill(_esc(tone), tone='bad' if tone == 'critical' else tone)}"
-        "</div>"
-        f'<div style="font-size:var(--num-md);line-height:1.1;font-weight:650;color:var(--ink);'
-        f'overflow-wrap:anywhere">{_esc(value)}</div>'
-        f'<div style="font-size:12px;color:var(--mute);line-height:1.45">{detail_html}</div>'
-        f"{foot_html}</div>{close_tag}"
-    )
 
 
 def _compact_row(
@@ -3338,152 +3032,6 @@ def _small_table(
         + "".join(body)
         + "</tbody></table></div></div>"
     )
-
-
-def _section_action_center(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
-    priority_items = list(d.decision_queue)[:5]
-    queue_rows = "".join(
-        _compact_row(
-            label=f"{item.rank}. {item.title}",
-            value=item.evidence,
-            detail=f"{item.detail} Action: {item.action}",
-            tone=item.tone,
-            href=item.anchor,
-            pm=pm,
-        )
-        for item in priority_items
-    )
-
-    if queue_rows:
-        # The section heading is already "Next actions", so no redundant inner
-        # sub-header. Meta reads as a distinct fact ("ranked by impact") rather
-        # than a second "priority …" count that competes with the verdict strip.
-        body = (
-            '<div style="background:var(--panel);border:1px solid var(--border);'
-            'border-radius:var(--r-md);overflow:hidden">'
-            f"{queue_rows}</div>"
-        )
-        meta = f"{len(priority_items)} ranked by impact"
-        return _section_wrap("action-center", rhythm=rhythm, body=body, meta=meta)
-
-    cards = [card for card in d.command_center if _command_card_is_useful(card)][:4]
-    if not cards and d.impact_cards:
-        cards = [
-            type(
-                "Card",
-                (),
-                {
-                    "label": card.label,
-                    "value": card.value,
-                    "detail": card.detail,
-                    "tone": card.tone,
-                    "metric": "impact",
-                },
-            )()
-            for card in d.impact_cards[:4]
-        ]
-    card_html = "".join(
-        _value_card(
-            label=card.label,
-            value=card.value,
-            detail=card.detail,
-            tone=card.tone,
-            foot=getattr(card, "metric", ""),
-            href="evidence" if card.label.lower().startswith("evidence") else None,
-            pm=pm,
-        )
-        for card in cards
-    )
-    if not card_html:
-        return ""
-    body = (
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));'
-        f'gap:10px">{card_html}</div>'
-    )
-    meta = f"{len(cards)} useful checks"
-    return _section_wrap("action-center", rhythm=rhythm, body=body, meta=meta)
-
-
-def _section_usage_windows(d: Dashboard, *, rhythm: str) -> str:
-    if not d.usage_windows:
-        return ""
-    cards = []
-    for window in d.usage_windows:
-        daily = window.cost_usd / window.days if window.days else 0.0
-        cards.append(
-            '<div style="background:var(--panel);border:1px solid var(--border);'
-            'border-radius:var(--r-md);padding:14px;min-width:0">'
-            '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:7px">'
-            f'<span style="font-size:12px;color:var(--ink);font-weight:600">{_esc(window.label)}</span>'
-            f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">{_esc(window.range)}</span>'
-            "</div>"
-            f'<div style="font-size:var(--num-lg);font-weight:650;color:var(--ink);line-height:1.05">{fmt_money(window.cost_usd)}</div>'
-            f'<div style="font-size:12px;color:var(--mute);margin-top:5px">{fmt_money(daily)}/day · '
-            f"{fmt_int(window.events)} events · {fmt_pct(window.cache_hit_rate)} cache</div>"
-            f'<div style="margin-top:10px">{_sparkline(window.daily_cost_sparkline, width=160, height=28)}</div>'
-            "</div>"
-        )
-    body = (
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">'
-        + "".join(cards)
-        + "</div>"
-    )
-    return _section_wrap("usage-windows", rhythm=rhythm, body=body)
-
-
-def _section_usage_mix(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
-    if not d.usage_mix:
-        return ""
-    by_dimension: dict[str, list[Any]] = {}
-    for row in d.usage_mix:
-        by_dimension.setdefault(row.dimension, []).append(row)
-    dimension_labels = {
-        "vendor": "Vendor spend",
-        "model/tier": "Model and tier",
-        "tier": "Service tier",
-        "source": "Source",
-    }
-    panels: list[str] = []
-    displayed = 0
-    for dimension in ("vendor", "model/tier", "tier", "source"):
-        rows = sorted(by_dimension.get(dimension, []), key=lambda r: -r.cost_usd)[:5]
-        if not rows:
-            continue
-        displayed += len(rows)
-        max_cost = max((row.cost_usd for row in rows), default=1.0) or 1.0
-        row_html = []
-        for row in rows:
-            row_html.append(
-                '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;'
-                'align-items:center;padding:10px 12px;border-top:1px solid var(--border)">'
-                '<div style="min-width:0">'
-                f'<div style="font-size:13px;color:var(--ink);font-weight:550;overflow-wrap:anywhere">{_private_text(row.label, pm)}</div>'
-                f'<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;margin-top:7px">'
-                f"{_meter(row.cost_usd, max_cost)}"
-                f'<span style="font-size:11px;color:var(--mute);font-family:var(--mono)">{fmt_pct(row.share, 0)}</span>'
-                "</div></div>"
-                '<div style="text-align:right">'
-                f'<div style="font-family:var(--mono);font-size:13px;color:var(--ink)">{fmt_money(row.cost_usd)}</div>'
-                f'<div style="font-size:11px;color:var(--mute);margin-top:3px">{fmt_tokens(row.total_tokens)} · {fmt_int(row.events)} events</div>'
-                f"{_sparkline(row.daily_cost_sparkline, width=72, height=18)}"
-                "</div></div>"
-            )
-        panels.append(
-            '<div style="background:var(--panel);border:1px solid var(--border);'
-            'border-radius:var(--r-md);overflow:hidden">'
-            f'<div style="padding:10px 12px;background:var(--panel-2);font-size:11px;'
-            f'letter-spacing:0;text-transform:uppercase;color:var(--mute);font-weight:650">'
-            f"{_esc(dimension_labels.get(dimension, dimension))}</div>"
-            + "".join(row_html)
-            + "</div>"
-        )
-    body = (
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">'
-        + "".join(panels)
-        + "</div>"
-    )
-    meta = f"Top {displayed} spend drivers" if displayed else None
-    return _section_wrap("usage-mix", rhythm=rhythm, body=body, meta=meta)
 
 
 def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
@@ -3577,101 +3125,6 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
     else:
         meta = f"{len(finding_rows)} findings · {len(cache_rows)} cache rows"
     return _section_wrap("inefficiencies", rhythm=rhythm, body=body, meta=meta)
-
-
-def _hour_bars(values: Sequence[float]) -> str:
-    if not values:
-        return ""
-    max_value = max(values) or 1.0
-    bars = []
-    for hour, value in enumerate(values):
-        color = "var(--accent)" if value == max_value else "var(--accent-tint-2)"
-        bars.append(
-            f'<span title="{hour:02d}:00 · {fmt_money(value)}" '
-            f'style="display:block;height:{max(3, int((value / max_value) * 42))}px;'
-            f'background:{color};border-radius:2px 2px 0 0"></span>'
-        )
-    return (
-        '<div style="display:grid;grid-template-columns:repeat(24,1fr);gap:2px;'
-        'align-items:end;height:48px">' + "".join(bars) + "</div>"
-    )
-
-
-def _section_outlook(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
-    panels: list[str] = []
-    if d.outlook:
-        out = d.outlook
-        panels.append(
-            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">'
-            + _value_card(
-                label="30d outlook",
-                value=fmt_money(out.horizon_30d.linear_total),
-                detail=(
-                    f"Band {fmt_money(out.horizon_30d.linear_low)} to "
-                    f"{fmt_money(out.horizon_30d.linear_high)}; EWMA "
-                    f"{fmt_money(out.horizon_30d.ewma_total)}."
-                ),
-                tone="warn"
-                if out.horizon_30d.ewma_total > out.horizon_30d.linear_total
-                else "neutral",
-            )
-            + _value_card(
-                label="90d outlook",
-                value=fmt_money(out.horizon_90d.linear_total),
-                detail=(
-                    f"Band {fmt_money(out.horizon_90d.linear_low)} to "
-                    f"{fmt_money(out.horizon_90d.linear_high)} from {out.days_analyzed} days."
-                ),
-                tone="neutral",
-            )
-            + "</div>"
-        )
-    if d.model_forecasts:
-        rows = []
-        for row in d.model_forecasts[:6]:
-            rows.append(
-                [
-                    _esc(row.model),
-                    fmt_money(row.projected_30d_cost_usd),
-                    _esc(row.trend_label),
-                    _sparkline(row.daily_cost_sparkline, width=72, height=18),
-                ]
-            )
-        panels.append(_small_table(["Model", "30d", "Trend", "Recent"], rows))
-    if d.forecast_drivers:
-        rows = []
-        for row in d.forecast_drivers[:8]:
-            rows.append(
-                [
-                    _private_text(f"{row.dimension}: {row.label}", pm),
-                    fmt_money(row.projected_30d_cost_usd),
-                    fmt_pct(row.share, 0),
-                    _esc(row.evidence_status),
-                ]
-            )
-        panels.append(_small_table(["Driver", "30d", "Share", "Evidence"], rows))
-    if d.seasonality:
-        s = d.seasonality
-        panels.append(
-            '<div style="background:var(--panel);border:1px solid var(--border);'
-            'border-radius:var(--r-md);padding:14px">'
-            '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px">'
-            '<span style="font-size:12px;color:var(--ink);font-weight:600">'
-            + _gloss(
-                "Cost-weighted rhythm",
-                "When your spend happens across the day, weighted by cost — "
-                "the peak hour and off-peak share, in your local time.",
-            )
-            + "</span>"
-            f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">peak {s.peak_hour:02d}:00 · off-peak {fmt_pct(s.off_peak_share, 0)}</span>'
-            "</div>"
-            f"{_hour_bars(s.by_hour_cost_usd)}"
-            f'<div style="font-size:11px;color:var(--mute);margin-top:9px">{_esc(s.timezone)} · {fmt_money(s.total_cost_usd)} distributed by local hour</div>'
-            "</div>"
-        )
-    body = '<div style="display:grid;gap:12px">' + "".join(panels) + "</div>"
-    meta = f"{len(d.model_forecasts)} model forecasts · {len(d.forecast_drivers)} drivers"
-    return _section_wrap("outlook", rhythm=rhythm, body=body, meta=meta)
 
 
 def _histogram(values: Sequence[int], labels: Sequence[str]) -> str:
@@ -4017,58 +3470,6 @@ def _section_cost(d: Dashboard, *, rhythm: str) -> str:
         "</div>"
     )
     return _section_wrap("cost", rhythm=rhythm, body=body)
-
-
-def _section_shape(d: Dashboard, *, rhythm: str) -> str:
-    s: SessionShape = d.shape
-    meta = (
-        f"{s.total_sessions} sessions · {s.total_turns} turns" if s and s.total_sessions else None
-    )
-    if not s or not s.top_tools:
-        return ""
-    segments: list[tuple[str, float, str]] = []
-    for c in s.categories:
-        color = _SHAPE_COLORS.get(c.category, "var(--mixed)")
-        segments.append((c.label or c.category, float(c.sessions), color))
-    category_rows: list[str] = []
-    for c in s.categories:
-        color = _SHAPE_COLORS.get(c.category, "var(--mixed)")
-        category_rows.append(
-            '<li style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;'
-            'align-items:baseline;font-size:13px">'
-            f'<span style="width:8px;height:8px;border-radius:2px;background:{color};display:inline-block"></span>'
-            f'<span style="color:var(--ink)">{_esc(c.category)}</span>'
-            f'<span style="color:var(--mute);font-size:11px">{int(round((c.share or 0) * 100))}%</span>'
-            f'<span style="color:var(--ink-2)">{fmt_int(c.sessions)}</span></li>'
-        )
-    coverage_block = ""
-    if s.coverage_events < s.coverage_total_events:
-        coverage_block = (
-            f'<div style="margin-top:4px">Coverage: {fmt_int(s.coverage_events)} of '
-            f"{fmt_int(s.coverage_total_events)} events.</div>"
-        )
-    body = (
-        '<div class="cal-shape-grid" '
-        'style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px">'
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);padding:16px">'
-        '<div style="font-size:12px;color:var(--ink-2);margin-bottom:12px;font-weight:500">Top tools</div>'
-        f"{_ranked_bars(s.top_tools)}"
-        "</div>"
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);padding:16px">'
-        '<div style="font-size:12px;color:var(--ink-2);margin-bottom:12px;font-weight:500">Shape distribution</div>'
-        f"{_stacked_bar(segments, height=16)}"
-        '<ul style="list-style:none;padding:0;margin:14px 0 0;display:grid;gap:8px">'
-        + "".join(category_rows)
-        + "</ul>"
-        '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);'
-        'font-size:11px;color:var(--mute)">'
-        f"{s.tool_use_total} tool calls · {s.tools_per_turn:.2f} tools/turn"
-        f"{coverage_block}"
-        "</div></div></div>"
-    )
-    return _section_wrap("shape", rhythm=rhythm, body=body, meta=meta)
 
 
 def render_models(rows: Sequence[ModelRow], *, total_cost: float | None = None) -> str:
@@ -4491,171 +3892,6 @@ def _section_budgets(d: Dashboard, *, rhythm: str) -> str:
     return _section_wrap("budgets", rhythm=rhythm, body=body)
 
 
-def _forecast_card(label: str, value: str, sub: str, band: str | None) -> str:
-    band_html = (
-        f'<div style="font-size:12px;color:var(--ink-2);margin-top:6px">{_esc(band)}</div>'
-        if band
-        else ""
-    )
-    return (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);padding:16px">'
-        f'<div style="font-size:11px;letter-spacing:0;color:var(--mute);'
-        f'text-transform:uppercase;margin-bottom:6px">{_esc(label)}</div>'
-        f'<div style="font-size:var(--num-lg);font-weight:600;color:var(--ink);margin-bottom:4px">{_esc(value)}</div>'
-        f'<div style="font-size:12px;color:var(--mute)">{_esc(sub)}</div>'
-        f"{band_html}</div>"
-    )
-
-
-def _section_forecast(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
-    panels: list[str] = []
-    f: Forecast | None = d.forecast
-    if f is not None:
-        intro = (
-            f'<div style="font-size:12px;color:var(--mute);margin-bottom:10px">'
-            f"Based on {f.days_analyzed} days · projected through next "
-            f"{f.days_remaining} days.</div>"
-        )
-        band1 = f"1σ band: {fmt_money(f.linear_low)} to {fmt_money(f.linear_high)}"
-        band2 = f"Delta vs linear: {fmt_money(f.ewma_total - f.linear_total)}"
-        cards = _forecast_card(
-            "Selected-window run rate",
-            fmt_money(f.linear_total),
-            f"daily mean ${f.daily_mean:.0f} ± ${f.daily_stdev:.0f}",
-            band1,
-        ) + _forecast_card(
-            "Recent-days weighted",
-            fmt_money(f.ewma_total),
-            "Weights recent spend higher",
-            band2,
-        )
-        panels.append(
-            intro + '<div class="cal-forecast-grid" style="display:grid;'
-            'grid-template-columns:1fr 1fr;gap:12px">' + cards + "</div>"
-        )
-
-    if d.outlook:
-        out = d.outlook
-        panels.append(
-            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">'
-            + _value_card(
-                label="30d outlook",
-                value=fmt_money(out.horizon_30d.linear_total),
-                detail=(
-                    f"Band {fmt_money(out.horizon_30d.linear_low)} to "
-                    f"{fmt_money(out.horizon_30d.linear_high)}; recency-weighted "
-                    f"{fmt_money(out.horizon_30d.ewma_total)}."
-                ),
-                tone="warn"
-                if out.horizon_30d.ewma_total > out.horizon_30d.linear_total
-                else "neutral",
-            )
-            + _value_card(
-                label="90d outlook",
-                value=fmt_money(out.horizon_90d.linear_total),
-                detail=(
-                    f"Band {fmt_money(out.horizon_90d.linear_low)} to "
-                    f"{fmt_money(out.horizon_90d.linear_high)} from {out.days_analyzed} days."
-                ),
-                tone="neutral",
-            )
-            + "</div>"
-        )
-
-    if d.model_forecasts:
-        rows = []
-        for row in d.model_forecasts[:6]:
-            rows.append(
-                [
-                    _esc(row.model),
-                    fmt_money(row.projected_30d_cost_usd),
-                    _esc(row.trend_label),
-                    _sparkline(row.daily_cost_sparkline, width=72, height=18),
-                ]
-            )
-        panels.append(_small_table(["Model", "30d", "Trend", "Recent"], rows))
-    if d.forecast_drivers:
-        rows = []
-        for row in d.forecast_drivers[:8]:
-            rows.append(
-                [
-                    _private_text(f"{row.dimension}: {row.label}", pm),
-                    fmt_money(row.projected_30d_cost_usd),
-                    fmt_pct(row.share, 0),
-                    _esc(row.evidence_status),
-                ]
-            )
-        panels.append(_small_table(["Driver", "30d", "Share", "Evidence"], rows))
-    if d.seasonality:
-        s = d.seasonality
-        panels.append(
-            '<div style="background:var(--panel);border:1px solid var(--border);'
-            'border-radius:var(--r-md);padding:14px">'
-            '<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:10px">'
-            '<span style="font-size:12px;color:var(--ink);font-weight:600">'
-            + _gloss(
-                "Cost-weighted rhythm",
-                "When your spend happens across the day, weighted by cost — "
-                "the peak hour and off-peak share, in your local time.",
-            )
-            + "</span>"
-            f'<span style="font-family:var(--mono);font-size:12px;color:var(--mute)">peak {s.peak_hour:02d}:00 · off-peak {fmt_pct(s.off_peak_share, 0)}</span>'
-            "</div>"
-            f"{_hour_bars(s.by_hour_cost_usd)}"
-            f'<div style="font-size:11px;color:var(--mute);margin-top:9px">{_esc(s.timezone)} · {fmt_money(s.total_cost_usd)} distributed by local hour</div>'
-            "</div>"
-        )
-    if not panels:
-        return ""
-    body = '<div style="display:grid;gap:12px">' + "".join(panels) + "</div>"
-    meta = f"{len(d.model_forecasts)} model forecasts · {len(d.forecast_drivers)} drivers"
-    return _section_wrap("forecast", rhythm=rhythm, body=body, meta=meta)
-
-
-def _section_advisor(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
-    rows: list[AdvisorRecommendation] = list(d.advisor_recommendations)
-    if not rows:
-        return ""
-    total = sum(r.savings_usd for r in rows)
-    header = (
-        '<div style="padding:10px 16px;background:var(--panel-2);'
-        "border-bottom:1px solid var(--border);display:flex;"
-        'justify-content:space-between;font-size:12px;color:var(--mute)">'
-        f"<span>{len(rows)} recommendations · estimated avoidable spend</span>"
-        f'<span style="color:var(--ok);font-family:var(--mono);font-weight:600">{fmt_money(total)}</span>'
-        "</div>"
-    )
-    body_rows: list[str] = []
-    for i, r in enumerate(rows):
-        top = "none" if i == 0 else "1px solid var(--border)"
-        conf_tone = "var(--ok)" if r.confidence >= 0.75 else "var(--warn)"
-        body_rows.append(
-            '<div class="cal-advisor-row" '
-            'style="display:grid;grid-template-columns:1fr auto auto;gap:14px;'
-            f'padding:12px 16px;border-top:{top};align-items:center">'
-            '<div style="min-width:0">'
-            f'<div style="font-size:13px;color:var(--ink);font-weight:500">{_private_text(r.title, pm)}</div>'
-            f'<div style="font-size:12px;color:var(--mute);margin-top:3px">{_private_text(r.detail, pm)}</div>'
-            f'<code style="display:inline-block;margin-top:6px;font-family:var(--mono);'
-            f'font-size:11px;color:var(--accent);background:transparent;padding:0">$ {_private_text(r.action, pm)}</code>'
-            "</div>"
-            '<div style="text-align:right">'
-            '<div style="font-size:11px;color:var(--mute);margin-bottom:2px">confidence</div>'
-            f'<div style="font-family:var(--mono);color:{conf_tone};font-size:12px">{int(round(r.confidence * 100))}%</div>'
-            "</div>"
-            '<div style="text-align:right">'
-            '<div style="font-size:11px;color:var(--mute);margin-bottom:2px">est. savings</div>'
-            f'<div style="font-family:var(--mono);font-size:15px;color:var(--ok);font-weight:600">{fmt_money(r.savings_usd)}</div>'
-            "</div></div>"
-        )
-    body = (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);overflow:hidden">' + header + "".join(body_rows) + "</div>"
-    )
-    return _section_wrap("advisor", rhythm=rhythm, body=body)
-
-
 def _section_rate_limits(d: Dashboard, *, rhythm: str) -> str:
     r: RateLimitPressure | None = d.rate_limit_pressure
     if r is None:
@@ -4703,38 +3939,6 @@ def _section_rate_limits(d: Dashboard, *, rhythm: str) -> str:
         "</div></div>"
     )
     return _section_wrap("rate-limits", rhythm=rhythm, body=body)
-
-
-def _section_heatmap(d: Dashboard, *, rhythm: str) -> str:
-    if d.recap is None or not d.recap.hours:
-        return ""
-    total_calls = sum(c.value for c in d.recap.hours)
-    # Peak-hour caption: surface the busiest hour-of-day across all weekdays.
-    # The prototype hard-coded "peak hour: 15:00 · 16:00"; we derive the same
-    # shape from data so the caption is accurate for real payloads too.
-    by_hour: dict[int, int] = {}
-    for c in d.recap.hours:
-        by_hour[c.hour] = by_hour.get(c.hour, 0) + c.value
-    if by_hour:
-        peak1, peak2 = sorted(by_hour, key=lambda h: -by_hour[h])[:2]
-        if peak2 is None:
-            peak_caption = f"peak hour: {peak1:02d}:00"
-        else:
-            lo, hi = sorted((peak1, peak2))
-            peak_caption = f"peak hour: {lo:02d}:00 · {hi:02d}:00"
-    else:
-        peak_caption = ""
-    body = (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);padding:16px">'
-        '<div style="display:flex;justify-content:space-between;margin-bottom:12px;'
-        'font-size:12px;color:var(--mute)">'
-        f"<span>AI tool calls by hour of day · {fmt_int(total_calls)} total</span>"
-        f'<span style="font-family:var(--mono)">{peak_caption}</span></div>'
-        f"{_heatmap_7x24(d.recap)}"
-        "</div>"
-    )
-    return _section_wrap("heatmap", rhythm=rhythm, body=body)
 
 
 def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
@@ -4838,28 +4042,27 @@ def _section_evidence(d: Dashboard, *, dense: bool, rhythm: str) -> str:
 # Variant shells
 # ============================================================================
 
+# Curated to what earns its place: lead with what the spend produced and where
+# it went (descriptive, always true), surface real flags only when present
+# (gated), tuck supporting detail in a collapsed appendix, close on trust.
+# Sections removed from the dashboard (billboard, action-center, overview,
+# usage-windows, usage-mix, forecast/outlook, session-shape, heatmap, advisor)
+# were redundant with these, speculative, or vanity. SECTION_NUMBERS keeps every
+# legacy anchor so old links still resolve.
 _SECTION_ORDER: list[str] = [
-    "action-center",
-    "output",
     "overview",
+    "output",
     "cost",
-    "usage-windows",
-    "usage-mix",
-    "anomalies",
-    "inefficiencies",
-    "forecast",
-    "budgets",
     "models",
     "projects",
     "sessions",
-    "shape",
-    "rate-limits",
-    "heatmap",
+    "anomalies",
+    "budgets",
+    "inefficiencies",
     "attribution",
-    "evidence",
+    "rate-limits",
     "insights",
-    "outlook",
-    "advisor",
+    "evidence",
 ]
 
 # ----------------------------------------------------------------------------
@@ -4875,33 +4078,26 @@ _SECTION_ORDER: list[str] = [
 # ----------------------------------------------------------------------------
 
 _SECTION_TIER: dict[str, str] = {
-    "action-center": "decisions",
-    "output": "decisions",
-    "inefficiencies": "decisions",
+    # What happened — always visible, the descriptive core.
+    "overview": "trajectory",
+    "output": "trajectory",
+    "cost": "trajectory",
+    "models": "trajectory",
+    "projects": "trajectory",
+    "sessions": "trajectory",
+    # Flags — only render when there's something real to flag (gated).
     "anomalies": "decisions",
     "budgets": "decisions",
-    "rate-limits": "decisions",
-    "insights": "decisions",
-    "overview": "trajectory",
-    "cost": "trajectory",
-    "forecast": "trajectory",
-    "projects": "trajectory",
-    "usage-mix": "trajectory",
-    "models": "appendix",
-    "shape": "appendix",
-    "sessions": "appendix",
-    "heatmap": "appendix",
-    # 7/30/90-day rolling spend is the headline trend (the CLI's "start with
-    # caliper overview"), not buried supporting material — keep it visible.
-    "usage-windows": "trajectory",
+    "inefficiencies": "decisions",
+    # Supporting detail — collapsed by default.
     "attribution": "appendix",
+    "rate-limits": "appendix",
+    "insights": "appendix",
+    # Trust footer.
     "evidence": "trust",
-    # Disabled (never rendered) — bucket assignment is irrelevant.
-    "advisor": "appendix",
-    "outlook": "appendix",
 }
 
-_TIER_ORDER: tuple[str, ...] = ("decisions", "trajectory", "appendix", "trust")
+_TIER_ORDER: tuple[str, ...] = ("trajectory", "decisions", "appendix", "trust")
 
 
 def _sections_by_tier(d: Dashboard) -> dict[str, list[str]]:
@@ -4960,9 +4156,9 @@ def _display_num(section_id: str) -> str:
 
 
 _TIER_LABEL: dict[str, str] = {
-    "decisions": "Decisions",
-    "trajectory": "Trajectory",
-    "appendix": "Appendix",
+    "trajectory": "What happened",
+    "decisions": "Worth a look",
+    "appendix": "More detail",
     "trust": "Trust",
 }
 
@@ -5169,101 +4365,6 @@ def _anomaly_tone_word(tone: str) -> str:
 # ----------------------------------------------------------------------------
 
 
-def _render_billboard(card: BillboardCard, rhythm: str) -> str:
-    """Render the one-headline above-the-fold billboard.
-
-    ``rhythm`` is reserved for future visual variants; today the same
-    markup serves both receipt and terminal. The card is purposely larger
-    and quieter than the existing ``_hero_verdict_strip`` so the eye lands
-    here first (Aesthetic-Usability + Krug billboard test).
-    """
-    tone = card.tone or "neutral"
-    rail = {
-        "warn": "var(--warn)",
-        "critical": "var(--bad)",
-        "good": "var(--ok)",
-    }.get(tone, "var(--accent)")
-    headline_color = {
-        "warn": "var(--warn)",
-        "critical": "var(--bad)",
-        "good": "var(--ok)",
-    }.get(tone, "var(--accent)")
-
-    confidence_html = ""
-    if card.confidence_pct is not None:
-        confidence_html = (
-            '<span class="cal-billboard-confidence" '
-            'style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;'
-            "border:1px solid var(--border);border-radius:999px;"
-            "font-family:var(--mono);font-size:11px;color:var(--mute);"
-            'background:var(--panel-2)">'
-            f'<span style="width:6px;height:6px;border-radius:50%;background:{rail}"></span>'
-            f"<span>{card.confidence_pct}% confidence</span>"
-            "</span>"
-        )
-
-    rationale_html = (
-        f'<p class="cal-billboard-rationale" '
-        'style="margin:0;color:var(--ink-2);font-size:14px;line-height:1.55;'
-        f'max-width:62ch">{_esc(card.rationale)}</p>'
-        if card.rationale
-        else ""
-    )
-
-    command_html = (
-        '<div class="cal-billboard-command" '
-        'style="font-family:var(--mono);font-size:12px;color:var(--accent);'
-        "margin-top:12px;padding:8px 12px;background:var(--panel-2);"
-        "border:1px solid var(--border);border-radius:var(--r-sm);"
-        'overflow-wrap:anywhere;word-break:break-word">'
-        f'<span style="color:var(--ghost)">$ </span>{_esc(card.command)}</div>'
-        if card.command
-        else ""
-    )
-
-    cta_html = (
-        f'<a class="cal-billboard-cta" href="#{_esc(card.cta_anchor or "")}" '
-        'style="display:inline-flex;align-items:center;gap:8px;margin-top:18px;'
-        "padding:11px 18px;background:var(--accent);color:var(--bg);"
-        "border-radius:var(--r-md);font-weight:600;font-size:13px;"
-        'text-decoration:none;letter-spacing:0">'
-        f"<span>{_esc(card.cta_label or 'Investigate')}</span>"
-        '<span class="cal-billboard-arrow" aria-hidden="true">→</span>'
-        "</a>"
-        if card.cta_label and card.cta_anchor
-        else ""
-    )
-
-    return (
-        '<div class="cal-billboard" '
-        f'data-billboard-kind="{_esc(card.kind)}" '
-        f'data-billboard-tone="{_esc(tone)}" '
-        'role="region" aria-label="Top recommendation" '
-        'style="position:relative;background:var(--panel);'
-        "border:1px solid var(--border);border-radius:var(--r-md);"
-        'padding:22px 26px 24px;overflow:hidden">'
-        f'<span aria-hidden="true" style="position:absolute;left:0;top:0;bottom:0;'
-        f'width:3px;background:{rail}"></span>'
-        f'<span class="cal-billboard-headline" '
-        'style="font-family:var(--mono);font-size:11px;letter-spacing:0;'
-        f'color:{headline_color};text-transform:uppercase;font-weight:700">'
-        f"{_esc(card.headline)}"
-        "</span>"
-        '<div class="cal-billboard-value-row" '
-        'style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-top:8px">'
-        '<span class="cal-billboard-value" '
-        'style="font-size:var(--num-xl);font-weight:700;color:var(--ink);'
-        'letter-spacing:0;line-height:1.05">'
-        f"{_esc(card.value)}</span>"
-        f"{confidence_html}"
-        "</div>"
-        f'<div style="margin-top:12px">{rationale_html}</div>'
-        f"{command_html}"
-        f"{cta_html}"
-        "</div>"
-    )
-
-
 def _section_output(d: Dashboard, *, rhythm: str) -> str:
     """The leverage view: what the window's spend actually produced.
 
@@ -5355,46 +4456,30 @@ def _section_output(d: Dashboard, *, rhythm: str) -> str:
 def _render_section(
     section_id: str, d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap
 ) -> str:
-    if section_id == "action-center":
-        return _section_action_center(d, rhythm=rhythm, pm=pm)
-    if section_id == "output":
-        return _section_output(d, rhythm=rhythm)
     if section_id == "overview":
         return _section_overview(d, dense=dense, rhythm=rhythm)
-    if section_id == "usage-windows":
-        return _section_usage_windows(d, rhythm=rhythm)
+    if section_id == "output":
+        return _section_output(d, rhythm=rhythm)
     if section_id == "cost":
         return _section_cost(d, rhythm=rhythm)
-    if section_id == "shape":
-        return _section_shape(d, rhythm=rhythm)
     if section_id == "models":
         return _section_models(d, rhythm=rhythm)
     if section_id == "projects":
         return _section_projects(d, rhythm=rhythm, pm=pm)
-    if section_id == "usage-mix":
-        return _section_usage_mix(d, rhythm=rhythm, pm=pm)
-    if section_id == "insights":
-        return _section_insights(d, dense=dense, rhythm=rhythm, pm=pm)
+    if section_id == "sessions":
+        return _section_sessions(d, rhythm=rhythm, pm=pm)
     if section_id == "anomalies":
         return _section_anomalies(d, dense=dense, rhythm=rhythm, pm=pm)
     if section_id == "budgets":
         return _section_budgets(d, rhythm=rhythm)
     if section_id == "inefficiencies":
         return _section_inefficiencies(d, rhythm=rhythm, pm=pm)
-    if section_id == "forecast":
-        return _section_forecast(d, rhythm=rhythm, pm=pm)
-    if section_id == "outlook":
-        return _section_outlook(d, rhythm=rhythm, pm=pm)
-    if section_id == "advisor":
-        return _section_advisor(d, rhythm=rhythm, pm=pm)
-    if section_id == "rate-limits":
-        return _section_rate_limits(d, rhythm=rhythm)
-    if section_id == "heatmap":
-        return _section_heatmap(d, rhythm=rhythm)
-    if section_id == "sessions":
-        return _section_sessions(d, rhythm=rhythm, pm=pm)
     if section_id == "attribution":
         return _section_attribution(d, rhythm=rhythm, pm=pm)
+    if section_id == "rate-limits":
+        return _section_rate_limits(d, rhythm=rhythm)
+    if section_id == "insights":
+        return _section_insights(d, dense=dense, rhythm=rhythm, pm=pm)
     if section_id == "evidence":
         return _section_evidence(d, dense=dense, rhythm=rhythm)
     return ""
@@ -5510,21 +4595,14 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         if d.banner is not None
         else ""
     )
-    billboard_html = (
-        f'<div style="margin-top:22px">{_render_billboard(d.billboard, rhythm)}</div>'
-        if d.billboard is not None
-        else ""
-    )
-    # When a billboard is set, it replaces the hero verdict strip as the
-    # above-the-fold peak. Keep the existing strip available for legacy
-    # payloads that omit the billboard.
-    hero_inner = "" if d.billboard is not None else _hero_verdict_strip(d, rhythm)
+    # The dashboard leads with the honest verdict strip (period, cost, trend).
+    hero_inner = _hero_verdict_strip(d, rhythm)
     hero_html = f'<div style="margin-top:18px">{hero_inner}</div>' if hero_inner else ""
     verdict_html = _verdict_block(d, rhythm)
-    # The above-the-fold banner/billboard/verdict carry the primary CTA and
-    # verdict, so they must sit inside a landmark (otherwise screen-reader
-    # landmark navigation skips the most important content).
-    summary_inner = banner_html + billboard_html + hero_html + verdict_html
+    # The above-the-fold banner/verdict carry the primary summary, so they must
+    # sit inside a landmark (otherwise screen-reader landmark navigation skips
+    # the most important content).
+    summary_inner = banner_html + hero_html + verdict_html
     summary_band = (
         f'<section class="cal-summary-band" aria-label="Summary">{summary_inner}</section>'
         if summary_inner
@@ -5557,8 +4635,10 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
             f'<div class="cal-appendix-body">{appendix_sections_html}</div>'
             "</details>"
         )
+    # Lead with what happened (trajectory), then flags worth a look (decisions),
+    # then the collapsed appendix, then the trust footer.
     main_html = (
-        _render_mobile_nav(d) + decisions_html + trajectory_html + appendix_html + trust_html
+        _render_mobile_nav(d) + trajectory_html + decisions_html + appendix_html + trust_html
     )
     toc_html = _render_receipt_toc(d)
     body_html = (
@@ -5721,12 +4801,7 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         if d.banner is not None
         else ""
     )
-    billboard_html = (
-        f'<div style="margin-bottom:22px">{_render_billboard(d.billboard, rhythm)}</div>'
-        if d.billboard is not None
-        else ""
-    )
-    hero_inner = "" if d.billboard is not None else _hero_verdict_strip(d, rhythm)
+    hero_inner = _hero_verdict_strip(d, rhythm)
     hero_html = f'<div style="margin-bottom:22px">{hero_inner}</div>' if hero_inner else ""
     verdict_html = _verdict_block(d, rhythm, margin="margin-bottom:22px")
     tiered = _sections_by_tier(d)
@@ -5756,7 +4831,7 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
             f'<div class="cal-appendix-body">{appendix_sections_html}</div>'
             "</details>"
         )
-    sections = decisions_html + trajectory_html + appendix_html + trust_html
+    sections = trajectory_html + decisions_html + appendix_html + trust_html
     return (
         '<div class="cal-dashboard-root cal-terminal-root">'
         f"{_terminal_masthead(d)}"
@@ -5765,7 +4840,6 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         f"{_terminal_index(d)}"
         '<main id="cal-main" class="cal-terminal-main" tabindex="-1">'
         f"{banner_html}"
-        f"{billboard_html}"
         f"{hero_html}"
         f"{verdict_html}"
         f"{_render_mobile_nav(d)}"

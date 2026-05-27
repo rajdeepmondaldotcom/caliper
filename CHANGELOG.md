@@ -2,6 +2,22 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.66 - 2026-05-27
+
+Only what earns its place.
+
+- **Removed the "biggest fix" billboard.** It led the page with a model-downgrade
+  suggestion Caliper can't judge for quality, priced in dollars that aren't real
+  on a flat plan. The dashboard now opens with the honest verdict: period, cost,
+  and trend, nothing prescriptive.
+- **Pruned the dashboard to what provides value.** Cut the speculative forecast
+  and outlook, the vanity activity heatmap, the redundant session-shape and
+  rolling-spend views, and the spend-driver bars that duplicated the model and
+  project tables. What's left, in order: what your spend produced, cost over
+  time, models, projects, sessions, then any real flags (anomalies, budgets,
+  avoidable spend), supporting detail in a collapsed appendix, and trust last.
+- Refreshed screenshots for the new structure.
+
 ## 0.0.65 - 2026-05-27
 
 The plain-language pass, finished.

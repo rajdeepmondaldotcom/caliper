@@ -110,10 +110,9 @@ def test_html_injection_in_names_is_escaped() -> None:
             assert "&lt;script&gt;" in html
 
 
-def test_zero_events_billboard_is_absent_and_render_is_clean() -> None:
+def test_zero_events_render_is_clean() -> None:
     dashboard = build_handoff_dashboard(
         _result([]), _OPTIONS, with_deltas=True, generated_at=_GENERATED_AT
     )
-    assert dashboard.billboard is None
     html = render_dashboard(dashboard, interactive=True)
     assert "<title>" in html
