@@ -142,9 +142,8 @@ real report layout without exposing local paths or session identities.
 | Per-PR / per-project cost | Yes — local git attribution | If you instrument it |
 | Works with WiFi off | Yes | No |
 
-Caliper is the receipt built from evidence already on your machine. If you need
-a request-path proxy, use one of those. If you want to know what last month
-actually cost, without sending prompts to a third party, use this.
+If you need a request-path proxy, use one of those. If you want to know what
+last month cost without sending prompts to a third party, use Caliper.
 
 ## What you get
 
