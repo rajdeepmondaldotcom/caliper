@@ -885,11 +885,8 @@ def test_insights_carry_sample_size_lineage() -> None:
     # render the same findings through actions, anomalies, and savings instead.
     lean = dataclasses.replace(
         sample_dashboard(),
-        command_center=[],
-        decision_queue=[],
         advisor_recommendations=[],
         top_sessions=[],
-        usage_mix=[],
         inefficiencies=[],
         anomalies=[],
     )
@@ -911,7 +908,6 @@ def test_insights_without_metrics_omit_the_lineage_chip() -> None:
         Dashboard,
         EvidenceRow,
         Insight,
-        SessionShape,
         Totals,
         WindowMeta,
     )
@@ -943,12 +939,10 @@ def test_insights_without_metrics_omit_the_lineage_chip() -> None:
             tools_per_turn=1.0,
         ),
         daily=[DailyPoint("2026-05-01", 10.0, 1, "execution")],
-        shape=SessionShape(1, 1, 0, 1.0, 1, 1, [], []),
         by_model=[],
         by_project=[],
         anomalies=[],
         insights=[Insight("info", "Quiet week", "No notable findings.", impact=None)],
-        forecast=None,
         evidence=[EvidenceRow("Usage completeness", "exact", "")],
     )
     html_text = render_dashboard(minimal, interactive=False)

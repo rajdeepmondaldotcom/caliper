@@ -26,160 +26,27 @@ from caliper.dashboards.data_models import (
     BudgetRow,
     CacheLeverageRow,
     CaliperMeta,
-    CategoryCount,
     CohortDeltaRow,
-    CommandCenterCard,
-    ComparisonSignal,
     DailyPoint,
     Dashboard,
-    DecisionQueueItem,
     EvidenceRow,
     ExecutiveBrief,
-    Forecast,
-    ForecastDriverRow,
-    HeatCell,
-    HourCell,
-    ImpactCard,
     InefficiencyRow,
     Insight,
     LongContextHistogram,
-    MixRow,
-    ModelForecastRow,
     ModelRow,
-    Outlook,
-    OutlookHorizon,
     OutputSummary,
     ProjectRow,
     QualityScore,
     QualitySignal,
     RateLimitPressure,
-    Recap,
-    RecapStat,
-    SeasonalitySection,
     SessionRow,
-    SessionShape,
     SkillRow,
     TierProvenance,
     ToolCount,
     Totals,
-    UsageWindow,
     WindowMeta,
-    YearlyHeatmap,
 )
-
-
-def _sample_heatmap() -> YearlyHeatmap:
-    """Synthesize a 365-day grid with a few peaks and weekend lulls."""
-    import datetime as _dt
-    import math
-    import random
-
-    rng = random.Random(42)
-    end_day = _dt.date(2026, 5, 17)
-    start_day = end_day - _dt.timedelta(days=364)
-    cells: list[HeatCell] = []
-    values: list[int] = []
-    day = start_day
-    while day <= end_day:
-        weekday_bias = 1.4 if day.weekday() < 5 else 0.4
-        seasonal = 1.0 + 0.6 * math.sin((day.timetuple().tm_yday / 365.0) * 2 * math.pi)
-        base = int(rng.gauss(150 * weekday_bias * seasonal, 80))
-        v = max(0, base)
-        if rng.random() < 0.05:
-            v *= 4  # occasional spike
-        values.append(v)
-        day = day + _dt.timedelta(days=1)
-    # Quartile thresholds for level binning.
-    nz = sorted(v for v in values if v > 0)
-    n = max(1, len(nz))
-    t = (
-        nz[min(n - 1, int(0.20 * (n - 1)))],
-        nz[min(n - 1, int(0.45 * (n - 1)))],
-        nz[min(n - 1, int(0.70 * (n - 1)))],
-        nz[min(n - 1, int(0.90 * (n - 1)))],
-    )
-
-    def level(v: int) -> int:
-        if v <= 0:
-            return 0
-        if v >= t[3]:
-            return 4
-        if v >= t[2]:
-            return 3
-        if v >= t[1]:
-            return 2
-        return 1
-
-    day = start_day
-    for v in values:
-        cells.append(HeatCell(date=day.isoformat(), value=v, level=level(v)))
-        day = day + _dt.timedelta(days=1)
-    return YearlyHeatmap(
-        metric_label="AI tool calls",
-        metric_total=sum(values),
-        cells=cells,
-        most_active_month="July",
-        most_active_day="Feb 4, 2026",
-        longest_streak=9,
-        current_streak=3,
-        legend_values=t,
-    )
-
-
-def _sample_recap() -> Recap:
-    import random
-
-    rng = random.Random(7)
-    hours: list[HourCell] = []
-    values: list[int] = []
-    for dow in range(7):
-        for hour in range(24):
-            weekday_bias = 1.0 if dow < 5 else 0.3
-            hour_bias = 1.5 if 9 <= hour <= 17 else 1.0 if 18 <= hour <= 22 else 0.2
-            base = max(0, int(rng.gauss(18 * weekday_bias * hour_bias, 7)))
-            values.append(base)
-    nz = sorted(v for v in values if v > 0)
-    n = max(1, len(nz))
-    t = (
-        nz[min(n - 1, int(0.20 * (n - 1)))],
-        nz[min(n - 1, int(0.45 * (n - 1)))],
-        nz[min(n - 1, int(0.70 * (n - 1)))],
-        nz[min(n - 1, int(0.90 * (n - 1)))],
-    )
-
-    def level(v: int) -> int:
-        if v <= 0:
-            return 0
-        if v >= t[3]:
-            return 4
-        if v >= t[2]:
-            return 3
-        if v >= t[1]:
-            return 2
-        return 1
-
-    idx = 0
-    for dow in range(7):
-        for hour in range(24):
-            v = values[idx]
-            hours.append(HourCell(day_of_week=dow, hour=hour, value=v, level=level(v)))
-            idx += 1
-    return Recap(
-        title="Caliper recap",
-        stats=[
-            RecapStat(label="Sessions", value="32"),
-            RecapStat(label="Events", value="5,852"),
-            RecapStat(label="Total tokens", value="6.1M"),
-            RecapStat(label="Active days", value="142"),
-            RecapStat(label="Current streak", value="3d"),
-            RecapStat(label="Longest streak", value="9d"),
-            RecapStat(label="Peak hour", value="5 PM"),
-            RecapStat(label="Favorite model", value="Sonnet 4.6"),
-        ],
-        hours=hours,
-        comparison="You've used ~39× more tokens than Pride and Prejudice.",
-        legend_values=t,
-    )
 
 
 def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> Dashboard:
@@ -268,29 +135,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             DailyPoint("2026-05-15", 134, 55, "execution"),
             DailyPoint("2026-05-16", 154, 51, "exploration"),
         ],
-        shape=SessionShape(
-            total_sessions=32,
-            total_turns=480,
-            tool_use_total=539,
-            tools_per_turn=1.123,
-            coverage_events=480,
-            coverage_total_events=480,
-            top_tools=[
-                ToolCount("Read", 172, "explore"),
-                ToolCount("Bash", 154, "diagnose"),
-                ToolCount("Edit", 101, "execute"),
-                ToolCount("Grep", 54, "explore"),
-                ToolCount("Write", 40, "execute"),
-                ToolCount("MultiEdit", 11, "execute"),
-                ToolCount("Glob", 7, "explore"),
-            ],
-            categories=[
-                CategoryCount("exploration", "exploration · read-heavy", 10, 0.31),
-                CategoryCount("execution", "execution · edit-heavy", 10, 0.31),
-                CategoryCount("diagnostic", "diagnostic · bash/grep-heavy", 8, 0.25),
-                CategoryCount("mixed", "mixed", 4, 0.13),
-            ],
-        ),
         by_model=[
             ModelRow("anthropic", "claude-sonnet-4-6", "standard", 812.40, 320, 2_400_000, 0.78),
             ModelRow("anthropic", "claude-opus-4-7", "standard", 312.18, 80, 1_100_000, 0.62),
@@ -464,16 +308,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 evidence_metrics={"events": 320, "sessions": 28, "tokens": 2_400_000},
             ),
         ],
-        forecast=Forecast(
-            days_analyzed=14,
-            days_remaining=17,
-            daily_mean=89.00,
-            daily_stdev=48.00,
-            linear_total=2759.00,
-            linear_low=2432.00,
-            linear_high=3086.00,
-            ewma_total=2952.00,
-        ),
         evidence=[
             EvidenceRow("Usage completeness", "exact", "480 of 480 events parsed"),
             EvidenceRow("Pricing freshness", "exact", "rate card checked 2026-05-12"),
@@ -481,109 +315,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             EvidenceRow("Service tier", "estimated", "inferred from response headers"),
             EvidenceRow("Project attribution", "partial", "12 of 480 events missing cwd"),
             EvidenceRow("Git attribution", "unsupported", "no recorded git SHA in source logs"),
-        ],
-        usage_windows=[
-            UsageWindow(
-                label="Last 7 days",
-                days=7,
-                start="2026-05-10",
-                end="2026-05-17",
-                range="2026-05-10 → 2026-05-17",
-                cost_usd=799.0,
-                total_tokens=2_330_000,
-                events=284,
-                sessions=18,
-                cache_hit_rate=0.71,
-                active_days=7,
-                daily_cost_sparkline=[168, 92, 108, 110, 33, 134, 154],
-                daily_token_sparkline=[560, 330, 400, 420, 140, 490, 420],
-            ),
-            UsageWindow(
-                label="Last 30 days",
-                days=30,
-                start="2026-04-17",
-                end="2026-05-17",
-                range="2026-04-17 → 2026-05-17",
-                cost_usd=1754.0,
-                total_tokens=8_870_000,
-                events=1042,
-                sessions=61,
-                cache_hit_rate=0.69,
-                active_days=24,
-                daily_cost_sparkline=[31, 42, 55, 48, 77, 22, 0, 88, 62, 144, 51, 18, 0, 84],
-                daily_token_sparkline=[
-                    90,
-                    120,
-                    160,
-                    140,
-                    210,
-                    80,
-                    0,
-                    240,
-                    180,
-                    420,
-                    160,
-                    80,
-                    0,
-                    300,
-                ],
-            ),
-            UsageWindow(
-                label="Last 90 days",
-                days=90,
-                start="2026-02-16",
-                end="2026-05-17",
-                range="2026-02-16 → 2026-05-17",
-                cost_usd=4238.0,
-                total_tokens=21_400_000,
-                events=3120,
-                sessions=183,
-                cache_hit_rate=0.66,
-                active_days=68,
-                daily_cost_sparkline=[18, 24, 64, 80, 41, 95, 57, 38, 112, 76, 120, 92, 144, 154],
-                daily_token_sparkline=[
-                    60,
-                    70,
-                    180,
-                    210,
-                    130,
-                    280,
-                    160,
-                    120,
-                    320,
-                    240,
-                    350,
-                    290,
-                    420,
-                    440,
-                ],
-            ),
-        ],
-        impact_cards=[
-            ImpactCard(
-                "Cost driver",
-                "api-server",
-                "$412 · 33% of selected-window cost",
-                "neutral",
-            ),
-            ImpactCard("Budget risk", "78%", "monthly cost: $1,754 of $2,250", "warn"),
-            ImpactCard(
-                "Cache discount",
-                "$612.40",
-                "72.4% cached-input share, vs. the full input rate.",
-                "good",
-            ),
-            ImpactCard(
-                "Usage rhythm",
-                "13 active days",
-                "Peak hour 5 PM; 32 sessions; 4.1M tokens.",
-            ),
-            ImpactCard(
-                "Dedupe",
-                "18 skipped",
-                "Rolling windows use parser-deduped usage events.",
-                "good",
-            ),
         ],
         output_summary=OutputSummary(
             commits_touched=37,
@@ -602,51 +333,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "automatically waste."
             ),
         ),
-        command_center=[
-            CommandCenterCard(
-                "Budget posture",
-                "78%",
-                "monthly cost: $1,754 of $2,250",
-                "warn",
-                "control",
-            ),
-            CommandCenterCard(
-                "Spend velocity",
-                "$114.14/day",
-                "+95.3% vs 30d/day",
-                "warn",
-                "trend",
-            ),
-            CommandCenterCard(
-                "Largest avoidable spend",
-                "$184.20",
-                "Largest advisor recommendation",
-                "good",
-                "savings",
-            ),
-            CommandCenterCard(
-                "Anomaly findings",
-                "2",
-                "Project-day spike · observed $59.00",
-                "critical",
-                "audit",
-            ),
-            CommandCenterCard(
-                "Highest-cost session",
-                "$84.10",
-                "long context · 820.0K tokens",
-                "warn",
-                "drilldown",
-            ),
-            CommandCenterCard(
-                "Peak rate-limit usage",
-                "82%",
-                "18 limit samples",
-                "warn",
-                "reliability",
-            ),
-            CommandCenterCard("Evidence quality", "82/100", "Good", "neutral", "evidence"),
-        ],
         executive_brief=ExecutiveBrief(
             title="AI usage needs review",
             verdict="4 items to review before sharing or acting on this report.",
@@ -687,88 +373,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 ),
             ],
         ),
-        decision_queue=[
-            DecisionQueueItem(
-                1,
-                "Spend velocity changed",
-                "The last 7 days are running higher than the 30-day daily baseline.",
-                "Review rolling windows and daily cost to find the date that moved the trend.",
-                "$114/day",
-                "warn",
-                "usage-windows",
-                "executive",
-            ),
-            DecisionQueueItem(
-                2,
-                "Review budget posture",
-                "monthly cost: $1,754 of $2,250",
-                "Open the Budget burn section and decide whether the configured budget "
-                "needs action.",
-                "78%",
-                "warn",
-                "budgets",
-                "finance",
-            ),
-            DecisionQueueItem(
-                3,
-                "Review avoidable spend",
-                "Largest advisor recommendation is $184.20 at API rates.",
-                "Open Avoidable spend, then validate quality and latency before changing routing.",
-                "3 recommendations",
-                "good",
-                "inefficiencies",
-                "executive",
-            ),
-            DecisionQueueItem(
-                4,
-                "Review anomaly finding",
-                "Project-day spike on api-server / 2026-05-17: observed $59.00.",
-                "Inspect the Anomalies section before treating the spike as a repeatable trend.",
-                "5.1σ · $37.00 impact",
-                "critical",
-                "anomalies",
-                "audit",
-            ),
-            DecisionQueueItem(
-                5,
-                "Inspect the highest-cost session",
-                "The top session is $84.10 and long context.",
-                "Inspect tokens, tools, models, and project attribution.",
-                "7% of selected-window cost",
-                "neutral",
-                "top-sessions",
-                "engineer",
-            ),
-        ],
-        comparisons=[
-            ComparisonSignal(
-                "7d spend velocity",
-                "$114.14/day",
-                "30d baseline $58.44/day",
-                "warn",
-                0.953,
-                "usage-windows",
-                "finance",
-            ),
-            ComparisonSignal(
-                "Top project concentration",
-                "33%",
-                "api-server is $412 of selected-window cost",
-                "neutral",
-                None,
-                "projects",
-                "finance",
-            ),
-            ComparisonSignal(
-                "Evidence quality",
-                "82/100",
-                "Good",
-                "neutral",
-                None,
-                "evidence",
-                "audit",
-            ),
-        ],
         advisor_recommendations=[
             AdvisorRecommendation(
                 "Move low-output fast tier calls to standard",
@@ -848,71 +452,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 47,
                 ["claude-sonnet-4-6"],
                 "cost outlier",
-            ),
-        ],
-        usage_mix=[
-            MixRow(
-                "vendor",
-                "claude-code",
-                1243.18,
-                4_120_000,
-                480,
-                1.0,
-                [88, 62, 144, 51, 18, 0, 84, 168, 92, 108, 110, 33, 134, 154],
-            ),
-            MixRow(
-                "model/tier",
-                "claude-sonnet-4-6 · standard",
-                812.40,
-                2_400_000,
-                320,
-                0.65,
-                [41, 55, 91, 28, 12, 0, 63, 104, 71, 82, 78, 22, 108, 117],
-            ),
-            MixRow(
-                "model/tier",
-                "claude-opus-4-7 · standard",
-                312.18,
-                1_100_000,
-                80,
-                0.25,
-                [30, 4, 39, 16, 4, 0, 14, 48, 12, 18, 22, 8, 16, 81],
-            ),
-            MixRow(
-                "model/tier",
-                "claude-haiku-4-5 · fast",
-                118.60,
-                620_000,
-                80,
-                0.10,
-                [17, 3, 14, 7, 2, 0, 7, 16, 9, 8, 10, 3, 10, 12],
-            ),
-            MixRow(
-                "tier",
-                "standard",
-                1124.58,
-                3_500_000,
-                400,
-                0.90,
-                [71, 59, 130, 44, 16, 0, 77, 152, 83, 100, 100, 30, 124, 142],
-            ),
-            MixRow(
-                "tier",
-                "fast",
-                118.60,
-                620_000,
-                80,
-                0.10,
-                [17, 3, 14, 7, 2, 0, 7, 16, 9, 8, 10, 3, 10, 12],
-            ),
-            MixRow(
-                "source",
-                "claude-code",
-                1243.18,
-                4_120_000,
-                480,
-                1.0,
-                [88, 62, 144, 51, 18, 0, 84, 168, 92, 108, 110, 33, 134, 154],
             ),
         ],
         rate_limit_pressure=RateLimitPressure(
@@ -1044,96 +583,10 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "272K token threshold",
             ),
         ],
-        forecast_drivers=[
-            ForecastDriverRow("project", "api-server", "exact", 883.24, 29.44, 0.32, "180 events"),
-            ForecastDriverRow(
-                "model", "claude-sonnet-4-6", "exact", 1740.86, 58.03, 0.63, "standard"
-            ),
-            ForecastDriverRow("agent", "planner-agent", "estimated", 305.14, 10.17, 0.11, "direct"),
-            ForecastDriverRow(
-                "skill", "diagnose", "estimated", 103.29, 3.44, 0.04, "session marker"
-            ),
-        ],
-        seasonality=SeasonalitySection(
-            by_hour_cost_usd=tuple(
-                [
-                    2,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    8,
-                    14,
-                    36,
-                    42,
-                    55,
-                    61,
-                    48,
-                    44,
-                    58,
-                    74,
-                    92,
-                    88,
-                    49,
-                    35,
-                    20,
-                    12,
-                    6,
-                    3,
-                ]
-            ),
-            by_dow_cost_usd=(220, 180, 210, 195, 260, 92, 86),
-            by_dow_hour_cost_usd=tuple(
-                tuple(float((dow + 1) * (hour % 6)) for hour in range(24)) for dow in range(7)
-            ),
-            peak_hour=16,
-            peak_dow=4,
-            off_peak_share=0.24,
-            timezone="America/Los_Angeles",
-            total_cost_usd=1243.18,
-        ),
         tier_provenance=TierProvenance(
             sources=(("Logged in event", 320), ("Codex config", 120), ("Assumed default", 40)),
             total_events=480,
         ),
-        outlook=Outlook(
-            days_analyzed=14,
-            daily_mean=89.0,
-            daily_stdev=48.0,
-            horizon_30d=OutlookHorizon(30, 2670.0, 2312.0, 3028.0, 2952.0),
-            horizon_90d=OutlookHorizon(90, 8010.0, 6936.0, 9084.0, 8856.0),
-        ),
-        model_forecasts=[
-            ModelForecastRow(
-                "anthropic",
-                "claude-sonnet-4-6",
-                14,
-                58.03,
-                1740.86,
-                1510.40,
-                1971.32,
-                1862.00,
-                "↑ 18,420 tok/d slope",
-                "warn",
-                [41, 55, 91, 28, 12, 0, 63, 104, 71, 82, 78, 22, 108, 117],
-                True,
-            ),
-            ModelForecastRow(
-                "anthropic",
-                "claude-opus-4-7",
-                14,
-                22.30,
-                669.00,
-                510.00,
-                828.00,
-                720.00,
-                "flat",
-                "neutral",
-                [30, 4, 39, 16, 4, 0, 14, 48, 12, 18, 22, 8, 16, 81],
-                False,
-            ),
-        ],
         cache_leverage=[
             CacheLeverageRow(
                 "3:42 pm, Sunday 10 May 2026", "api-server", 144.20, 0.82, 720_000, 158_000
@@ -1159,8 +612,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             CohortDeltaRow("Total cost", "$1,243.18", "$1,148.90", 0.082, 94.28, "warn"),
             CohortDeltaRow("Cache hit rate", "72.4%", "75.5%", -0.031, -0.031, "warn"),
         ],
-        heatmap=_sample_heatmap(),
-        recap=_sample_recap(),
         banner=banner,
         show_paths=show_paths,
         budgets=[
@@ -1201,21 +652,10 @@ def empty_dashboard() -> Dashboard:
             tools_per_turn=0,
         ),
         daily=[],
-        shape=SessionShape(
-            total_sessions=0,
-            total_turns=0,
-            tool_use_total=0,
-            tools_per_turn=0,
-            coverage_events=0,
-            coverage_total_events=0,
-            top_tools=[],
-            categories=[],
-        ),
         by_model=[],
         by_project=[],
         anomalies=[],
         insights=[],
-        forecast=None,
         evidence=[],
     )
 
