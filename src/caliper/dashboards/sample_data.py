@@ -619,7 +619,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "trend",
             ),
             CommandCenterCard(
-                "Largest savings candidate",
+                "Largest avoidable spend",
                 "$184.20",
                 "Largest advisor recommendation",
                 "good",
@@ -663,11 +663,11 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                     "executive",
                 ),
                 BriefFinding(
-                    "Review estimated savings",
-                    "Estimated routing savings need review before the next heavy session.",
-                    "est. $184",
+                    "Review avoidable spend",
+                    "A routing change worth reviewing before the next heavy session.",
+                    "$184 at API rates",
                     "good",
-                    "advisor",
+                    "inefficiencies",
                     "executive",
                 ),
                 BriefFinding(
@@ -712,12 +712,12 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             ),
             DecisionQueueItem(
                 3,
-                "Review estimated savings",
-                "Largest advisor recommendation is $184.20.",
-                "Validate quality and latency before changing model or tier routing.",
+                "Review avoidable spend",
+                "Largest advisor recommendation is $184.20 at API rates.",
+                "Open Avoidable spend, then validate quality and latency before changing routing.",
                 "3 recommendations",
                 "good",
-                "advisor",
+                "inefficiencies",
                 "executive",
             ),
             DecisionQueueItem(
@@ -786,9 +786,9 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "Use Sonnet 4.6 for Opus non-reasoning turns",
                 "$61.24",
                 "21 matching events across 4 sessions. Test current alternatives: "
-                "claude-sonnet-4.6 (anthropic, saves $61.24), "
-                "gpt-5.4 (openai, saves $55.10), "
-                "gpt-5.4-mini (openai, saves $68.80).",
+                "claude-sonnet-4.6 (anthropic, $61.24 cheaper), "
+                "gpt-5.4 (openai, $55.10 cheaper), "
+                "gpt-5.4-mini (openai, $68.80 cheaper).",
                 "caliper whatif --hypothetical-model claude-sonnet-4.6",
                 0.80,
                 21,
@@ -806,8 +806,8 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 "$19.00",
                 "37 matching events across 6 sessions. Keep GPT-5.5 and Sonnet 4.6 "
                 "for complex work. Test current alternatives: "
-                "gpt-5.4 (openai, saves $12.40), "
-                "gpt-5.4-mini (openai, saves $19.00).",
+                "gpt-5.4 (openai, $12.40 cheaper), "
+                "gpt-5.4-mini (openai, $19.00 cheaper).",
                 "caliper whatif --hypothetical-model gpt-5.4",
                 0.70,
                 37,
