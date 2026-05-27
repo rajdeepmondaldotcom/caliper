@@ -487,68 +487,65 @@ def test_anomaly_rows_use_constructive_copy_without_scale_noise() -> None:
     assert 'class="cal-metric-chip"' in html
 
 
-def test_dashboard_renders_operator_first_sections() -> None:
+def test_dashboard_renders_curated_sections_in_order() -> None:
     html = render_dashboard(sample_dashboard(show_paths=True))
 
+    # The curated set: descriptive core, then flags, then collapsed detail, trust.
     for section_id in (
-        "action-center",
+        "overview",
+        "output",
         "cost",
-        "usage-windows",
-        "usage-mix",
+        "models",
+        "projects",
+        "sessions",
         "anomalies",
         "inefficiencies",
-        "forecast",
         "attribution",
         "evidence",
     ):
         assert f'id="{section_id}"' in html
 
-    assert "Operator brief" not in html  # renamed to "Next actions"
-    assert "Next actions" in html
-    assert "Spend drivers" in html
-    assert "Forecast" in html  # renamed from "Forward look"
+    assert "What this produced" in html
+    assert "Avoidable spend" in html
     assert "Recommended changes" in html
-    assert "Detected waste" in html
-    assert 'id="advisor"' not in html
-    assert 'id="outlook"' not in html
-    assert 'id="insights"' not in html
-    assert "Decision queue" not in html
-    assert "Signals checked" not in html
-    assert "Evidence-labelled findings" not in html
-    assert "No insights for this window" not in html
-    assert "No tool-use signal yet" not in html
-    assert "Cost-weighted rhythm" in html
     assert "Long-context boundary" in html
 
-    # Phase 1 UX overhaul: sections are grouped by tier
-    # (decisions → trajectory → appendix → trust). Within each tier the
-    # original _SECTION_ORDER is preserved, so the operator-first decision
-    # cluster precedes trajectory diagrams and the diagnostic appendix.
+    # Pruned sections no longer render anywhere.
+    for gone in (
+        "action-center",
+        "usage-windows",
+        "usage-mix",
+        "forecast",
+        "shape",
+        "heatmap",
+        "advisor",
+        "outlook",
+    ):
+        assert f'id="{gone}"' not in html, f"{gone} should be pruned"
+
+    # Order: descriptive core (trajectory) → flags (decisions) → collapsed
+    # appendix → trust footer.
     section_order = [
-        'id="action-center"',  # decisions tier
-        'id="anomalies"',  # decisions tier
-        'id="inefficiencies"',  # decisions tier
-        'id="overview"',  # trajectory tier
-        'id="cost"',  # trajectory tier
-        'id="usage-windows"',  # trajectory tier (promoted from appendix)
-        'id="usage-mix"',  # trajectory tier
-        'id="forecast"',  # trajectory tier
-        'id="evidence"',  # trust tier (always last)
+        'id="overview"',
+        'id="output"',
+        'id="cost"',
+        'id="models"',
+        'id="projects"',
+        'id="sessions"',
+        'id="anomalies"',
+        'id="inefficiencies"',
+        'id="attribution"',
+        'id="evidence"',
     ]
     positions = [html.index(marker) for marker in section_order]
     assert positions == sorted(positions), f"Tier ordering broken; got positions {positions}"
+    assert "data-billboard-kind" not in html  # no manufactured "biggest fix" hero
 
-    # Spend windows (7/30/90-day trend) was promoted out of the appendix into
-    # the trajectory tier, so it renders BEFORE the collapsible block.
+    # Supporting detail (attribution) renders inside the collapsed appendix;
+    # the descriptive core renders before it.
     appendix_start = html.index('class="cal-appendix"')
-    assert html.index('id="usage-windows"') < appendix_start, (
-        "usage-windows should render in the trajectory tier, before the appendix"
-    )
-    # A genuine appendix section (heatmap) still renders inside the <details>
-    # so the default view stays calm.
-    assert appendix_start < html.index('id="heatmap"'), (
-        "appendix sections must render inside the appendix <details> block"
-    )
+    assert html.index('id="sessions"') < appendix_start
+    assert appendix_start < html.index('id="attribution"')
 
 
 def test_dashboard_recommendations_show_ranked_model_alternatives() -> None:
@@ -680,15 +677,10 @@ def test_dashboard_section_numbers_are_stable() -> None:
 
 def test_hero_verdict_renders_period_cost_trend_and_fixable() -> None:
     """Legacy hero verdict fallback (no billboard) carries the period,
-    headline cost, trend chip, avoidable-spend sum, and the top advisor
-    action — all readable in one glance.
-
-    Phase 1 UX overhaul: when ``dashboard.billboard`` is populated, the
-    billboard supplants the hero verdict as the page peak. The hero
-    verdict still renders for payloads without a billboard (legacy /
-    backwards compatibility), so we exercise it via ``billboard=None``.
+    headline cost, and trend chip, all readable in one glance, with nothing
+    prescriptive competing with the cost.
     """
-    dashboard = dataclasses.replace(sample_dashboard(), billboard=None)
+    dashboard = sample_dashboard()
     html_text = render_dashboard(dashboard)
     _assert_private_html(html_text)
     # The class anchors the block and lets future tests find it.
@@ -701,13 +693,10 @@ def test_hero_verdict_renders_period_cost_trend_and_fixable() -> None:
     # Trend chip: +8.2% with the prior-window label.
     assert "+8.2%" in html_text
     assert "vs prior" in html_text
-    # Avoidable sum: top-3 advisor recs = $96.40 + $61.24 + $19.00 = $176.64.
-    assert "AVOIDABLE" in html_text
-    assert "$176.64" in html_text
-    # The top action title appears verbatim.
-    assert "Move low-output fast tier calls to standard" in html_text
-    # The CLI command for the top action is shown (copy-paste path).
-    assert "caliper advise --rule fast-tier-low-output" in html_text
+    # The hero states what happened, nothing prescriptive. No manufactured
+    # "biggest fix" or avoidable-spend dollar competes with the cost.
+    assert "AVOIDABLE" not in html_text.split('id="inefficiencies"')[0]
+    assert "Top fix" not in html_text.split('id="inefficiencies"')[0]
 
 
 def test_hero_verdict_hidden_on_empty_dashboard() -> None:
@@ -720,9 +709,8 @@ def test_hero_verdict_hidden_on_empty_dashboard() -> None:
 
 
 def test_hero_verdict_renders_in_terminal_rhythm() -> None:
-    """Terminal rhythm includes the legacy hero verdict (no billboard set)."""
-    dashboard = dataclasses.replace(sample_dashboard(), billboard=None)
-    html_text = render_dashboard(dashboard, rhythm="terminal")
+    """Terminal rhythm includes the hero verdict."""
+    html_text = render_dashboard(sample_dashboard(), rhythm="terminal")
     assert 'class="cal-hero-verdict"' in html_text
 
 
@@ -731,65 +719,15 @@ def test_hero_verdict_renders_in_terminal_rhythm() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_billboard_renders_above_the_fold_with_headline_value_and_cta() -> None:
-    """When ``dashboard.billboard`` is populated, the renderer emits a
-    single above-the-fold peak with the BIGGEST FIX headline, the
-    avoidable amount, confidence chip, and the investigate CTA. This
-    supplants the legacy hero verdict strip."""
+def test_dashboard_has_no_billboard_hero() -> None:
+    """The manufactured "biggest fix" billboard was removed. The dashboard
+    leads with the honest verdict (period, cost, trend), not a prescriptive
+    model-arbitrage headline."""
     html_text = render_dashboard(sample_dashboard())
     _assert_private_html(html_text)
-    # The class anchors the block and the data attributes carry the
-    # selection (fix vs tidy fallback).
-    assert 'class="cal-billboard"' in html_text
-    assert 'data-billboard-kind="fix"' in html_text
-    # Headline label + avoidable value.
-    assert "BIGGEST FIX" in html_text
-    assert "$612/mo avoidable" in html_text
-    # Confidence chip rendered as a percentage.
-    assert "92% confidence" in html_text
-    # CTA anchors back to the avoidable-spend section so a click lands on detail.
-    assert 'href="#inefficiencies"' in html_text
-    # When the billboard is present the legacy hero verdict is suppressed.
-    assert 'class="cal-hero-verdict"' not in html_text
-
-
-def test_billboard_tidy_fallback_when_no_fix_available() -> None:
-    """When advisor recommendations and inefficiency rows are empty, the
-    billboard uses positive framing (YOU'RE TIDY) and shows total spend
-    rather than disappearing — Peak-End preserved on a healthy report."""
-    tidy = dataclasses.replace(
-        sample_dashboard(),
-        advisor_recommendations=[],
-        inefficiencies=[],
-    )
-    from caliper.dashboards.adapter import _build_billboard
-
-    bb = _build_billboard(
-        advisor_recommendations=tidy.advisor_recommendations,
-        inefficiency_rows=tidy.inefficiencies,
-        totals=tidy.totals,
-        window=tidy.window,
-    )
-    assert bb is not None
-    assert bb.kind == "tidy"
-    assert "$1,243" in bb.value
-    assert bb.tone == "good"
-
-
-def test_billboard_hidden_on_empty_dashboard() -> None:
-    """Empty window: no events, no billboard — same rule as the legacy
-    hero verdict."""
-    from caliper.dashboards.adapter import _build_billboard
-    from caliper.dashboards.sample_data import empty_dashboard
-
-    empty = empty_dashboard()
-    bb = _build_billboard(
-        advisor_recommendations=[],
-        inefficiency_rows=[],
-        totals=empty.totals,
-        window=empty.window,
-    )
-    assert bb is None
+    assert "data-billboard-kind" not in html_text
+    assert "BIGGEST FIX" not in html_text
+    assert 'class="cal-hero-verdict"' in html_text
 
 
 def test_every_section_has_an_explicit_tier() -> None:
@@ -806,42 +744,6 @@ def test_every_section_has_an_explicit_tier() -> None:
     assert not bad_tier, f"sections mapped to an unknown tier: {bad_tier}"
 
 
-def test_billboard_tidy_drops_cta_when_no_evidence_section() -> None:
-    """The tidy-fallback billboard anchors its CTA at the evidence section.
-    When there are no evidence rows that section won't render, so the CTA
-    must be omitted rather than linking to a dead anchor."""
-    from caliper.dashboards.adapter import _build_billboard
-    from caliper.dashboards.html import _render_billboard
-    from caliper.dashboards.sample_data import sample_dashboard
-
-    window = sample_dashboard().window
-    totals = sample_dashboard().totals
-    # No advisor recs, no inefficiencies, no evidence → tidy with no CTA.
-    card = _build_billboard(
-        advisor_recommendations=[],
-        inefficiency_rows=[],
-        totals=totals,
-        window=window,
-        has_evidence=False,
-    )
-    assert card is not None and card.kind == "tidy"
-    assert card.cta_anchor == ""
-    html = _render_billboard(card, "receipt")
-    assert "cal-billboard-cta" not in html  # no dangling link
-    assert "TIDY" in html  # headline still renders (apostrophe is HTML-escaped)
-
-    # With evidence present, the tidy CTA points at the evidence section.
-    card_ev = _build_billboard(
-        advisor_recommendations=[],
-        inefficiency_rows=[],
-        totals=totals,
-        window=window,
-        has_evidence=True,
-    )
-    assert card_ev is not None and card_ev.cta_anchor == "evidence"
-    assert 'href="#evidence"' in _render_billboard(card_ev, "receipt")
-
-
 def test_receipt_rhythm_renders_sticky_toc_grouped_by_tier() -> None:
     """Phase 2: the receipt rhythm includes a sticky right-rail TOC,
     grouped by tier. Each section anchor must appear as a TOC link with
@@ -850,11 +752,11 @@ def test_receipt_rhythm_renders_sticky_toc_grouped_by_tier() -> None:
     assert 'class="cal-receipt-toc"' in html_text
     assert 'aria-label="Section navigation"' in html_text
     # Tier group labels are visible.
-    assert ">Decisions<" in html_text
-    assert ">Trajectory<" in html_text
-    assert ">Appendix<" in html_text
+    assert ">What happened<" in html_text
+    assert ">Worth a look<" in html_text
+    assert ">More detail<" in html_text
     # Each rendered section has a corresponding TOC link with data-toc-target.
-    for sid in ("action-center", "anomalies", "inefficiencies", "overview", "cost"):
+    for sid in ("overview", "output", "cost", "anomalies", "inefficiencies"):
         assert f'data-toc-target="{sid}"' in html_text
     # The TOC must not duplicate the terminal-rhythm index.
     assert 'class="cal-rail-link"' not in html_text
@@ -918,10 +820,10 @@ def test_dashboard_renders_appendix_block_with_collapsed_diagnostic_sections() -
     appendix_start = html_text.index('class="cal-appendix"')
     appendix_end = html_text.index("</details>", appendix_start)
     inside = html_text[appendix_start:appendix_end]
-    assert 'id="models"' in inside
+    # Supporting detail lives inside the collapsed appendix.
     assert 'id="attribution"' in inside
-    # Decisions tier must render BEFORE the appendix block opens.
-    assert html_text.index('id="action-center"') < appendix_start
+    # The descriptive core and the flags render BEFORE the appendix opens.
+    assert html_text.index('id="sessions"') < appendix_start
     assert html_text.index('id="inefficiencies"') < appendix_start
     assert html_text.index('id="anomalies"') < appendix_start
 

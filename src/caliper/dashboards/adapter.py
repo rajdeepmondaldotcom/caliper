@@ -64,7 +64,6 @@ from caliper.dashboards.data_models import (
     AgentRow,
     AnomalyRow,
     Banner,
-    BillboardCard,
     BriefFinding,
     BudgetRow,
     CacheLeverageRow,
@@ -412,13 +411,6 @@ def build_handoff_dashboard(
         executive_brief = _cap_brief_findings(executive_brief, limit=4)
 
     window = _build_window(options, result)
-    billboard = _build_billboard(
-        advisor_recommendations=advisor_recommendations,
-        inefficiency_rows=inefficiency_rows,
-        totals=totals,
-        window=window,
-        has_evidence=bool(evidence),
-    )
 
     return Dashboard(
         caliper=CaliperMeta(version=__version__, schema_version=DASHBOARD_SCHEMA_VERSION),
@@ -462,7 +454,6 @@ def build_handoff_dashboard(
         long_context_histogram=long_context_histogram,
         cohort_deltas=cohort_deltas,
         budgets=budgets,
-        billboard=billboard,
     )
 
 
@@ -484,138 +475,6 @@ def _cap_brief_findings(brief: ExecutiveBrief, *, limit: int) -> ExecutiveBrief:
         subtitle=brief.subtitle,
         tone=brief.tone,
         findings=capped,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Billboard — the single above-the-fold "biggest fix" headline (Phase 1 UX)
-# ---------------------------------------------------------------------------
-
-_INEFF_CONFIDENCE_PCT = {"high": 90, "medium": 70, "low": 50}
-
-
-def _fmt_money_compact(amount: float) -> str:
-    """Compact money for the billboard: $1,243 / $612 / $0.85.
-
-    Round to whole dollars at >= $1 so the page peak doesn't show fake
-    precision (savings are estimates). Sub-dollar amounts keep cents.
-    """
-    if amount >= 1:
-        return "$" + format(int(round(amount)), ",")
-    return "$" + format(float(amount), ".2f")
-
-
-def _first_sentence(text: str, *, max_chars: int = 140) -> str:
-    """First sentence (or first clause) of detail copy, capped to ``max_chars``.
-
-    The billboard rationale must read at a glance, so we trim aggressively.
-    """
-    raw = (text or "").strip()
-    if not raw:
-        return ""
-    cut = raw
-    for delim in (". ", " · ", " — "):
-        idx = cut.find(delim)
-        if 0 < idx < max_chars:
-            cut = cut[:idx]
-            break
-    if len(cut) > max_chars:
-        cut = cut[: max_chars - 1].rstrip() + "…"
-    return cut.rstrip(".")
-
-
-def _build_billboard(
-    *,
-    advisor_recommendations: list[AdvisorRecommendation],
-    inefficiency_rows: list[InefficiencyRow],
-    totals: Totals,
-    window: WindowMeta,
-    has_evidence: bool = True,
-) -> BillboardCard | None:
-    """Pick the single highest-leverage fix and shape it for above-the-fold display.
-
-    Preference order:
-    1. Highest ``savings_usd × confidence`` from advisor recommendations.
-    2. Highest ``impact_usd`` (× string-mapped confidence) from inefficiency rows.
-    3. Tidy fallback — "no fix detected" + total spend for the window.
-    4. ``None`` when the window has zero events (nothing to say).
-
-    The fix paths anchor the CTA at the "inefficiencies" section, which is
-    guaranteed to render whenever a fix exists (its render guard is exactly
-    "advisor_recommendations or inefficiencies"). The tidy fallback anchors
-    at "evidence" only when evidence rows exist; otherwise it emits no
-    anchor so the renderer drops the CTA rather than linking nowhere.
-    """
-    if totals is None or totals.events == 0:
-        return None
-
-    best_advisor: AdvisorRecommendation | None = None
-    best_advisor_score = 0.0
-    for rec in advisor_recommendations or []:
-        savings = float(rec.savings_usd or 0.0)
-        if savings <= 0:
-            continue
-        score = savings * max(float(rec.confidence or 0.0), 0.1)
-        if score > best_advisor_score:
-            best_advisor = rec
-            best_advisor_score = score
-
-    if best_advisor is not None:
-        conf_pct = int(round(max(0.0, min(1.0, best_advisor.confidence or 0.0)) * 100))
-        return BillboardCard(
-            kind="fix",
-            headline="BIGGEST FIX",
-            value=f"{_fmt_money_compact(best_advisor.savings_usd)} avoidable",
-            rationale=_first_sentence(best_advisor.detail) or best_advisor.title,
-            cta_label="Investigate",
-            cta_anchor="inefficiencies",
-            confidence_pct=conf_pct or None,
-            command=best_advisor.action or "",
-            tone="warn" if best_advisor.tone in ("warn", "critical") else "neutral",
-        )
-
-    best_ineff: InefficiencyRow | None = None
-    best_ineff_score = 0.0
-    for row in inefficiency_rows or []:
-        impact = float(row.impact_usd or 0.0)
-        if impact <= 0:
-            continue
-        conf_mult = _INEFF_CONFIDENCE_PCT.get((row.confidence or "").lower(), 60) / 100.0
-        score = impact * max(conf_mult, 0.1)
-        if score > best_ineff_score:
-            best_ineff = row
-            best_ineff_score = score
-
-    if best_ineff is not None:
-        conf_pct = _INEFF_CONFIDENCE_PCT.get((best_ineff.confidence or "").lower())
-        return BillboardCard(
-            kind="fix",
-            headline="BIGGEST FIX",
-            value=f"{_fmt_money_compact(best_ineff.impact_usd)} avoidable",
-            rationale=_first_sentence(best_ineff.detail) or best_ineff.title,
-            cta_label="Investigate",
-            cta_anchor="inefficiencies",
-            confidence_pct=conf_pct,
-            command=best_ineff.action or "",
-            tone="warn" if best_ineff.severity in ("warn", "fail", "critical") else "neutral",
-        )
-
-    # Tidy fallback — positive framing so the page never feels empty. Only
-    # offer the "Open evidence" CTA when the evidence section will actually
-    # render; otherwise leave the anchor empty so the renderer drops the link.
-    return BillboardCard(
-        kind="tidy",
-        headline="YOU'RE TIDY",
-        value=f"{_fmt_money_compact(totals.cost_usd)} spend",
-        rationale=(
-            f"No avoidable spend detected in the {window.label.lower()}. "
-            "Keep an eye on the trajectory below."
-        ),
-        cta_label="Open evidence" if has_evidence else "",
-        cta_anchor="evidence" if has_evidence else "",
-        confidence_pct=None,
-        command="",
-        tone="good",
     )
 
 

@@ -33,3 +33,6 @@ docs/agents/
 # Designer handoff artifacts — local references, not part of the launch repo.
 caliper-dashboard-design-brief.zip
 out/
+
+# Coverage artifact
+coverage.xml

@@ -12,7 +12,6 @@ Covers the verified fixes from the persona QA sweep:
 
 from __future__ import annotations
 
-import dataclasses
 import datetime as dt
 import json
 from pathlib import Path
@@ -222,18 +221,10 @@ def test_show_the_math_has_chevron() -> None:
     assert "show the math" in html
 
 
-def test_verdict_demoted_when_billboard_present() -> None:
+def test_verdict_block_renders_verdict_strip_inline() -> None:
     d = sample_dashboard()
-    assert d.billboard is not None  # the sample exercises the billboard path
     block = _verdict_block(d, "receipt")
-    assert "cal-secondary-verdict" in block
-    assert "Review findings" in block
-
-
-def test_verdict_inline_without_billboard() -> None:
-    d = dataclasses.replace(sample_dashboard(), billboard=None)
-    block = _verdict_block(d, "receipt")
-    # Legacy payloads keep the strip inline (no demotion disclosure).
+    # The verdict strip renders inline (no demotion disclosure, no billboard).
     assert "cal-secondary-verdict" not in block
     assert "cal-verdict-strip" in block
 

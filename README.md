@@ -72,7 +72,8 @@ No logs yet? Run `caliper dashboard --demo` to open the full report on built-in
 sample data before pointing Caliper at your own usage.
 
 It writes a self-contained HTML file and opens it in your browser. The verdict
-sits at the top: period, cost, trend, and the largest avoidable-spend finding.
+sits at the top: the period, the cost, and the trend. Nothing prescriptive
+competes with it.
 
 ```text
 Caliper · Last 30 days · $1,243 · trend +8.2% · top fix: Move low-output
@@ -119,17 +120,17 @@ disclosures expand the formula and sample size on top of it.
 These screenshots come from `caliper dashboard --safe-share`, so they show the
 real report layout without exposing local paths or session identities.
 
-| Next actions | Spend drivers |
+| Cost over time | Models & tiers |
 |---|---|
-| <img alt="Dashboard next actions with verdict, priority actions, and selected-window cost" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/hero.png"> | <img alt="Spend drivers grouped by vendor, model and tier, service tier, and source" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/usage-mix.png"> |
+| <img alt="Daily cost over the selected window as a bar chart" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/cost.png"> | <img alt="Cost by model and service tier" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/models.png"> |
 
-| Anomalies | Avoidable spend |
+| Projects | Session drilldown |
 |---|---|
-| <img alt="Spend spike anomaly rows with human-readable dates and impact labels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/anomalies.png"> | <img alt="Ranked avoidable-spend findings, detected inefficiencies, and cache reuse panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/inefficiencies.png"> |
+| <img alt="Cost by repository or folder" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/projects.png"> | <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/sessions.png"> |
 
-| Session drilldown | Attribution and evidence |
+| Avoidable spend | Attribution |
 |---|---|
-| <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/sessions.png"> | <img alt="Attribution panels for agents, skills, tier sources, long-context boundary, and cohort deltas" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/attribution.png"> |
+| <img alt="Ranked avoidable-spend findings with re-pricing caveats and cache reuse panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/inefficiencies.png"> | <img alt="Attribution panels for agents, skills, tier sources, and the long-context boundary" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/attribution.png"> |
 
 ## How it's different
 
@@ -149,7 +150,7 @@ last month cost without sending prompts to a third party, use Caliper.
 
 | Surface | Command | Purpose |
 |---|---|---|
-| Browser dashboard | `caliper dashboard` | Next actions, what your spend produced, spend drivers, avoidable spend, anomalies, sessions, evidence. |
+| Browser dashboard | `caliper dashboard` | What your spend produced, cost over time, models, projects, sessions, then any real flags (anomalies, budgets, avoidable spend) and the evidence behind every number. |
 | PR receipt | `caliper pr 42` | Cost of events that recorded the PR's commit SHAs (it states how much of window spend that covers). |
 | Overview | `caliper overview` | Rolling 7 / 30 / 90 day spend. |
 | Project rollup | `caliper project` | Spend by repository or folder. |
