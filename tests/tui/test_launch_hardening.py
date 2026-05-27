@@ -426,7 +426,7 @@ def test_first_run_welcome_screenshot_regression(tmp_path, monkeypatch):
 
     svg = asyncio.run(_drive())
 
-    assert "Local&#160;AI&#160;cost&#160;ledger" in svg
+    assert "AI&#160;coding&#160;cost&#160;and&#160;produced" in svg
     assert "Press&#160;space&#160;to&#160;enter" in svg
     assert "Preparing&#160;session&#160;scan" not in svg
     assert "Counting&#160;files" not in svg

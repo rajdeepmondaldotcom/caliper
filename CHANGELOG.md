@@ -2,6 +2,16 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.65 - 2026-05-27
+
+The plain-language pass, finished.
+
+- **Consistent plain wording.** The package description, the module docstring,
+  and the TUI welcome line now say "see what your AI coding cost and produced"
+  instead of "cost ledger." The README comparison section dropped its last
+  analogy.
+- **Screenshots** regenerated for this version and pinned to the `v0.0.65` tag.
+
 ## 0.0.64 - 2026-05-27
 
 Reads like documentation, not a pitch.
