@@ -558,7 +558,7 @@ def test_dashboard_recommendations_show_ranked_model_alternatives() -> None:
     assert "claude-sonnet-4.6" in html
     assert "GPT-5.5" in html
     assert "gpt-5.4" in html
-    assert "openai, saves" in html
+    assert "cheaper)" in html
     assert "claude-haiku-4.5" not in html
     assert "claude-3-haiku" not in html
 
