@@ -5334,8 +5334,8 @@ def _section_output(d: Dashboard, *, rhythm: str) -> str:
         return ""
 
     subhead = (
-        "What your AI spend turned into, read from the git history and tool calls "
-        "on your machine. The honest start of an answer to whether this is working."
+        "Read from the git history and tool calls already on your machine. "
+        "Cost on one side, what it produced on the other."
     )
     grid = '<div style="display:flex;flex-wrap:wrap;gap:12px">' + "".join(tiles) + "</div>"
     caveat_html = (
