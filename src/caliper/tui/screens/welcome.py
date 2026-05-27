@@ -36,7 +36,7 @@ def mark_welcome_seen() -> None:
 
 class WelcomeScreen(CaliperScreen):
     SCREEN_TITLE = "Caliper"
-    SCREEN_QUESTION = "Local AI cost ledger."
+    SCREEN_QUESTION = "What your AI coding cost and produced."
 
     BINDINGS = [
         ("space", "dismiss", "continue"),
