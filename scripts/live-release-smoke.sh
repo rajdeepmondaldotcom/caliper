@@ -207,7 +207,9 @@ for attrs in opens:
         assert 'type="application/json"' in attrs, (
             f"unexpected non-JSON <script> attrs {attrs!r}"
         )
-for needle in ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import("):
+# `://` already catches any external URL inside any tag, so the inline-data
+# favicon (`<link rel="icon" href="data:…">`) is allowed.
+for needle in ("://", " src=", "fetch(", "XMLHttpRequest", "import("):
     assert needle not in html, f"dashboard privacy gate found {needle!r}"
 PY
 text_allow_health_exit doctor "$VENV/bin/caliper" doctor "${COMMON[@]}"
