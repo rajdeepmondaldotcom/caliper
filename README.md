@@ -138,10 +138,11 @@ looking at the cause, not just the spike.
 
 ![Plan limits used: per-source Codex and Claude Code panels with Current session and Peak this window meters, each with a human-readable reset time](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/ratelimits.png)
 
-Plan limits used shows how close each source ran to its plan limits — one
-panel per provider with the current session and the peak this window, with
-human-readable reset times ("Resets in 3 hr 42 min", "Resets Thu 21 May ·
-09:30") instead of raw Unix epochs.
+Plan limits used shows how close each source ran to its plan limits. Caliper
+parses rate-limit headers from **Codex** today; **Claude Code, Cursor, and
+Aider** panels appear automatically once their parsers learn to surface
+rate-limit info. Each panel reads with human reset times — "Resets in 3 hr
+42 min", "Resets Thu 21 May · 09:30" — instead of raw Unix epochs.
 
 ![Attribution panels for agents, skills, tier sources, and the long-context boundary](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/attribution.png)
 

@@ -1731,8 +1731,9 @@ _SECTION_HINTS: dict[str, str] = {
         "Detail for auditing, not a daily read."
     ),
     "rate-limits": (
-        "How close usage ran to each plan's limits, by source. Latest is the most "
-        "recent reading; peak is the highest in this window. Resets are local time."
+        "How close usage ran to each plan's limits, by source. Codex is parsed "
+        "today; other sources will appear here as their parsers learn to surface "
+        "rate-limit headers. Resets are local time."
     ),
     "insights": "Patterns worth a glance when no stronger finding is present.",
     "evidence": (

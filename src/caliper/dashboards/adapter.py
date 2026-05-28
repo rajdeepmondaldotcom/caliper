@@ -1995,24 +1995,34 @@ def _build_rate_limit_pressures_by_source(result: LoadResult) -> list[RateLimitP
     Ordering: Codex first, then Claude Code, then any other vendors
     alphabetically — stable across renders and matches how the rest of the
     dashboard lists sources.
+
+    Accuracy rules enforced here:
+
+    * Records with an empty/missing ``vendor`` are dropped — we will not
+      render a panel with no source attribution.
+    * A record contributes only when at least one of primary/secondary
+      percent or a ``rate_limit_reached_type`` is set; pure noise is dropped.
+    * A source that ends up with zero contributing values yields no panel.
     """
     by_source: dict[str, list] = {}
+
+    def _has_signal(item: object) -> bool:
+        return (
+            getattr(item, "primary_used_percent", None) is not None
+            or getattr(item, "secondary_used_percent", None) is not None
+            or bool(getattr(item, "rate_limit_reached_type", ""))
+        )
+
     for sample in result.rate_limit_samples:
-        if (
-            sample.primary_used_percent is None
-            and sample.secondary_used_percent is None
-            and not sample.rate_limit_reached_type
-        ):
+        vendor = (sample.vendor or "").strip()
+        if not vendor or not _has_signal(sample):
             continue
-        by_source.setdefault(sample.vendor or "", []).append(sample)
+        by_source.setdefault(vendor, []).append(sample)
     for event in result.events:
-        if (
-            event.primary_used_percent is None
-            and event.secondary_used_percent is None
-            and not event.rate_limit_reached_type
-        ):
+        vendor = (getattr(event, "vendor", "") or "").strip()
+        if not vendor or not _has_signal(event):
             continue
-        by_source.setdefault(getattr(event, "vendor", "") or "", []).append(event)
+        by_source.setdefault(vendor, []).append(event)
     if not by_source:
         return []
     # Stable ordering: Codex, Claude Code, then alphabetical for the rest.
@@ -2021,7 +2031,9 @@ def _build_rate_limit_pressures_by_source(result: LoadResult) -> list[RateLimitP
     out: list[RateLimitPressure] = []
     for source in ordered_sources:
         records = by_source[source]
-        latest = max(records, key=lambda item: item.timestamp)
+        # Stable tiebreaker on equal timestamps: keep the last-seen record so
+        # later log lines win — matches how a tail-followed file reads.
+        latest = max(records, key=lambda item: (item.timestamp, id(item)))
         primary_values = [_percent_fraction(item.primary_used_percent) for item in records]
         secondary_values = [_percent_fraction(item.secondary_used_percent) for item in records]
         primary_values = [v for v in primary_values if v is not None]

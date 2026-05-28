@@ -13,6 +13,7 @@ from caliper.dashboards.adapter import (
     _build_model_rows,
     _build_project_rows,
     _build_rate_limit_pressure,
+    _build_rate_limit_pressures_by_source,
     build_handoff_dashboard,
     tool_category,
 )
@@ -379,6 +380,92 @@ def test_build_rate_limit_pressure_scores_peak_and_reached(tmp_path) -> None:
     assert pressure.peak_primary_pct == 0.97
     assert pressure.reached_count == 1
     assert pressure.latest_limit_name == "5-hour usage"
+
+
+def test_per_source_pressures_route_records_to_their_vendors(tmp_path) -> None:
+    """Each panel must reflect ONLY that vendor's samples — no cross-contamination."""
+    result = LoadResult(
+        events=[],
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[
+            # Codex: peak should be 80%.
+            RateLimitSample(
+                timestamp=dt.datetime(2026, 5, 12, 10, tzinfo=dt.UTC),
+                path=tmp_path / "codex-a.jsonl",
+                session_id="c1",
+                plan_type="pro",
+                limit_name="5-hour usage",
+                primary_used_percent=40.0,
+                vendor=VENDOR_OPENAI_CODEX,
+            ),
+            RateLimitSample(
+                timestamp=dt.datetime(2026, 5, 12, 11, tzinfo=dt.UTC),
+                path=tmp_path / "codex-b.jsonl",
+                session_id="c1",
+                plan_type="pro",
+                limit_name="5-hour usage",
+                primary_used_percent=80.0,
+                vendor=VENDOR_OPENAI_CODEX,
+            ),
+            # Claude: peak should be 99% and the panel must NOT see 80%.
+            RateLimitSample(
+                timestamp=dt.datetime(2026, 5, 12, 12, tzinfo=dt.UTC),
+                path=tmp_path / "claude.jsonl",
+                session_id="cc1",
+                plan_type="max",
+                limit_name="5-hour usage",
+                primary_used_percent=99.0,
+                rate_limit_reached_type="primary",
+                vendor=VENDOR_CLAUDE_CODE,
+            ),
+        ],
+        warnings=[],
+    )
+    pressures = _build_rate_limit_pressures_by_source(result)
+    # Ordering: Codex first, Claude Code second.
+    assert [p.source for p in pressures] == [VENDOR_OPENAI_CODEX, VENDOR_CLAUDE_CODE]
+    codex, claude = pressures
+    assert codex.source_label == "Codex"
+    assert codex.peak_primary_pct == 0.80  # NOT 0.99
+    assert codex.latest_plan_type == "pro"
+    assert codex.tone == "warn"  # 0.80 ≥ 0.75 threshold
+    assert codex.reached_count == 0
+    assert claude.source_label == "Claude Code"
+    assert claude.peak_primary_pct == 0.99
+    assert claude.latest_plan_type == "max"
+    assert claude.tone == "critical"  # reached_count drives critical
+    assert claude.reached_count == 1
+
+
+def test_per_source_skips_empty_vendor_and_signal_free_records(tmp_path) -> None:
+    """Records with no vendor or no rate-limit signal must not produce panels."""
+    result = LoadResult(
+        events=[],
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[
+            # No vendor → dropped, even though it has a signal.
+            RateLimitSample(
+                timestamp=dt.datetime(2026, 5, 12, 10, tzinfo=dt.UTC),
+                path=tmp_path / "orphan.jsonl",
+                session_id="o1",
+                primary_used_percent=50.0,
+                vendor="",
+            ),
+            # No signal → dropped, even though vendor is set.
+            RateLimitSample(
+                timestamp=dt.datetime(2026, 5, 12, 11, tzinfo=dt.UTC),
+                path=tmp_path / "silent.jsonl",
+                session_id="s1",
+                vendor=VENDOR_OPENAI_CODEX,
+            ),
+        ],
+        warnings=[],
+    )
+    assert _build_rate_limit_pressures_by_source(result) == []
 
 
 # ----- _build_evidence -----
