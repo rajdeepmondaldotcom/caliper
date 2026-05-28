@@ -2595,6 +2595,8 @@ def dashboard(
                 rolling_options=rolling_options,
                 budget_config=budget_config,
                 progress=prog,
+                wide_result=loaded_result,
+                wide_start=load_options.start,
             )
             t = payload.totals
             prog.stage_done(

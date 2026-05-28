@@ -22,9 +22,8 @@ from typing import Any
 
 from caliper.aggregation import (
     aggregate_daily,
-    aggregate_model_mode,
+    aggregate_dashboard_groups,
     aggregate_overview_windows,
-    aggregate_projects,
     aggregate_sessions,
     aggregate_total,
     event_cost,
@@ -98,7 +97,7 @@ from caliper.humanize import session_label_lookup
 from caliper.inefficiencies import build_inefficiency_findings
 from caliper.insights import _inefficiency_insight, build_insights_from
 from caliper.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions
-from caliper.parser import load_usage
+from caliper.parser import load_usage, scope_load_result
 from caliper.predict import (
     forecast_project_burn,
     forecast_rate_limits,
@@ -174,6 +173,8 @@ def build_handoff_dashboard(
     rolling_options: RuntimeOptions | None = None,
     budget_config: dict[str, Any] | None = None,
     progress: Any | None = None,
+    wide_result: LoadResult | None = None,
+    wide_start: dt.datetime | None = None,
 ) -> Dashboard:
     """Assemble the handoff `Dashboard` payload for `render_dashboard`."""
     from caliper import __version__
@@ -181,8 +182,16 @@ def build_handoff_dashboard(
     rate_card = load_rate_card(options)
     rolling_source = rolling_result or result
     rolling_runtime = rolling_options or options
-    total = aggregate_total(result, options, rate_card=rate_card)
-    daily_aggregates = aggregate_daily(result, options, rate_card=rate_card)
+    # One event pass for the five core groupings (total / daily / model /
+    # project / session) instead of five — the dominant cost of the serial
+    # build phase. Byte-identical to the individual aggregate_* wrappers.
+    (
+        total,
+        daily_aggregates,
+        model_mode_aggregates,
+        project_aggregates,
+        session_aggregates,
+    ) = aggregate_dashboard_groups(result, options, rate_card=rate_card)
     shape_report = compute_session_shape(result)
     _advance_build(progress, "totals")
 
@@ -190,7 +199,9 @@ def build_handoff_dashboard(
     daily_points = _build_daily(daily_aggregates, shape_report, options)
     daily_cache_rate = _daily_cache_sparkline(result, options, daily_points)
     deltas = (
-        _compute_period_deltas(options, total, shape_report)
+        _compute_period_deltas(
+            options, total, shape_report, wide_result=wide_result, wide_start=wide_start
+        )
         if with_deltas
         else (None, None, None, None)
     )
@@ -212,7 +223,7 @@ def build_handoff_dashboard(
         lambda event: (event.model or "unknown", event.model or "unknown"),
     )
     by_model = _build_model_rows(
-        aggregate_model_mode(result, options, rate_card=rate_card),
+        model_mode_aggregates,
         daily_by_model=model_daily_cost,
     )
     _advance_build(progress, "models")
@@ -222,7 +233,6 @@ def build_handoff_dashboard(
         rate_card,
         lambda event: (event.thread.cwd or UNKNOWN_PROJECT, event.thread.cwd or UNKNOWN_PROJECT),
     )
-    project_aggregates = aggregate_projects(result, options, rate_card=rate_card)
     project_forecast_bands = _build_project_forecast_bands(
         project_aggregates,
         options,
@@ -288,7 +298,6 @@ def build_handoff_dashboard(
         audit_findings=audit_findings,
     )
     _advance_build(progress, "recommendations")
-    session_aggregates = aggregate_sessions(result, options, rate_card=rate_card)
     top_sessions = _build_top_sessions(
         result,
         options,
@@ -351,7 +360,13 @@ def build_handoff_dashboard(
         session_aggregates=session_aggregates,
     )
     long_context_histogram = _build_long_context_histogram(result, rate_card)
-    cohort_deltas = _build_cohort_deltas(result, options, rate_card, total) if with_deltas else []
+    cohort_deltas = (
+        _build_cohort_deltas(
+            result, options, rate_card, total, wide_result=wide_result, wide_start=wide_start
+        )
+        if with_deltas
+        else []
+    )
     budgets = _build_budget_rows(result, options, rate_card, budget_config)
     output_summary = _build_output_summary(result, rate_card, shape_report)
     _advance_build(progress, "forecasts")
@@ -671,15 +686,41 @@ def _daily_session_counts(result: LoadResult, options: RuntimeOptions) -> list[i
 # ---------------------------------------------------------------------------
 
 
+def _load_prior_window(
+    prior_options: RuntimeOptions,
+    *,
+    wide_result: LoadResult | None,
+    wide_start: dt.datetime | None,
+) -> LoadResult:
+    """Materialize the prior comparison window.
+
+    The dashboard command parses one wide window up front (today back through
+    the 90-day rolling span). When the requested prior window falls inside
+    what was already loaded, slice it in memory instead of re-parsing every
+    log file a second time. Older windows (e.g. `--days 180`) fall back to a
+    fresh `load_usage`, which the parse cache still keeps cheap.
+    """
+    if wide_result is not None and wide_start is not None and prior_options.start >= wide_start:
+        return scope_load_result(
+            wide_result,
+            start=prior_options.start,
+            end=prior_options.end,
+        )
+    return load_usage(prior_options)
+
+
 def _compute_period_deltas(
     options: RuntimeOptions,
     total: Aggregate,
     shape_report: SessionShapeReport,
+    *,
+    wide_result: LoadResult | None = None,
+    wide_start: dt.datetime | None = None,
 ) -> tuple[float | None, float | None, float | None, float | None]:
     """Return (Δcost, Δcache, Δtokens, Δsessions) vs. the prior equal window.
 
-    Runs `load_usage()` for the prior window. The parse cache makes this
-    cheap on warm runs.
+    Reuses the already-loaded wide window when it covers the prior period;
+    otherwise loads it (cheap on warm runs thanks to the parse cache).
     """
     span = options.end - options.start
     prior_options = dataclasses.replace(
@@ -688,7 +729,9 @@ def _compute_period_deltas(
         end=options.start,
     )
     try:
-        prior_result = load_usage(prior_options)
+        prior_result = _load_prior_window(
+            prior_options, wide_result=wide_result, wide_start=wide_start
+        )
     except Exception:
         # Don't let prior-window load failures kill the dashboard.
         return (None, None, None, None)
@@ -1547,11 +1590,15 @@ def _build_cohort_deltas(
     options: RuntimeOptions,
     rate_card: RateCard,
     total: Aggregate,
+    *,
+    wide_result: LoadResult | None = None,
+    wide_start: dt.datetime | None = None,
 ) -> list[CohortDeltaRow]:
     """Side-by-side comparison vs. the prior equal-length window.
 
     Best-effort: returns ``[]`` when the prior window parses cleanly to zero
     activity (avoids meaningless 0→x deltas) or when the prior load fails.
+    Reuses the wide pre-load when it covers the prior window.
     """
     span = options.end - options.start
     prior_options = dataclasses.replace(
@@ -1560,7 +1607,7 @@ def _build_cohort_deltas(
         end=options.start,
     )
     try:
-        prior = load_usage(prior_options)
+        prior = _load_prior_window(prior_options, wide_result=wide_result, wide_start=wide_start)
     except Exception:
         return []
     prior_total = aggregate_total(prior, prior_options, rate_card=rate_card)

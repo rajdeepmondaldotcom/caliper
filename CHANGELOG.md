@@ -2,6 +2,25 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.77 - 2026-05-29
+
+Faster first dashboard load — same numbers, less work.
+
+- **No more redundant prior-window parses.** Building the dashboard's
+  period-over-period deltas (`_compute_period_deltas`) and the cohort
+  comparison (`_build_cohort_deltas`) each re-ran a full parse of the prior
+  comparison window. But `caliper dashboard` already loads one wide window
+  (today back through the 90-day rolling span) that contains that period for
+  any `--days <= 90`. Both now slice the already-loaded events in memory and
+  fall back to a real parse only for longer windows. The two delta passes drop
+  from seconds to milliseconds on warm runs and avoid re-reading every log
+  file on cold runs.
+- **One aggregation pass for the core groupings.** `build_handoff_dashboard`
+  iterated the event set five separate times (total / daily / model / project /
+  session). A new single-pass `aggregate_dashboard_groups` produces all five
+  in one traversal. Output is byte-for-byte identical — verified on the
+  deterministic `--demo` dashboard — so this is purely a speed change.
+
 ## 0.0.76 - 2026-05-28
 
 Plan limits: honest about what's actually parsed.

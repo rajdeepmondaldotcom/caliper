@@ -146,6 +146,75 @@ def aggregate_total(
     return items[0] if items else Aggregate(key="total", label=label)
 
 
+def aggregate_dashboard_groups(
+    result: LoadResult,
+    options: RuntimeOptions,
+    rate_card: RateCard | None = None,
+) -> tuple[
+    Aggregate,
+    list[Aggregate],
+    list[Aggregate],
+    list[Aggregate],
+    list[Aggregate],
+]:
+    """Compute the five core dashboard groupings in a single event pass.
+
+    Equivalent to calling ``aggregate_total`` / ``aggregate_daily`` /
+    ``aggregate_model_mode`` / ``aggregate_projects`` / ``aggregate_sessions``
+    individually, but iterates (and prices) each event once instead of five
+    times. The per-grouping ordering matches each wrapper exactly, so the
+    rendered dashboard is byte-identical; this is purely a speed win on the
+    serial build phase. Returns
+    ``(total, daily, by_model_mode, by_project, by_session)``.
+    """
+    tz = load_timezone(options.timezone)
+
+    # First-seen session labels, identical to aggregate_sessions.
+    labels: dict[str, str] = {}
+    for event in result.events:
+        if event.session_id not in labels:
+            labels[event.session_id] = session_display_label(
+                event,
+                options.timezone,
+                include_title=options.show_prompts,
+            )
+
+    def total_key(_event: UsageEvent) -> tuple[str, str]:
+        return "total", "Total"
+
+    def daily_key(event: UsageEvent) -> tuple[str, str]:
+        day = day_key(event.timestamp, tz)
+        return day, day
+
+    def model_key(event: UsageEvent) -> tuple[str, str]:
+        return (
+            f"{event.model}\0{event.service_tier}",
+            f"{event.model or 'unknown model'} / {event.service_tier or 'unknown tier'}",
+        )
+
+    def project_key(event: UsageEvent) -> tuple[str, str]:
+        project = event.thread.cwd or UNKNOWN_PROJECT
+        return project, project
+
+    def session_key(event: UsageEvent) -> tuple[str, str]:
+        return event.session_id, labels[event.session_id]
+
+    total_rows, daily_rows, model_rows, project_rows, session_rows = aggregate_many(
+        result.events,
+        [total_key, daily_key, model_key, project_key, session_key],
+        options,
+        rate_card=rate_card,
+    )
+    total = total_rows[0] if total_rows else Aggregate(key="total", label="Total")
+    return (
+        total,
+        daily_rows,
+        sorted(model_rows, key=budget_impact_sort_key),
+        sorted(project_rows, key=budget_impact_sort_key),
+        sorted(session_rows, key=budget_impact_sort_key),
+    )
+
+
 def aggregate_overview_windows(
     result: LoadResult,
     options: RuntimeOptions,
