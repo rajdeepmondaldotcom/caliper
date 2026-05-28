@@ -2,6 +2,15 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.75 - 2026-05-28
+
+Same content as the failed-to-publish 0.0.74, with the release smoke
+gate's `<link` check dropped so the 0.0.74 favicon (inline-data SVG)
+no longer trips the publish step. `://` already catches any external
+URL inside any tag, so inline-data-URI favicons are explicitly allowed.
+
+See 0.0.74 below for the full feature list.
+
 ## 0.0.74 - 2026-05-28
 
 Plan limits — per source, human-readable, no more Unix epochs.
