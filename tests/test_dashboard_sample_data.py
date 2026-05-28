@@ -15,7 +15,7 @@ from caliper.dashboards import render_dashboard
 from caliper.dashboards.data_models import DASHBOARD_SCHEMA_VERSION, Banner
 from caliper.dashboards.html import _hero_verdict_data
 
-FORBIDDEN = ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import(")
+FORBIDDEN = ("://", " src=", "fetch(", "XMLHttpRequest", "import(")
 
 
 def _assert_private_static_html(html: str) -> None:

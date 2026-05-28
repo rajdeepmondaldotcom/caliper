@@ -312,6 +312,7 @@ def build_handoff_dashboard(
     )
     _advance_build(progress, "attribution")
     rate_limit_pressure = _build_rate_limit_pressure(result)
+    rate_limit_pressures = _build_rate_limit_pressures_by_source(result)
     quality_score = _build_quality_score(result, total, evidence)
     comparisons = _build_comparisons(
         totals=totals,
@@ -381,6 +382,7 @@ def build_handoff_dashboard(
         skills=skill_rows,
         inefficiencies=inefficiency_rows,
         rate_limit_pressure=rate_limit_pressure,
+        rate_limit_pressures=rate_limit_pressures,
         quality_score=quality_score,
         executive_brief=executive_brief,
         banner=banner,
@@ -1974,6 +1976,83 @@ def _build_rate_limit_pressure(result: LoadResult) -> RateLimitPressure:
         tone=tone,  # type: ignore[arg-type]
         forecasts=forecasts,
     )
+
+
+# Map vendor ids to short display labels for per-source rate-limit panels.
+_RATE_LIMIT_SOURCE_LABELS: dict[str, str] = {
+    "openai-codex": "Codex",
+    "claude-code": "Claude Code",
+    "cursor": "Cursor",
+    "aider": "Aider",
+}
+
+
+def _build_rate_limit_pressures_by_source(result: LoadResult) -> list[RateLimitPressure]:
+    """One :class:`RateLimitPressure` per vendor that emitted samples.
+
+    Returns an empty list when no records carry rate-limit data, so the
+    renderer can fall back to the legacy single-pressure object cleanly.
+    Ordering: Codex first, then Claude Code, then any other vendors
+    alphabetically — stable across renders and matches how the rest of the
+    dashboard lists sources.
+    """
+    by_source: dict[str, list] = {}
+    for sample in result.rate_limit_samples:
+        if (
+            sample.primary_used_percent is None
+            and sample.secondary_used_percent is None
+            and not sample.rate_limit_reached_type
+        ):
+            continue
+        by_source.setdefault(sample.vendor or "", []).append(sample)
+    for event in result.events:
+        if (
+            event.primary_used_percent is None
+            and event.secondary_used_percent is None
+            and not event.rate_limit_reached_type
+        ):
+            continue
+        by_source.setdefault(getattr(event, "vendor", "") or "", []).append(event)
+    if not by_source:
+        return []
+    # Stable ordering: Codex, Claude Code, then alphabetical for the rest.
+    priority = {"openai-codex": 0, "claude-code": 1}
+    ordered_sources = sorted(by_source.keys(), key=lambda s: (priority.get(s, 2), s))
+    out: list[RateLimitPressure] = []
+    for source in ordered_sources:
+        records = by_source[source]
+        latest = max(records, key=lambda item: item.timestamp)
+        primary_values = [_percent_fraction(item.primary_used_percent) for item in records]
+        secondary_values = [_percent_fraction(item.secondary_used_percent) for item in records]
+        primary_values = [v for v in primary_values if v is not None]
+        secondary_values = [v for v in secondary_values if v is not None]
+        peak = max(primary_values + secondary_values, default=0.0)
+        reached = sum(1 for r in records if getattr(r, "rate_limit_reached_type", ""))
+        if reached or peak >= 0.95:
+            tone: str = "critical"
+        elif peak >= 0.75:
+            tone = "warn"
+        else:
+            tone = "neutral"
+        latest_reset = latest.primary_resets_at or latest.secondary_resets_at or ""
+        out.append(
+            RateLimitPressure(
+                sample_count=len(records),
+                peak_primary_pct=max(primary_values) if primary_values else None,
+                peak_secondary_pct=max(secondary_values) if secondary_values else None,
+                latest_primary_pct=_percent_fraction(latest.primary_used_percent),
+                latest_secondary_pct=_percent_fraction(latest.secondary_used_percent),
+                latest_limit_name=latest.limit_name or latest.limit_id or "",
+                latest_plan_type=latest.plan_type or "",
+                latest_resets_at=_stringify_reset(latest_reset),
+                reached_count=reached,
+                tone=tone,  # type: ignore[arg-type]
+                forecasts=(),
+                source=source,
+                source_label=_RATE_LIMIT_SOURCE_LABELS.get(source, source or ""),
+            )
+        )
+    return out
 
 
 def _build_rate_limit_forecast_bands(

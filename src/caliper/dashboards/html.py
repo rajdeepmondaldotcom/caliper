@@ -31,12 +31,15 @@ This module exports:
 
 from __future__ import annotations
 
+import base64
+import datetime as dt
 import html
 import math
 import re
 from collections.abc import Iterable, Sequence
 from contextvars import ContextVar
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .data_models import (
     AgentRow,
@@ -1683,7 +1686,7 @@ _SECTION_TITLES: dict[str, str] = {
     "budgets": "Budget burn",
     "forecast": "Forecast",
     "advisor": "Advisor",
-    "rate-limits": "Rate-limit pressure",
+    "rate-limits": "Plan limits used",
     "heatmap": "Activity heatmap",
     "sessions": "Session drilldown",
     "evidence": "Trust & evidence",
@@ -1728,8 +1731,8 @@ _SECTION_HINTS: dict[str, str] = {
         "Detail for auditing, not a daily read."
     ),
     "rate-limits": (
-        "How close usage ran to the provider's limits. A throughput signal, shown only "
-        "when pressure is high."
+        "How close usage ran to each plan's limits, by source. Latest is the most "
+        "recent reading; peak is the highest in this window. Resets are local time."
     ),
     "insights": "Patterns worth a glance when no stronger finding is present.",
     "evidence": (
@@ -1757,10 +1760,12 @@ def _has_rich_operator_findings(d: Dashboard) -> bool:
 
 
 def _rate_limit_is_actionable(d: Dashboard) -> bool:
-    pressure = d.rate_limit_pressure
-    if pressure is None:
-        return False
-    return pressure.tone in {"critical", "warn"} or pressure.reached_count > 0
+    # Surface the section when ANY source — per-source list or the legacy
+    # aggregate — shows warn/critical pressure or a recorded breach.
+    candidates: list[RateLimitPressure] = list(d.rate_limit_pressures or [])
+    if d.rate_limit_pressure is not None:
+        candidates.append(d.rate_limit_pressure)
+    return any(p.tone in {"critical", "warn"} or p.reached_count > 0 for p in candidates)
 
 
 def _should_render(section_id: str, d: Dashboard) -> bool:
@@ -1984,6 +1989,82 @@ _FRIENDLY_TS_RE = re.compile(
     r"(?:\s+\d{4})?\s*$",
     re.IGNORECASE,
 )
+
+
+# Months for human-readable reset times. Three-letter abbreviations match
+# the IBM Plex Mono numerals nicely and keep the line tight.
+_RESET_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_RESET_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _parse_reset_dt(raw: str) -> dt.datetime | None:
+    """Parse a reset timestamp from either Unix epoch seconds or ISO 8601.
+
+    Returns ``None`` for unparseable or empty input. All results are aware
+    datetimes in UTC; the caller converts to the dashboard's window timezone.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+    # Unix epoch (seconds) — what raw provider headers often emit.
+    try:
+        epoch = int(s)
+        if epoch > 10**8:  # before 1973 the epoch is too small to be a reset
+            return dt.datetime.fromtimestamp(epoch, tz=dt.UTC)
+    except (TypeError, ValueError):
+        pass
+    # ISO 8601 — what the adapter normalizes datetime objects to.
+    try:
+        parsed = dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.UTC)
+        return parsed.astimezone(dt.UTC)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_reset_at(raw: str, *, now: dt.datetime, tz_name: str = "") -> str:
+    """Turn a reset timestamp into a human-readable "Resets …" line.
+
+    Examples (relative to ``now`` and the window's ``tz_name``):
+      * within 6 hours: ``Resets in 3 hr 43 min`` / ``Resets in 12 min``
+      * later today:    ``Resets today 18:00``
+      * within a week:  ``Resets Sun 17 May · 18:00``
+      * further out:    ``Resets 17 May 2026 · 18:00``
+      * already past:   ``Window already reset``
+    Falls back to the raw string when it can't be parsed.
+    """
+    parsed = _parse_reset_dt(raw)
+    if parsed is None:
+        return raw or ""
+    # Convert to the dashboard's window timezone if it's a valid IANA name,
+    # else stay in UTC. Dashboards are static so a local convert at render
+    # time is honest — the reader's clock-time matches the page's text.
+    try:
+        tz = ZoneInfo(tz_name) if tz_name and tz_name != "UTC" else dt.UTC
+    except ZoneInfoNotFoundError:
+        tz = dt.UTC
+    local = parsed.astimezone(tz)
+    now_local = now.astimezone(tz)
+    delta = local - now_local
+    secs = int(delta.total_seconds())
+    if secs < -60:
+        return "Window already reset"
+    if secs < 6 * 3600:
+        # Tight countdown for the inside-six-hours horizon.
+        m = max(0, secs // 60)
+        if m < 60:
+            return f"Resets in {m} min"
+        return f"Resets in {m // 60} hr {m % 60} min"
+    same_day = local.date() == now_local.date()
+    if same_day:
+        return f"Resets today {local.strftime('%H:%M')}"
+    days_out = (local.date() - now_local.date()).days
+    weekday = _RESET_WEEKDAYS[local.weekday()]
+    month = _RESET_MONTHS[local.month - 1]
+    if 0 < days_out < 7:
+        return f"Resets {weekday} {local.day} {month} · {local.strftime('%H:%M')}"
+    return f"Resets {local.day} {month} {local.year} · {local.strftime('%H:%M')}"
 
 
 def _compress_session_label(label: str) -> str:
@@ -2634,6 +2715,26 @@ def _caliper_mark(size: int = 22) -> str:
         '<circle cx="12" cy="12" r="1.5" fill="var(--accent)" />'
         "</svg></span>"
     )
+
+
+def _favicon_link() -> str:
+    """Return a `<link rel="icon">` with the Caliper mark as an SVG data URI.
+
+    Browser tabs were untitled-with-globe before this — the embedded SVG is
+    tiny (~200 bytes) and resolves to the same caliper glyph the masthead
+    uses. CSS variables don't resolve in favicons, so the stroke colour is a
+    literal hex that matches `--accent` in the default dark theme.
+    """
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+        '<path d="M3 7v10M21 7v10M3 7l4 -3M21 7l-4 -3M3 17l4 3M21 17l-4 3M7 12h10" '
+        'fill="none" stroke="#7cc4ff" stroke-width="1.75" '
+        'stroke-linecap="round" stroke-linejoin="round" />'
+        '<circle cx="12" cy="12" r="1.75" fill="#7cc4ff" />'
+        "</svg>"
+    )
+    payload = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f'<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,{payload}">'
 
 
 def _section_head(section_id: str, *, rhythm: str, meta: str | None = None) -> str:
@@ -3964,51 +4065,79 @@ def _section_budgets(d: Dashboard, *, rhythm: str) -> str:
 
 
 def _section_rate_limits(d: Dashboard, *, rhythm: str) -> str:
-    r: RateLimitPressure | None = d.rate_limit_pressure
-    if r is None:
+    # Prefer the per-source breakdown when the adapter produced one; fall
+    # back to the legacy aggregate so older Dashboard payloads still render.
+    pressures: list[RateLimitPressure] = list(d.rate_limit_pressures or [])
+    if not pressures and d.rate_limit_pressure is not None:
+        pressures = [d.rate_limit_pressure]
+    if not pressures:
         return ""
 
-    def _meter_block(label: str, pct: float | None, note: str) -> str:
+    # Reference "now" for the human reset format — use the dashboard's own
+    # generated_at so the rendered countdown matches the snapshot moment.
+    now_ref = _parse_reset_dt(d.generated_at) or dt.datetime.now(tz=dt.UTC)
+    tz_name = (d.window.timezone or "UTC") if d.window else "UTC"
+
+    def _meter_row(label: str, pct: float | None, sub: str) -> str:
         if pct is None:
             return (
-                "<div>"
-                '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">'
-                f'<span style="color:var(--ink-2)">{_esc(label)}</span>'
-                '<span style="color:var(--mute)">—</span></div>'
+                '<div class="cal-limit-row" style="display:grid;'
+                "grid-template-columns:1fr auto;column-gap:18px;row-gap:6px;"
+                'align-items:baseline;margin-bottom:14px">'
+                f'<div style="color:var(--ink);font-size:13px;font-weight:500">{_esc(label)}</div>'
+                '<div style="color:var(--mute);font-size:12px;font-family:var(--mono)">—</div>'
                 f"{_meter(0, 1)}"
-                f'<div style="font-size:11px;color:var(--mute);margin-top:6px">{_esc(note)}</div></div>'
+                f'<div style="grid-column:1 / -1;color:var(--mute);font-size:11px;'
+                f'margin-top:2px">{_esc(sub)}</div>'
+                "</div>"
             )
-        if pct > 0.8:
+        if pct >= 0.85:
             color = "var(--bad)"
-        elif pct > 0.6:
+        elif pct >= 0.6:
             color = "var(--warn)"
         else:
             color = "var(--ok)"
         return (
-            "<div>"
-            '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">'
-            f'<span style="color:var(--ink-2)">{_esc(label)}</span>'
-            f'<span style="font-family:var(--mono);color:{color}">{pct * 100:.0f}%</span></div>'
-            f"{_meter(pct, 1, color=color, height=8)}"
-            f'<div style="font-size:11px;color:var(--mute);margin-top:6px">{_esc(note)}</div>'
+            '<div class="cal-limit-row" style="display:grid;'
+            "grid-template-columns:1fr auto;column-gap:18px;row-gap:6px;"
+            'align-items:baseline;margin-bottom:14px">'
+            f'<div style="color:var(--ink);font-size:13px;font-weight:500">{_esc(label)}</div>'
+            f'<div style="font-family:var(--mono);font-size:12px;color:{color};'
+            f'font-variant-numeric:tabular-nums">{pct * 100:.0f}% used</div>'
+            f'<div style="grid-column:1 / -1">{_meter(pct, 1, color=color, height=8)}</div>'
+            f'<div style="grid-column:1 / -1;color:var(--mute);font-size:11px;'
+            f'margin-top:2px">{_esc(sub)}</div>'
             "</div>"
         )
 
-    peak_note = f"{r.sample_count} samples"
-    latest_note = f"{r.latest_limit_name} · {r.latest_plan_type}"
-    secondary_pct = (r.peak_secondary_pct or 0) * 100
-    body = (
-        '<div style="background:var(--panel);border:1px solid var(--border);'
-        'border-radius:var(--r-md);padding:16px">'
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">'
-        + _meter_block("Peak primary", r.peak_primary_pct, peak_note)
-        + _meter_block("Latest primary", r.latest_primary_pct, latest_note)
-        + "</div>"
-        '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);'
-        'font-size:11px;color:var(--mute);font-family:var(--mono)">'
-        f"Resets at {_esc(r.latest_resets_at)} · peak secondary {secondary_pct:.0f}%"
-        "</div></div>"
-    )
+    panels: list[str] = []
+    for r in pressures:
+        title = r.source_label or r.source or "Plan limits"
+        plan = (r.latest_plan_type or "").strip()
+        title_suffix = (
+            f' <span style="color:var(--mute);font-weight:400">· {_esc(plan)}</span>'
+            if plan
+            else ""
+        )
+        # The "current session" line uses the latest reading + a human reset
+        # countdown. The "peak this window" line uses the peak reading + the
+        # sample count so the reader sees how representative the value is.
+        reset_human = _fmt_reset_at(r.latest_resets_at, now=now_ref, tz_name=tz_name)
+        current_sub = reset_human or (r.latest_limit_name or "Latest sample")
+        sample_label = "sample" if r.sample_count == 1 else "samples"
+        peak_sub = f"Highest reading from {r.sample_count:,} {sample_label} this window"
+        panels.append(
+            '<div class="cal-limit-panel" style="background:var(--panel);'
+            "border:1px solid var(--border);border-radius:var(--r-md);"
+            'padding:18px 18px 6px;flex:1 1 320px;min-width:280px">'
+            '<div class="cal-limit-source" style="font-size:14px;color:var(--ink);'
+            f'font-weight:600;margin-bottom:14px">{_esc(title)}{title_suffix}</div>'
+            + _meter_row("Current session", r.latest_primary_pct, current_sub)
+            + _meter_row("Peak this window", r.peak_primary_pct, peak_sub)
+            + "</div>"
+        )
+
+    body = '<div style="display:flex;flex-wrap:wrap;gap:14px">' + "".join(panels) + "</div>"
     return _section_wrap("rate-limits", rhythm=rhythm, body=body)
 
 
@@ -5454,6 +5583,7 @@ def _wrap_document(
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f"<title>{_esc(title)}</title>"
+        f"{_favicon_link()}"
         f"<style>{INLINE_STYLES}</style>"
         "</head>"
         f'<body class="{class_attr}" data-theme="{theme}" data-density="{density}" '

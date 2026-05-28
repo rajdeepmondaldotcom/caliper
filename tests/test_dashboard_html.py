@@ -21,6 +21,8 @@ from caliper.dashboards.html import (
     _agent_display_label,
     _anomaly_command,
     _compress_session_label,
+    _favicon_link,
+    _fmt_reset_at,
     fmt_money,
     fmt_tokens,
     render_models,
@@ -33,7 +35,10 @@ from caliper.parser import load_usage
 SECRET = "REDACTED_SECRET_THAT_MUST_NEVER_LEAK"
 
 # Privacy gate: no external resources, no network-capable script APIs.
-FORBIDDEN = ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import(")
+# `://` already covers any external URL inside any tag (link/script/img/etc),
+# so inline-data-URI elements like the favicon (`<link rel="icon" href="data:…">`)
+# are safely allowed.
+FORBIDDEN = ("://", " src=", "fetch(", "XMLHttpRequest", "import(")
 
 
 def _assert_private_html(html: str) -> None:
@@ -505,6 +510,36 @@ def test_compress_session_label_friendly_timestamps_to_a_tight_summary() -> None
     assert _compress_session_label("9:06 pm, Tuesday 19 May 2026") == "Tue 19 May · 21:06"
     assert _compress_session_label("12:00 am, Mon 1 Jan 2026") == "Mon 1 Jan · 00:00"
     assert _compress_session_label("12:30 pm, Fri 4 Jul 2025") == "Fri 4 Jul · 12:30"
+
+
+def test_fmt_reset_at_humanizes_unix_epoch_and_iso_strings() -> None:
+    # 06:00 UTC reference gives room for both same-day (>6h) and minutes-out cases.
+    now = dt.datetime(2026, 5, 17, 6, 0, tzinfo=dt.UTC)
+    # Unix epoch seconds — what raw provider headers often emit. Inside the
+    # six-hour horizon the helper switches to a tight countdown.
+    epoch_in_3h42m = str(int((now + dt.timedelta(hours=3, minutes=42)).timestamp()))
+    assert _fmt_reset_at(epoch_in_3h42m, now=now) == "Resets in 3 hr 42 min"
+    # Same UTC day, past the six-hour horizon → "today HH:MM".
+    later_today = (now + dt.timedelta(hours=8, minutes=15)).isoformat().replace("+00:00", "Z")
+    assert _fmt_reset_at(later_today, now=now) == "Resets today 14:15"
+    # Within the same week → weekday + date.
+    next_thu = (now + dt.timedelta(days=4, hours=3, minutes=30)).isoformat().replace("+00:00", "Z")
+    assert _fmt_reset_at(next_thu, now=now) == "Resets Thu 21 May · 09:30"
+    # Already-past resets read clearly.
+    past = (now - dt.timedelta(hours=2)).isoformat().replace("+00:00", "Z")
+    assert _fmt_reset_at(past, now=now) == "Window already reset"
+    # Empty input passes through silently.
+    assert _fmt_reset_at("", now=now) == ""
+    # Unparseable input passes through verbatim (don't lose information).
+    assert _fmt_reset_at("not a date", now=now) == "not a date"
+
+
+def test_favicon_link_is_inline_data_uri_only() -> None:
+    link = _favicon_link()
+    assert 'rel="icon"' in link
+    assert "data:image/svg+xml" in link
+    # No external URLs — the favicon is fully embedded.
+    assert "://" not in link
 
 
 def test_compress_session_label_passes_through_non_timestamps() -> None:

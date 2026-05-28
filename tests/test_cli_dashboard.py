@@ -479,7 +479,9 @@ def test_dashboard_demo_renders_without_local_logs(tmp_path) -> None:
     # for the toggle controller. The CI privacy gate forbids any network
     # APIs inside it.
     assert html.count("<script>") <= 1
-    for needle in ("://", "<link", " src=", "fetch(", "XMLHttpRequest", "import("):
+    # `://` covers any external URL — the only `<link>` present is the
+    # inline-data-URI favicon, which carries no network risk.
+    for needle in ("://", " src=", "fetch(", "XMLHttpRequest", "import("):
         assert needle not in html
 
 
