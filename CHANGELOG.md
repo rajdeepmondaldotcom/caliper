@@ -2,6 +2,18 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.70 - 2026-05-28
+
+Two more sections point you somewhere, not just describe.
+
+- **Cost over time names the peak day.** The summary line now ends in
+  `peak $X on YYYY-MM-DD`, so the section's "days worth investigating" hint
+  resolves to one concrete date instead of leaving you to eyeball the chart.
+- **Trust & evidence shows the grade tally up front.** The section heading
+  carries an at-a-glance count — `6 dimensions · 3 exact · 1 estimated · 1
+  partial · 1 unsupported` — so you know how much of the page rests on exact
+  data before reading row by row.
+
 ## 0.0.69 - 2026-05-28
 
 Anomalies tell you where to look next.

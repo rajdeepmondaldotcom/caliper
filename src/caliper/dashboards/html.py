@@ -3409,6 +3409,14 @@ def _section_cost(d: Dashboard, *, rhythm: str) -> str:
     total = sum(float(p.cost_usd) for p in daily)
     avg = total / len(daily) if daily else 0.0
     active_days = sum(1 for p in daily if float(p.cost_usd) > 0 or int(p.events) > 0)
+    # Name the single most expensive day so the hint's "days worth
+    # investigating" points at one concrete date, not just the chart.
+    peak = max(daily, key=lambda p: float(p.cost_usd))
+    peak_note = (
+        f" · peak {fmt_money(float(peak.cost_usd))} on {peak.day}"
+        if float(peak.cost_usd) > avg > 0
+        else ""
+    )
     legend = _category_legend(
         [
             ("var(--explore)", "exploration"),
@@ -3419,7 +3427,7 @@ def _section_cost(d: Dashboard, *, rhythm: str) -> str:
     )
     summary = (
         f"{active_days} active days across {len(daily)} days · "
-        f"{fmt_money(total)} total · avg {fmt_money(avg)}/day"
+        f"{fmt_money(total)} total · avg {fmt_money(avg)}/day{peak_note}"
     )
     body = (
         '<div class="cal-cost-panel" style="background:var(--panel);border:1px solid var(--border);'
@@ -4014,7 +4022,16 @@ def _section_evidence(d: Dashboard, *, dense: bool, rhythm: str) -> str:
         '<div style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);padding:8px 16px">' + "".join(rows) + "</div>"
     )
-    return _section_wrap("evidence", rhythm=rhythm, body=body)
+    # At-a-glance trust posture: tally the grades so the reader knows how much
+    # of the page rests on exact data before scanning row by row.
+    tally: dict[str, int] = {}
+    for e in d.evidence:
+        tally[e.status] = tally.get(e.status, 0) + 1
+    parts = [
+        f"{tally[s]} {s}" for s in ("exact", "estimated", "partial", "unsupported") if tally.get(s)
+    ]
+    meta = f"{len(d.evidence)} dimensions · " + " · ".join(parts) if parts else None
+    return _section_wrap("evidence", rhythm=rhythm, body=body, meta=meta)
 
 
 # ============================================================================
