@@ -1658,6 +1658,49 @@ _SECTION_TITLES: dict[str, str] = {
     "output": "What this produced",
 }
 
+# One plain "how to read this" line per section, rendered under the heading.
+# Honest and concrete: what the section is for and how to interpret it. Synthesized
+# from a multi-persona review (engineers, founders, leads). No hype, no em-dashes.
+_SECTION_HINTS: dict[str, str] = {
+    "overview": (
+        "Your spend for the window. Open any card to see its exact formula and rate card."
+    ),
+    "output": ("Spend mapped to what it produced. Unlinked spend is unmapped, not wasted."),
+    "cost": ("Daily spend. Bars above the average line are the days worth investigating."),
+    "models": (
+        "Where the cost went, by model and tier. A big share on a premium tier is your first lever."
+    ),
+    "projects": (
+        "Cost by project, with the trend against the prior period. Rising on a quiet "
+        "project is worth a look."
+    ),
+    "sessions": (
+        "Your most expensive sessions, with a short reason for each. Start here to trace a spike."
+    ),
+    "anomalies": (
+        "Days or sessions that ran above the expected band, and by how far. Expected is a "
+        "robust baseline, not a target."
+    ),
+    "budgets": "Share of the cap you set in .caliper.toml, by period.",
+    "inefficiencies": (
+        "Spend that could be lower at the same token count, plus repeated work. Output "
+        "quality is not assessed, so treat each as a question, not an instruction."
+    ),
+    "attribution": (
+        "Where spend traces to: sources, skills, tier provenance, and context length. "
+        "Detail for auditing, not a daily read."
+    ),
+    "rate-limits": (
+        "How close usage ran to the provider's limits. A throughput signal, shown only "
+        "when pressure is high."
+    ),
+    "insights": "Patterns worth a glance when no stronger finding is present.",
+    "evidence": (
+        "How much to trust each number above, graded by the data behind it. Treat "
+        "estimated and unsupported with care."
+    ),
+}
+
 # Map session-shape categories to CSS color tokens.
 _SHAPE_COLORS: dict[str, str] = {
     "exploration": "var(--explore)",
@@ -2848,10 +2891,19 @@ def _caliper_footer(d: Dashboard) -> str:
 def _section_wrap(section_id: str, *, rhythm: str, body: str, meta: str | None = None) -> str:
     num = _display_num(section_id)
     title = _SECTION_TITLES[section_id]
+    hint = _SECTION_HINTS.get(section_id, "")
+    hint_html = (
+        '<p class="cal-section-hint" style="margin:-2px 0 14px;font-size:12px;'
+        'color:var(--mute);line-height:1.5;max-width:74ch">'
+        f"{_esc(hint)}</p>"
+        if hint
+        else ""
+    )
     return (
         f'<section id="{section_id}" aria-label="{num} {_esc(title)}" '
         f'data-screen-label="{num} {_esc(title)}">'
         f"{_section_head(section_id, rhythm=rhythm, meta=meta)}"
+        f"{hint_html}"
         f"{body}"
         "</section>"
     )
@@ -4344,10 +4396,6 @@ def _section_output(d: Dashboard, *, rhythm: str) -> str:
     if not tiles:
         return ""
 
-    subhead = (
-        "Read from the git history and tool calls already on your machine. "
-        "Cost on one side, what it produced on the other."
-    )
     grid = '<div style="display:flex;flex-wrap:wrap;gap:12px">' + "".join(tiles) + "</div>"
     caveat_html = (
         '<p style="font-size:12px;color:var(--mute);margin:14px 0 0;'
@@ -4355,11 +4403,7 @@ def _section_output(d: Dashboard, *, rhythm: str) -> str:
         if o.caveat
         else ""
     )
-    body = (
-        '<p style="font-size:13px;color:var(--ink-2);margin:0 0 14px;'
-        f'line-height:1.5">{_esc(subhead)}</p>'
-        f"{grid}{caveat_html}"
-    )
+    body = f"{grid}{caveat_html}"
     return _section_wrap("output", rhythm=rhythm, body=body)
 
 
