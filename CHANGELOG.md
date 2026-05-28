@@ -2,6 +2,19 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.68 - 2026-05-28
+
+Every section now says how to read it.
+
+- **A one-line "how to read this" sits under each section heading.** Plain
+  English: what the section is for and how to interpret it. The lines were
+  written against a review from six reader perspectives (engineers, founders,
+  leads) so each section justifies its own place.
+- **Avoidable spend leads with its honest caveat.** The section now states up
+  front that output quality is not assessed, so a cheaper-at-equal-tokens
+  finding is a question to check, not an instruction to follow.
+- Every kept section earned its place in that review; nothing else was cut.
+
 ## 0.0.67 - 2026-05-28
 
 Remove the dead code behind the pruned dashboard.
