@@ -20,6 +20,7 @@ from caliper.dashboards.html import (
     SECTION_NUMBERS,
     _agent_display_label,
     _anomaly_command,
+    _compress_session_label,
     fmt_money,
     fmt_tokens,
     render_models,
@@ -496,6 +497,21 @@ def test_anomaly_command_maps_kind_to_the_drilldown_command() -> None:
     assert _anomaly_command("Commit spike") == "caliper commit"
     # Anything else falls back to the single-day overview.
     assert _anomaly_command("Daily total spike") == "caliper overview --days 1"
+
+
+def test_compress_session_label_friendly_timestamps_to_a_tight_summary() -> None:
+    # Verbose human timestamps collapse to weekday + day + month + 24h time.
+    assert _compress_session_label("3:02 am, Thursday 21 May 2026") == "Thu 21 May · 03:02"
+    assert _compress_session_label("9:06 pm, Tuesday 19 May 2026") == "Tue 19 May · 21:06"
+    assert _compress_session_label("12:00 am, Mon 1 Jan 2026") == "Mon 1 Jan · 00:00"
+    assert _compress_session_label("12:30 pm, Fri 4 Jul 2025") == "Fri 4 Jul · 12:30"
+
+
+def test_compress_session_label_passes_through_non_timestamps() -> None:
+    # Indexed, SHA-like, and arbitrary labels pass through unchanged so the
+    # privacy-map lookup keys stay stable.
+    for label in ("Session 4", "abc123def456", "morning refactor", "", "  spaced  "):
+        assert _compress_session_label(label) == label
 
 
 def test_anomaly_rows_carry_a_copyable_drilldown_command() -> None:

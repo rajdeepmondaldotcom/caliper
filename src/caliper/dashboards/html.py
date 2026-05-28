@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from collections.abc import Iterable, Sequence
 from contextvars import ContextVar
 from typing import Any
@@ -1960,10 +1961,44 @@ def _private_project(name: str, pm: _PrivacyMap) -> str:
 
 
 def _private_session(label: str, pm: _PrivacyMap) -> str:
+    # The visible "real" form is the compressed timestamp where applicable
+    # (so the cell stays scannable); the privacy-map key is still the raw
+    # upstream label so the redacted twin lookup is unchanged.
+    display = _compress_session_label(label)
     if pm.mode == "off":
-        return _esc(label)
+        return _esc(display)
     redacted = pm.sessions.get(label, "Session ?")
-    return _private(label, redacted, pm)
+    return _private(display, redacted, pm)
+
+
+# Some upstream tools (notably Codex when no upstream session id is recorded)
+# label sessions with a verbose human-readable timestamp like
+# "3:02 am, Thursday 21 May 2026". That format crowds the narrow session
+# column. Compress it to "Thu 21 May · 03:02" — same information, half the
+# width, scannable at a glance. Anything that doesn't match the pattern
+# passes through unchanged so SHA-style and short indexed labels are safe.
+_FRIENDLY_TS_RE = re.compile(
+    r"^\s*(\d{1,2}):(\d{2})\s+(am|pm),\s+"
+    r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+"
+    r"(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
+    r"(?:\s+\d{4})?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _compress_session_label(label: str) -> str:
+    """Compress verbose timestamp-style session labels into a tight summary.
+
+    Pass-through for any label that isn't a friendly timestamp.
+    """
+    m = _FRIENDLY_TS_RE.match(label)
+    if not m:
+        return label
+    hour12, minute, meridiem, weekday, day, month = m.groups()
+    h = int(hour12) % 12
+    if meridiem.lower() == "pm":
+        h += 12
+    return f"{weekday.title()[:3]} {int(day)} {month.title()[:3]} · {h:02d}:{minute}"
 
 
 def _private_path(path: str | None, pm: _PrivacyMap) -> str:
@@ -3087,15 +3122,28 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
         )
     cache_rows = []
     for row in d.cache_leverage[:6]:
-        # Wrap the timestamp-style session label so it doesn't break
-        # one-word-per-line inside the narrow cache-leverage column. The
-        # span keeps the date intact while ``overflow-wrap`` and the table's
-        # horizontal scroll handle very-narrow viewports gracefully.
+        # Two-line label: the compressed session label on top (verbose
+        # timestamps like "3:02 am, Thursday 21 May 2026" collapse to
+        # "Thu 21 May · 03:02"), then the project the session ran in
+        # underneath, muted. The reader doesn't have to cross-reference
+        # the main sessions table to know which repo each cache row is from.
+        session_display = _private_text(_compress_session_label(row.session_label), pm)
+        project_display = _private_project(row.project, pm) if row.project else ""
+        project_line = (
+            '<div class="cal-cache-project" style="color:var(--mute);font-size:11px;'
+            'font-family:var(--font);margin-top:2px;white-space:nowrap;'
+            f'overflow:hidden;text-overflow:ellipsis">in {project_display}</div>'
+            if project_display
+            else ""
+        )
         label_html = (
-            '<span class="cal-cache-session" '
+            '<div class="cal-cache-session-cell" style="min-width:0">'
+            '<div class="cal-cache-session" '
             'style="white-space:nowrap;font-variant-numeric:tabular-nums lining-nums">'
-            f"{_private_text(row.session_label, pm)}"
-            "</span>"
+            f"{session_display}"
+            "</div>"
+            f"{project_line}"
+            "</div>"
         )
         cache_rows.append(
             [
