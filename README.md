@@ -128,9 +128,15 @@ real report layout without exposing local paths or session identities.
 |---|---|
 | <img alt="Cost by repository or folder" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/projects.png"> | <img alt="Session drilldown table with redacted session labels, started time, project, cost, tokens, tools, models, and reason" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/sessions.png"> |
 
-| Avoidable spend | Attribution |
+| Anomalies | Avoidable spend |
 |---|---|
-| <img alt="Ranked avoidable-spend findings with re-pricing caveats and cache reuse panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/inefficiencies.png"> | <img alt="Attribution panels for agents, skills, tier sources, and the long-context boundary" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/attribution.png"> |
+| <img alt="Spend spikes above the expected band, each with actual vs expected spend, cost impact, the detector sigma, and a copyable drill-in command" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/anomalies.png"> | <img alt="Ranked avoidable-spend findings with re-pricing caveats and cache reuse panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/inefficiencies.png"> |
+
+Anomalies flag the days and sessions that ran above their expected band, and
+each row ends in the command that opens its source — paste it and you are
+looking at the cause, not just the spike.
+
+![Attribution panels for agents, skills, tier sources, and the long-context boundary](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/attribution.png)
 
 ## How it's different
 

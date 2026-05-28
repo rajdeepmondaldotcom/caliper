@@ -2,6 +2,18 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.69 - 2026-05-28
+
+Anomalies tell you where to look next.
+
+- **Every anomaly row ends in a copyable drill-in command.** A project-day
+  spike points at `caliper project`, a session spike at `caliper session`, a
+  model spike at `caliper models`, and anything else at the single-day
+  overview. The spike was already named; now the next step is one paste away.
+- **The README tour shows the anomalies section.** It was the one flagged
+  section missing from the screenshots, so the regenerated tour now includes
+  it alongside avoidable spend.
+
 ## 0.0.68 - 2026-05-28
 
 Every section now says how to read it.

@@ -19,6 +19,7 @@ from caliper.dashboards.html import (
     INLINE_STYLES,
     SECTION_NUMBERS,
     _agent_display_label,
+    _anomaly_command,
     fmt_money,
     fmt_tokens,
     render_models,
@@ -485,6 +486,24 @@ def test_anomaly_rows_use_constructive_copy_without_scale_noise() -> None:
     assert "+400%" in html
     assert 'class="cal-anomaly-row"' in html
     assert 'class="cal-metric-chip"' in html
+
+
+def test_anomaly_command_maps_kind_to_the_drilldown_command() -> None:
+    # Each anomaly kind points at the command that opens its source.
+    assert _anomaly_command("Session spike") == "caliper session"
+    assert _anomaly_command("Project-day spike") == "caliper project"
+    assert _anomaly_command("Model cost spike") == "caliper models"
+    assert _anomaly_command("Commit spike") == "caliper commit"
+    # Anything else falls back to the single-day overview.
+    assert _anomaly_command("Daily total spike") == "caliper overview --days 1"
+
+
+def test_anomaly_rows_carry_a_copyable_drilldown_command() -> None:
+    dashboard = sample_dashboard()
+    html = render_dashboard(dashboard)
+    # Every anomaly row ends in the command that drills into its source.
+    for anomaly in dashboard.anomalies:
+        assert _anomaly_command(anomaly.kind) in html
 
 
 def test_dashboard_renders_curated_sections_in_order() -> None:
