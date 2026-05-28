@@ -2,6 +2,22 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.71 - 2026-05-28
+
+The dashboard's view controls no longer float over content.
+
+- **The Dark / Light / Redacted toggle, Search, and Save copy moved inline
+  to the top of the page.** They used to live in a fixed bottom-right pill
+  that drifted over content as you scrolled and clipped tiles in
+  screenshots. Now they sit above the masthead, right-aligned, scrolling
+  with the rest of the chrome. Cmd+K still opens the palette globally.
+- **Sessions table columns rebalanced.** Model pills no longer overflow
+  into the Reason column; the Reason label sits on a single line; the
+  Started timestamp no longer breaks in the middle of the date.
+- **Screenshot pipeline hardened.** The capture script now defensively
+  hides any element with `position: fixed` or `sticky` before per-section
+  shots, so future floating UI can't sneak into README images either.
+
 ## 0.0.70 - 2026-05-28
 
 Two more sections point you somewhere, not just describe.
