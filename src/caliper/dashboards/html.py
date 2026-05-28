@@ -3131,7 +3131,7 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
         project_display = _private_project(row.project, pm) if row.project else ""
         project_line = (
             '<div class="cal-cache-project" style="color:var(--mute);font-size:11px;'
-            'font-family:var(--font);margin-top:2px;white-space:nowrap;'
+            "font-family:var(--font);margin-top:2px;white-space:nowrap;"
             f'overflow:hidden;text-overflow:ellipsis">in {project_display}</div>'
             if project_display
             else ""
