@@ -2,6 +2,19 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.73 - 2026-05-28
+
+Session labels carry more information in less space.
+
+- **Verbose timestamp labels collapse to a scannable summary.** Upstream
+  labels like `3:02 am, Thursday 21 May 2026` (Codex without an explicit
+  session id) now render as `Thu 21 May · 03:02` — same information, half
+  the column width. Indexed and SHA-style labels pass through unchanged.
+- **Cache-discount rows now show the project on a second line.** Below the
+  session label, `in <project>` is rendered in a muted secondary line so
+  you don't have to cross-reference the main sessions table to know which
+  repo each cache row came from. Works for both real and redacted modes.
+
 ## 0.0.72 - 2026-05-28
 
 The dashboard now has a type voice of its own.
