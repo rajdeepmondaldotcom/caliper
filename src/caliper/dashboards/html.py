@@ -3725,6 +3725,20 @@ def _anomaly_action(kind: str) -> str:
     return "Review this day before using it as a run-rate baseline."
 
 
+def _anomaly_command(kind: str) -> str:
+    """The command that drills straight into the source of a spike."""
+    normalized = kind.lower()
+    if "session" in normalized:
+        return "caliper session"
+    if "project" in normalized:
+        return "caliper project"
+    if "model" in normalized:
+        return "caliper models"
+    if "commit" in normalized:
+        return "caliper commit"
+    return "caliper overview --days 1"
+
+
 def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMap) -> str:
     if not d.anomalies:
         return ""
@@ -3777,6 +3791,9 @@ def _section_anomalies(d: Dashboard, *, dense: bool, rhythm: str, pm: _PrivacyMa
             f"{_esc(comparison)}</div>"
             f"{metrics_html}"
             f'<div style="color:var(--ink-2);font-size:12px;margin-top:5px">{_esc(action)}</div>'
+            '<div style="font-family:var(--mono);font-size:11px;color:var(--accent);'
+            'margin-top:5px;overflow-wrap:anywhere">'
+            f'<span style="color:var(--ghost)">$ </span>{_esc(_anomaly_command(a.kind))}</div>'
             "</div>"
             '<div class="cal-anomaly-side" style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">'
             f'<span style="font-size:13px;color:{tone_color};font-family:var(--mono);'
