@@ -506,6 +506,21 @@ def test_anomaly_rows_carry_a_copyable_drilldown_command() -> None:
         assert _anomaly_command(anomaly.kind) in html
 
 
+def test_cost_section_names_the_peak_day_to_investigate() -> None:
+    # The hint says "days worth investigating"; the summary names the date.
+    dashboard = sample_dashboard()
+    peak = max(dashboard.daily, key=lambda p: float(p.cost_usd))
+    html = render_dashboard(dashboard)
+    assert f"on {peak.day}" in html
+
+
+def test_evidence_section_summarizes_the_grade_tally() -> None:
+    # An at-a-glance trust posture sits in the section meta.
+    html = render_dashboard(sample_dashboard())
+    assert "dimensions ·" in html
+    assert "exact" in html
+
+
 def test_dashboard_renders_curated_sections_in_order() -> None:
     html = render_dashboard(sample_dashboard(show_paths=True))
 
