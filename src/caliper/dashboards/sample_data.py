@@ -466,6 +466,15 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             reached_count=0,
             tone="warn",
         ),
+        # Per-source rate-limit panels reflect what real parsing actually
+        # produces. As of 0.0.76 ONLY the Codex parser populates
+        # `rate_limit_samples` (the Claude Code, Cursor, and Aider parsers
+        # currently return an empty list). Do NOT add a synthetic Claude Code
+        # entry here just to make the demo look prettier — the Claude Code
+        # parser doesn't extract rate-limit headers yet, and a fake demo
+        # entry would mislead users into expecting a panel they won't see on
+        # their own logs. When `vendors/claude_code.py` learns to surface
+        # rate-limit data, the Claude Code panel will appear automatically.
         rate_limit_pressures=[
             RateLimitPressure(
                 sample_count=24,
@@ -483,22 +492,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 tone="neutral",
                 source="openai-codex",
                 source_label="Codex",
-            ),
-            RateLimitPressure(
-                sample_count=18,
-                peak_primary_pct=0.82,
-                peak_secondary_pct=0.61,
-                latest_primary_pct=0.54,
-                latest_secondary_pct=0.18,
-                latest_limit_name="weekly usage",
-                latest_plan_type="max",
-                # 16:30 UTC on Thursday 21 May = 09:30 Pacific. Matches the
-                # "Resets Thu 9:30 AM" pattern from the target weekly-limits UI.
-                latest_resets_at="2026-05-21T16:30Z",
-                reached_count=0,
-                tone="warn",
-                source="claude-code",
-                source_label="Claude Code",
             ),
         ],
         quality_score=QualityScore(

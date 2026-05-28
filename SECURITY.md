@@ -13,8 +13,8 @@ fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| `0.0.75` | yes |
-| `< 0.0.75` | no |
+| `0.0.76` | yes |
+| `< 0.0.76` | no |
 
 The `1.0` release will introduce a longer support window and a published
 deprecation policy. Until then, please upgrade promptly.

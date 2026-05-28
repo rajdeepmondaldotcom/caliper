@@ -2,6 +2,31 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.76 - 2026-05-28
+
+Plan limits: honest about what's actually parsed.
+
+- **Dropped the synthetic Claude Code rate-limit entry from the demo.** It
+  was misleading: the Claude Code parser explicitly returns
+  `rate_limit_samples=[]`, so on real user data the Claude Code panel would
+  not appear. The demo now shows only what real parsing produces today
+  (Codex), and the section hint says so directly: "Codex is parsed today;
+  other sources will appear here as their parsers learn to surface
+  rate-limit headers."
+- **Hardened the per-source builder for accuracy.**
+  `_build_rate_limit_pressures_by_source` now drops records with an empty
+  vendor (no source attribution → no panel) and records with no
+  rate-limit signal at all. Stable tiebreaker on equal-timestamp records
+  so the "latest" reading is deterministic.
+- **README copy aligned with reality.** Claude Code / Cursor / Aider
+  panels are explicitly described as "appear automatically once their
+  parsers learn to surface rate-limit info", not pretending they ship
+  today.
+- **New accuracy tests:** per-source records route to their own panels
+  (no cross-vendor contamination of peak / latest), empty-vendor and
+  no-signal records are dropped, and the Codex → Claude Code → others
+  ordering holds.
+
 ## 0.0.75 - 2026-05-28
 
 Same content as the failed-to-publish 0.0.74, with the release smoke
