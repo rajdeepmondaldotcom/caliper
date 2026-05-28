@@ -466,6 +466,41 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             reached_count=0,
             tone="warn",
         ),
+        rate_limit_pressures=[
+            RateLimitPressure(
+                sample_count=24,
+                peak_primary_pct=0.68,
+                peak_secondary_pct=0.42,
+                latest_primary_pct=0.08,
+                latest_secondary_pct=0.04,
+                latest_limit_name="5-hour usage",
+                latest_plan_type="pro",
+                # The demo's generated_at is 12:34 Pacific (19:34 UTC). 23:17 UTC
+                # is 16:17 Pacific — exactly 3 hr 43 min from "now", matching
+                # the friendly target Codex shows on its own usage page.
+                latest_resets_at="2026-05-17T23:17Z",
+                reached_count=0,
+                tone="neutral",
+                source="openai-codex",
+                source_label="Codex",
+            ),
+            RateLimitPressure(
+                sample_count=18,
+                peak_primary_pct=0.82,
+                peak_secondary_pct=0.61,
+                latest_primary_pct=0.54,
+                latest_secondary_pct=0.18,
+                latest_limit_name="weekly usage",
+                latest_plan_type="max",
+                # 16:30 UTC on Thursday 21 May = 09:30 Pacific. Matches the
+                # "Resets Thu 9:30 AM" pattern from the target weekly-limits UI.
+                latest_resets_at="2026-05-21T16:30Z",
+                reached_count=0,
+                tone="warn",
+                source="claude-code",
+                source_label="Claude Code",
+            ),
+        ],
         quality_score=QualityScore(
             score=82,
             grade="Good",

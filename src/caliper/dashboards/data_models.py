@@ -343,6 +343,13 @@ class RateLimitPressure:
     reached_count: int
     tone: ImpactTone = "neutral"
     forecasts: tuple[RateLimitForecastBand, ...] = ()
+    # Which provider / coding tool these samples came from. Optional for
+    # backwards compatibility with the legacy aggregate pressure object;
+    # the new per-source breakdown sets it ("openai-codex", "claude-code").
+    source: str = ""
+    # Human-readable display label for the source (e.g. "Codex", "Claude
+    # Code"). The renderer prefers this over a raw vendor id.
+    source_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -590,6 +597,9 @@ class Dashboard:
     skills: list[SkillRow] = field(default_factory=list)
     inefficiencies: list[InefficiencyRow] = field(default_factory=list)
     rate_limit_pressure: RateLimitPressure | None = None
+    # Per-source breakdown (one entry per provider/coding tool). When present,
+    # the renderer shows a panel per source instead of the legacy aggregate.
+    rate_limit_pressures: list[RateLimitPressure] = field(default_factory=list)
     quality_score: QualityScore | None = None
     # Feeds the top verdict strip (the "items to review" triage). Built from
     # the comparison/decision pipeline; not rendered as its own section.

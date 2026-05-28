@@ -2,6 +2,29 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.74 - 2026-05-28
+
+Plan limits — per source, human-readable, no more Unix epochs.
+
+- **The rate-limit section is renamed and rebuilt around what it actually
+  measures: "Plan limits used".** One panel per source (Codex and Claude
+  Code render side-by-side in the demo), each with a "Current session"
+  meter and a "Peak this window" meter. Plan label sits next to the source
+  name ("Codex · pro", "Claude Code · max").
+- **Reset times read like a human wrote them.** Unix epochs and ISO 8601
+  strings are converted to "Resets in 3 hr 42 min" inside the six-hour
+  horizon, "Resets today 14:15" further out the same day, "Resets Thu 21
+  May · 09:30" inside the week, and a full date beyond. Already-past
+  resets read "Window already reset". Time zone follows the dashboard's
+  window (`d.window.timezone`), falling back to UTC.
+- **The browser tab now shows a Caliper icon.** The same caliper-mark SVG
+  the masthead uses is embedded as an inline data URI favicon — no
+  external request, the privacy invariant still holds.
+- **Adapter exposes per-source rate-limit pressures** as
+  `Dashboard.rate_limit_pressures: list[RateLimitPressure]`, ordered Codex
+  → Claude Code → others alphabetically. The legacy aggregate
+  `rate_limit_pressure` still lives for backward compatibility.
+
 ## 0.0.73 - 2026-05-28
 
 Session labels carry more information in less space.
