@@ -2,6 +2,23 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.72 - 2026-05-28
+
+The dashboard now has a type voice of its own.
+
+- **IBM Plex Sans + IBM Plex Mono** ship embedded as base64 woff2 inside the
+  CSS (~60KB total, Latin subset). The dashboard stays fully offline — no
+  external font CDN, no `<link>` tags, no runtime network. Plex Mono gives
+  numbers a precise, slightly engineering-blueprint character that fits a
+  measurement instrument; Plex Sans pairs cleanly for body and headings.
+  System fonts remain as fallback if the embedded face fails to load.
+- **Page-load motion: KPI cards fade in with a small stagger** (40 / 110 /
+  180 / 250 ms) so the eye lands on Cost first and sweeps right. Pure
+  opacity, no transform, no layout shift; honors `prefers-reduced-motion`.
+- **KPI cards acknowledge hover with a soft shadow halo** — no movement,
+  no twitch. The hover-jump guard test still holds: nothing on this page
+  shifts when you mouse over it.
+
 ## 0.0.71 - 2026-05-28
 
 The dashboard's view controls no longer float over content.

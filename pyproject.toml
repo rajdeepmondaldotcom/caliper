@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "caliper-ai"
-version = "0.0.71"
+version = "0.0.72"
 description = "See what your AI coding cost and produced. Caliper reads local logs from Codex, Claude Code, Cursor, and Aider, prices the usage at API rates, and attributes it by project, PR, model, and session. Offline, no account, no upload."
 readme = "README.md"
 requires-python = ">=3.11"
