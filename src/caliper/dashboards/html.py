@@ -598,13 +598,9 @@ section[id] { scroll-margin-top: 36px; }
     justify-content: flex-start !important;
   }
   .cal-tweaks-panel {
-    left: auto;
-    right: 10px;
-    bottom: 10px;
-    width: auto;
-    flex-wrap: nowrap;
-    border-radius: 999px;
-    justify-content: center;
+    padding: 12px 14px 0;
+    gap: 8px;
+    justify-content: flex-end;
   }
   .cal-evidence-row {
     grid-template-columns: minmax(0, 1fr) !important;
@@ -891,27 +887,22 @@ p, h1, h2, h3 { text-wrap: pretty; }
 [data-rhythm="terminal"] .cal-rhythm-receipt  { display: none !important; }
 
 .cal-tweaks-panel {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 8500;
+  /* Inline utility bar at the top of the document, right-aligned with the
+     masthead. Used to be a fixed bottom-right pill, but that floated over
+     content (and clipped KPI tiles in screenshots). Static placement here
+     keeps the controls discoverable without obstructing anything. Print and
+     PDF rules below still hide it. */
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 16px 32px 0;
   display: flex;
+  justify-content: flex-end;
   align-items: center;
-  gap: 14px;
-  padding: 10px 14px;
-  background: var(--panel);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.32);
+  gap: 12px;
   font-family: var(--font);
   font-size: 12px;
   color: var(--ink-2);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-}
-body[data-interactive="true"] .cal-receipt-root,
-body[data-interactive="true"] .cal-terminal-main {
-  padding-bottom: 116px !important;
+  flex-wrap: wrap;
 }
 .cal-tweaks-panel .cal-tweaks-section { display: flex; align-items: center; gap: 6px; }
 .cal-tweaks-panel .cal-tweaks-label {
@@ -3982,9 +3973,12 @@ def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
         '<table class="cal-table" aria-label="Top sessions by cost" '
         'style="width:100%;border-collapse:collapse;'
         'font-size:13px;table-layout:fixed">'
-        '<colgroup><col style="width:16%"><col style="width:12%"><col style="width:14%">'
-        '<col style="width:11%"><col style="width:10%"><col style="width:8%">'
-        '<col style="width:8%"><col style="width:13%"><col style="width:8%"></colgroup>'
+        # Widened Models (15%) so two model pills don't overflow into Reason,
+        # Reason (14%) so short labels sit on a single line, and Started (13%)
+        # so the timestamp doesn't break in the middle of the date.
+        '<colgroup><col style="width:12%"><col style="width:13%"><col style="width:11%">'
+        '<col style="width:11%"><col style="width:9%"><col style="width:7%">'
+        '<col style="width:7%"><col style="width:15%"><col style="width:15%"></colgroup>'
         + head
         + "<tbody>"
         + "".join(body_rows)
@@ -5474,9 +5468,14 @@ def render_dashboard(
             f"{palette_index}</script>"
             f"{_render_palette()}"
         )
+        # The tweaks panel sits at the very top of the page, above the
+        # masthead, so its inline (no longer fixed) placement never obstructs
+        # content below. It still scrolls with the page; Cmd+K is always live.
         body = (
-            f'<div class="{wrapper_class}">{rendered}</div>'
+            f'<div class="{wrapper_class}">'
             + _render_tweaks_panel(initial_rhythm=rhythm, initial_mode=mode)
+            + rendered
+            + "</div>"
             + palette_data
         )
     else:
