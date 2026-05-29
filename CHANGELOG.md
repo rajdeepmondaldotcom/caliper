@@ -2,6 +2,31 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.79 - 2026-05-29
+
+Accuracy audit + anomalies that surface waste, not just busy days.
+
+A first-principles pass over every dashboard statistic (design-brief/
+ACCURACY-AUDIT.md). The money foundation (pricing, dedup, token accounting,
+tier/model inference) audited clean. The real fixes:
+
+- **Token KPI sparkline plotted event counts under a "tokens" label.** It now
+  plots tokens (new `DailyPoint.tokens`); an invariant test pins it to the
+  window's total tokens.
+- **"What this produced" tool-mix shares silently dropped unclassified tool
+  calls,** so they read as 100% of a hidden subset. The unrecognized remainder
+  is now counted and disclosed in the caveat; `LSP` is classified.
+- **The models table had no "Other" residual row** while the projects table did,
+  so a truncated model list under-summed silently. Added the residual row.
+- **New anomaly detector: efficiency regressions.** The old detectors all flag
+  raw cost spikes, which mostly means "a busy day." This one flags a session
+  that paid more *per 1M tokens* than prior sessions of the same size in the
+  same project+model cohort (cache loss, model drift, tool thrash), with the
+  extra dollars quantified. Rate-appropriate robust stats, dollar-denominated
+  output, drills into `caliper session`.
+- README updated to match; full accuracy audit + new-metric roadmap recorded in
+  `design-brief/ACCURACY-AUDIT.md`.
+
 ## 0.0.78 - 2026-05-29
 
 "What this produced" now counts the commits you actually shipped.
