@@ -379,6 +379,7 @@ class DailyPoint:
     cost_usd: float
     events: int
     shape: SessionShapeName
+    tokens: int = 0
 
 
 # ---------------------------------------------------------------------------

@@ -156,6 +156,10 @@ def test_build_handoff_dashboard_decimal_to_float(monkeypatch, tmp_path) -> None
     assert len(d.totals.daily_cost_sparkline) == len(d.daily)
     assert len(d.totals.daily_token_sparkline) == len(d.daily)
     assert len(d.totals.daily_session_sparkline) == len(d.daily)
+    # The token sparkline must plot tokens, not event counts (historical bug):
+    # it sums to the window's total tokens, which exceeds the event count.
+    assert sum(d.totals.daily_token_sparkline) == float(d.totals.total_tokens)
+    assert d.totals.total_tokens > d.totals.events
     assert d.top_sessions
     assert d.top_sessions[0].label == "10:01 am, Tuesday 12 May 2026"
     assert "s1" not in d.top_sessions[0].label

@@ -481,7 +481,7 @@ def _build_output_summary(
     has_git = commits_touched > 0
     linked_pct = float(linked / total) if total > 0 else 0.0
 
-    edits = diagnostics = exploration = classified = 0
+    edits = diagnostics = exploration = classified = unclassified = 0
     for name, count in shape_report.tool_use.per_tool:
         if name in EXECUTION_TOOLS:
             edits += count
@@ -492,12 +492,24 @@ def _build_output_summary(
         elif name in EXPLORATION_TOOLS:
             exploration += count
             classified += count
+        else:
+            unclassified += count
 
     if not has_git and classified == 0:
         return None
 
     def _share(part: int) -> float:
         return (part / classified) if classified else 0.0
+
+    # Be honest when some tool calls don't fall into the edit/diagnose/explore
+    # buckets: the shares are of the classified subset, not all tool activity.
+    unclassified_note = ""
+    total_tool_calls = classified + unclassified
+    if unclassified and total_tool_calls:
+        unclassified_note = (
+            f" {unclassified / total_tool_calls:.0%} of tool calls are an "
+            "unrecognized kind and sit outside the mix below."
+        )
 
     if not has_git:
         caveat = (
@@ -520,6 +532,7 @@ def _build_output_summary(
             "exploration, planning, or work that never reached a commit, not "
             "automatically waste."
         )
+    caveat += unclassified_note
 
     return OutputSummary(
         commits_touched=commits_touched,
@@ -650,7 +663,7 @@ def _build_totals(
         delta_sessions_pct=delta_sessions,
         daily_cost_sparkline=[float(p.cost_usd) for p in daily_points],
         daily_cache_sparkline=daily_cache_rate,
-        daily_token_sparkline=[float(p.events) for p in daily_points],
+        daily_token_sparkline=[float(p.tokens) for p in daily_points],
         daily_session_sparkline=[float(n) for n in daily_session_count],
     )
 
@@ -824,8 +837,9 @@ def _build_daily(
         agg = by_key.get(key)
         cost = float(agg.costs.cost_usd) if agg else 0.0
         events = agg.totals.events if agg else 0
+        tokens = agg.totals.total_tokens if agg else 0
         shape = _SHAPE_NAME_MAP.get(shape_by_day.get(key, CATEGORY_NONE), "no-tools")
-        out.append(DailyPoint(day=key, cost_usd=cost, events=events, shape=shape))
+        out.append(DailyPoint(day=key, cost_usd=cost, events=events, shape=shape, tokens=tokens))
         day = day + dt.timedelta(days=1)
     return out
 

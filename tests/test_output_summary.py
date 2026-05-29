@@ -143,6 +143,24 @@ def test_output_summary_zero_authored_commits_falls_back_to_proxy() -> None:
     assert summary.commits_touched == 1
 
 
+def test_output_summary_caveats_unclassified_tools() -> None:
+    # A tool that isn't in the edit/diagnose/explore sets must be disclosed,
+    # not silently dropped from the denominator behind a clean-looking 100%.
+    card = _card()
+    events = [
+        _event(session_id="s1", turn_index=0, tools=("Edit",), minute=1),
+        _event(session_id="s1", turn_index=1, tools=("TotallyNewTool",), minute=2),
+    ]
+    result = _result(events)
+    summary = _build_output_summary(result, card, compute_session_shape(result))
+
+    assert summary is not None
+    # Only the Edit call is classified; the unknown tool is the other half.
+    assert summary.classified_tool_calls == 1
+    assert "unrecognized kind" in summary.caveat
+    assert "50%" in summary.caveat
+
+
 def test_output_summary_none_on_empty_window() -> None:
     assert _build_output_summary(_result([]), _card(), compute_session_shape(_result([]))) is None
 

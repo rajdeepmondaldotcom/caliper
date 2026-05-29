@@ -22,6 +22,7 @@ EXPLORATION_TOOLS = frozenset(
         "LS",
         "NotebookRead",
         "Explore",
+        "LSP",
     }
 )
 EXECUTION_TOOLS = frozenset(

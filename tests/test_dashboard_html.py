@@ -271,6 +271,28 @@ def test_dashboard_renderer_sorts_tables_by_cost() -> None:
     assert model_html.index("model-c") < model_html.index("model-b")
     assert 'aria-sort="descending"' in model_html
 
+
+def test_render_models_shows_other_row_when_rows_undersum() -> None:
+    # Rows total $7 but the window cost is $10, so $3 (30%) is unaccounted for.
+    # The table must name that tail instead of silently under-summing.
+    html = render_models(
+        [
+            ModelRow("anthropic", "model-a", "standard", 5, 1, 100, 0),
+            ModelRow("anthropic", "model-b", "standard", 2, 2, 200, 0),
+        ],
+        total_cost=10,
+    )
+    assert "Other models/tiers" in html
+    assert "30%" in html
+
+
+def test_render_models_no_other_row_when_rows_account_for_total() -> None:
+    html = render_models(
+        [ModelRow("anthropic", "model-a", "standard", 10, 1, 100, 0)],
+        total_cost=10,
+    )
+    assert "Other models/tiers" not in html
+
     project_html = render_projects(
         [
             ProjectRow("project-b", "/tmp/project-b", 2, 2, 1, []),
