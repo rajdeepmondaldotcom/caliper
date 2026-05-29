@@ -2,6 +2,20 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.81 - 2026-05-29
+
+How long are your turns taking? A velocity signal from the session data.
+
+- **Turn response time.** The Claude Code parser now records, per turn, the gap
+  from the previous logged event to the reply (`TurnFacts.latency_ms`) — model
+  time plus any tool runs inside the turn, with idle gaps over 10 minutes
+  dropped. Surfaced as a "Typical turn response time" insight: the median and
+  p90 across the window's turns. The first analysis on local data showed a
+  median around 6.7s and p90 around 17.5s across ~46k turns.
+- This bumps the Claude parser cache version, so the next run re-parses your
+  Claude logs once (later runs reuse the cache as usual). Codex's explicit
+  `time_to_first_token_ms` / `duration_ms` is the next step.
+
 ## 0.0.80 - 2026-05-29
 
 Dashboard defaults to real labels for your own analysis; one flag to share.

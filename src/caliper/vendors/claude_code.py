@@ -27,7 +27,7 @@ from caliper.progress import NULL_PROGRESS, ParseProgress
 from caliper.timeutil import parse_event_timestamp
 
 SUPPORTED_SCHEMAS = ("1",)
-PARSER_VERSION = "claude-code-v4"
+PARSER_VERSION = "claude-code-v5"
 
 
 @dataclass(frozen=True)
@@ -268,6 +268,7 @@ def _parse_session(
 ) -> list[UsageEvent]:
     events: list[UsageEvent] = []
     turn_counter: dict[str, int] = {}
+    prev_ts: dt.datetime | None = None
     try:
         total_bytes = path.stat().st_size
     except OSError:
@@ -285,9 +286,15 @@ def _parse_session(
             raw = _json_event_from_line(line)
             if raw is None:
                 continue
-            event = _usage_event(raw, path, line_number, options, turn_counter)
+            event = _usage_event(raw, path, line_number, options, turn_counter, prev_ts=prev_ts)
             if event is not None:
                 events.append(event)
+            # Track the timestamp of every line (user prompts, tool results,
+            # assistant replies) so the next turn's response time is the gap
+            # from the immediately preceding event, not the prior usage event.
+            line_ts = parse_event_timestamp(str(raw.get("timestamp") or ""))
+            if line_ts is not None:
+                prev_ts = line_ts
     if total_bytes:
         from caliper.progress import report_file_progress
 
@@ -303,12 +310,33 @@ def _json_event_from_line(line: str) -> dict[str, Any] | None:
     return raw if isinstance(raw, dict) else None
 
 
+# Wall-clock gaps longer than this read as the human stepping away between
+# turns, not the model thinking — excluded from the turn-response-time proxy.
+_MAX_TURN_LATENCY_S = 600.0
+
+
+def _turn_latency_ms(prev_ts: dt.datetime | None, ts: dt.datetime) -> int | None:
+    """Milliseconds from the previous logged event to this reply, or None.
+
+    A proxy for how long the turn took to come back (model time plus any
+    in-turn tool runs). Negative or idle-length gaps are dropped so the median
+    reflects real responsiveness, not a lunch break.
+    """
+    if prev_ts is None:
+        return None
+    gap = (ts - prev_ts).total_seconds()
+    if gap < 0 or gap > _MAX_TURN_LATENCY_S:
+        return None
+    return int(gap * 1000)
+
+
 def _usage_event(
     raw: dict[str, Any],
     path: Path,
     line_number: int,
     options: RuntimeOptions,
     turn_counter: dict[str, int],
+    prev_ts: dt.datetime | None = None,
 ) -> UsageEvent | None:
     message = raw.get("message")
     if not isinstance(message, dict):
@@ -342,7 +370,9 @@ def _usage_event(
     session_id = str(raw.get("sessionId") or path.stem)
     turn_index = turn_counter.get(session_id, 0)
     turn_counter[session_id] = turn_index + 1
-    turn_facts = _turn_facts_from_message(message, raw, turn_index)
+    turn_facts = _turn_facts_from_message(
+        message, raw, turn_index, latency_ms=_turn_latency_ms(prev_ts, timestamp)
+    )
     return UsageEvent(
         timestamp=timestamp,
         path=path,
@@ -370,6 +400,8 @@ def _turn_facts_from_message(
     message: dict[str, Any],
     raw: dict[str, Any],
     turn_index: int,
+    *,
+    latency_ms: int | None = None,
 ) -> TurnFacts:
     content = message.get("content")
     tool_names: list[str] = []
@@ -399,6 +431,7 @@ def _turn_facts_from_message(
         tool_names=tuple(tool_names),
         skill_names=tuple(skill_names),
         has_thinking_block=has_thinking,
+        latency_ms=latency_ms,
     )
 
 

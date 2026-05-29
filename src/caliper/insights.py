@@ -120,6 +120,7 @@ def build_insights_from(
         _top_waste_insight(result, rate_card, audit_findings=audit_findings),
         _demand_shift_insight(result, rate_card),
         _spinning_session_insight(result, rate_card),
+        _turn_latency_insight(result),
     ]
     return sorted(
         [item for item in candidates if item is not None],
@@ -482,6 +483,45 @@ def _spinning_session_insight(result: LoadResult, card: RateCard) -> Insight | N
         impact_usd_exact=decimal_string(Decimal(str(cost))),
         impact_label=f"${cost:,.2f} session",
         evidence_metrics={"diagnostic_share": diag_share, "tool_calls": classified},
+        commands=("caliper session",),
+    )
+
+
+def _turn_latency_insight(result: LoadResult) -> Insight | None:
+    """How long turns typically take to come back (a velocity signal).
+
+    Derived from the gap between each reply and the previous logged event
+    (parsed into TurnFacts.latency_ms), so it reflects model time plus any
+    in-turn tool runs. Needs a stable sample before it's worth showing.
+    """
+    latencies = sorted(
+        event.turn_facts.latency_ms
+        for event in result.events
+        if event.turn_facts is not None and event.turn_facts.latency_ms is not None
+    )
+    n = len(latencies)
+    if n < 20:
+        return None
+    median_ms = latencies[n // 2] if n % 2 else (latencies[n // 2 - 1] + latencies[n // 2]) / 2
+    p90_ms = latencies[min(n - 1, int(n * 0.9))]
+    median_s = median_ms / 1000
+    p90_s = p90_ms / 1000
+    return Insight(
+        severity="info",
+        title="Typical turn response time",
+        detail=(
+            f"Half your turns came back within {median_s:.1f}s and 90% within "
+            f"{p90_s:.1f}s, measured from the previous event to the reply across "
+            f"{n:,} turns. This includes any tool runs inside the turn; idle gaps "
+            "over 10 minutes are excluded."
+        ),
+        action="Slower turns usually mean larger context or heavier tool loops.",
+        scope=SCOPE_SESSIONS,
+        evidence=(f"median {median_s:.1f}s over {n:,} turns",),
+        category="usage",
+        priority=58,
+        confidence="medium",
+        evidence_metrics={"median_latency_ms": median_ms, "turns": n},
         commands=("caliper session",),
     )
 

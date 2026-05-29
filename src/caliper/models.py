@@ -276,6 +276,10 @@ class TurnFacts:
     tool_names: tuple[str, ...] = ()
     skill_names: tuple[str, ...] = ()
     has_thinking_block: bool = False
+    # Wall-clock milliseconds from the previous logged event to this turn's
+    # reply — a turn-response-time proxy. None when it can't be derived or the
+    # gap looks like idle time (the deriving parser caps it).
+    latency_ms: int | None = None
 
     @classmethod
     def from_dict(cls, raw: object) -> TurnFacts | None:
@@ -287,6 +291,8 @@ class TurnFacts:
         skill_names = (
             tuple(str(item) for item in skills) if isinstance(skills, list | tuple) else ()
         )
+        latency_raw = raw.get("latency_ms")
+        latency_ms = _safe_int(latency_raw) if latency_raw is not None else None
         return cls(
             turn_index=_safe_int(raw.get("turn_index")),
             parent_uuid=str(raw.get("parent_uuid") or ""),
@@ -294,6 +300,7 @@ class TurnFacts:
             tool_names=tool_names,
             skill_names=skill_names,
             has_thinking_block=bool(raw.get("has_thinking_block")),
+            latency_ms=latency_ms,
         )
 
 

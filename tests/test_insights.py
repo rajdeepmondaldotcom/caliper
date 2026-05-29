@@ -245,3 +245,75 @@ def test_insights_markdown_escapes_pipe_characters() -> None:
 
     assert "A \\| B" in output
     assert "one \\| two" in output
+
+
+def test_turn_latency_insight_reports_median() -> None:
+    import datetime as dt2
+    from pathlib import Path
+
+    from caliper.insights import _turn_latency_insight
+    from caliper.models import ThreadMeta, TurnFacts, Usage, UsageEvent
+
+    base = dt2.datetime(2026, 5, 12, 10, 0, tzinfo=dt2.UTC)
+    events = [
+        UsageEvent(
+            timestamp=base + dt2.timedelta(minutes=i),
+            path=Path("/tmp/r.jsonl"),
+            session_id="s1",
+            usage=Usage(input_tokens=100, output_tokens=20, total_tokens=120),
+            model="claude-sonnet-4-6",
+            service_tier="standard",
+            tier_source="logged",
+            thread=ThreadMeta(cwd="/tmp/p"),
+            # 25 turns, all 5s → median 5000ms.
+            turn_facts=TurnFacts(turn_index=i, latency_ms=5000),
+        )
+        for i in range(25)
+    ]
+    result = LoadResult(
+        events=events,
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[],
+        warnings=[],
+    )
+    insight = _turn_latency_insight(result)
+    assert insight is not None
+    assert insight.evidence_metrics["median_latency_ms"] == 5000
+    assert insight.evidence_metrics["turns"] == 25
+    assert "5.0s" in insight.detail
+
+
+def test_turn_latency_insight_needs_enough_turns() -> None:
+    import datetime as dt2
+    from pathlib import Path
+
+    from caliper.insights import _turn_latency_insight
+    from caliper.models import ThreadMeta, TurnFacts, Usage, UsageEvent
+
+    base = dt2.datetime(2026, 5, 12, 10, 0, tzinfo=dt2.UTC)
+    events = [
+        UsageEvent(
+            timestamp=base,
+            path=Path("/tmp/r.jsonl"),
+            session_id="s1",
+            usage=Usage(input_tokens=100, output_tokens=20, total_tokens=120),
+            model="claude-sonnet-4-6",
+            service_tier="standard",
+            tier_source="logged",
+            thread=ThreadMeta(cwd="/tmp/p"),
+            turn_facts=TurnFacts(latency_ms=5000),
+        )
+        for _ in range(5)
+    ]
+    result = LoadResult(
+        events=events,
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[],
+        warnings=[],
+    )
+    # Below the 20-turn floor → no insight (medians on tiny samples are noise).
+    assert _turn_latency_insight(result) is None
