@@ -280,6 +280,13 @@ class TurnFacts:
     # reply — a turn-response-time proxy. None when it can't be derived or the
     # gap looks like idle time (the deriving parser caps it).
     latency_ms: int | None = None
+    # Tool-result outcomes for this turn's tool calls (Claude Code): how many
+    # results came back, how many were errors, and the code churn (lines added
+    # / removed from edit/write patches). Zero when the source doesn't log them.
+    tool_result_count: int = 0
+    tool_error_count: int = 0
+    lines_added: int = 0
+    lines_removed: int = 0
 
     @classmethod
     def from_dict(cls, raw: object) -> TurnFacts | None:
@@ -301,6 +308,10 @@ class TurnFacts:
             skill_names=skill_names,
             has_thinking_block=bool(raw.get("has_thinking_block")),
             latency_ms=latency_ms,
+            tool_result_count=_safe_int(raw.get("tool_result_count")),
+            tool_error_count=_safe_int(raw.get("tool_error_count")),
+            lines_added=_safe_int(raw.get("lines_added")),
+            lines_removed=_safe_int(raw.get("lines_removed")),
         )
 
 

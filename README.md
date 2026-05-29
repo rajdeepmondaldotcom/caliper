@@ -272,10 +272,11 @@ evidence supports.
 - Tool-mix shares disclose any unrecognized-tool remainder instead of quietly
   normalizing it away, and per-day token sparklines plot tokens, not event
   counts.
-- Velocity signals from the session data: a **typical turn response time**
-  (median and p90, from the gap between each reply and the previous event) and a
-  callout for any **session that spun more than it shipped** (mostly diagnostics,
-  almost no edits).
+- Velocity and quality signals mined from the session data: a **typical turn
+  response time** (median and p90), a callout for any **session that spun more
+  than it shipped** (mostly diagnostics, almost no edits), the **tool-error
+  rate** (how often the AI's commands fail), and **code churn** (lines added /
+  removed and a rough cost per line changed).
 - Evidence is graded `exact`, `estimated`, `partial`, or `unsupported`. Each
   KPI exposes its formula inline.
 

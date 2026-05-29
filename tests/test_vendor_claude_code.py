@@ -274,3 +274,60 @@ def test_claude_turn_latency_from_preceding_event(tmp_path) -> None:
     assert len(events) == 2
     assert events[0].turn_facts.latency_ms == 3000
     assert events[1].turn_facts.latency_ms is None
+
+
+def test_claude_tool_result_outcomes_attach_to_turn(tmp_path) -> None:
+    from caliper.config import build_options as _bo
+    from caliper.vendors.claude_code import _parse_session
+
+    session = tmp_path / "session.jsonl"
+    rows = [
+        {
+            "type": "assistant",
+            "sessionId": "s1",
+            "timestamp": "2026-05-12T10:00:00.000Z",
+            "message": {
+                "id": "m1",
+                "role": "assistant",
+                "model": "claude-sonnet-4-6",
+                "usage": {"input_tokens": 100, "output_tokens": 20},
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Edit", "input": {}},
+                    {"type": "tool_use", "id": "t2", "name": "Bash", "input": {}},
+                ],
+            },
+        },
+        # Tool results arrive in the following user event(s), keyed by tool_use_id.
+        {
+            "type": "user",
+            "sessionId": "s1",
+            "timestamp": "2026-05-12T10:00:05.000Z",
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": False}],
+            },
+            "toolUseResult": {
+                "structuredPatch": [
+                    {"lines": ["+added one", "+added two", "-removed one", " context"]}
+                ]
+            },
+        },
+        {
+            "type": "user",
+            "sessionId": "s1",
+            "timestamp": "2026-05-12T10:00:06.000Z",
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "t2", "is_error": True}],
+            },
+        },
+    ]
+    session.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    options = _bo(timezone="UTC", vendors=[VENDOR_CLAUDE_CODE], no_parse_cache=True)
+    events = _parse_session(session, options)
+    assert len(events) == 1
+    facts = events[0].turn_facts
+    assert facts.tool_result_count == 2
+    assert facts.tool_error_count == 1  # the Bash result errored
+    assert facts.lines_added == 2
+    assert facts.lines_removed == 1

@@ -2,6 +2,23 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.82 - 2026-05-29
+
+Two more signals mined from the session logs: tool errors and code churn.
+
+- **Tool-error rate.** The Claude Code parser now links each turn's tool calls
+  to their results (`tool_result.is_error`) in a second pass, recording per-turn
+  error counts on `TurnFacts`. Surfaced as a gated insight that fires when more
+  than 5% of tool results errored — a "the agent is thrashing" signal that burns
+  tokens on dead ends. Stays silent when your tooling is healthy.
+- **Code churn.** Edit/Write `structuredPatch` hunks are summed into lines
+  added / removed per turn, surfaced as a "code your spend moved" insight with a
+  rough cost per line changed — turning spend into a leverage figure (not a
+  code-quality judgment).
+- Claude parser cache version bumped (v6) for the one-time re-parse. Codex
+  equivalents (`function_call_output` failures, `patch_apply_end` diffs) are the
+  next extension.
+
 ## 0.0.81 - 2026-05-29
 
 How long are your turns taking? A velocity signal from the session data.

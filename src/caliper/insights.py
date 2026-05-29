@@ -121,6 +121,8 @@ def build_insights_from(
         _demand_shift_insight(result, rate_card),
         _spinning_session_insight(result, rate_card),
         _turn_latency_insight(result),
+        _tool_error_insight(result),
+        _code_churn_insight(result, total),
     ]
     return sorted(
         [item for item in candidates if item is not None],
@@ -522,6 +524,81 @@ def _turn_latency_insight(result: LoadResult) -> Insight | None:
         priority=58,
         confidence="medium",
         evidence_metrics={"median_latency_ms": median_ms, "turns": n},
+        commands=("caliper session",),
+    )
+
+
+def _tool_error_insight(result: LoadResult) -> Insight | None:
+    """Share of the AI's tool calls that came back as errors (Claude Code).
+
+    A high error rate means the agent is thrashing — wrong commands, failing
+    tests, bad paths — and burning tokens on dead ends. Derived from
+    ``tool_result.is_error`` recorded per turn.
+    """
+    errors = total = 0
+    for event in result.events:
+        facts = event.turn_facts
+        if facts is None:
+            continue
+        total += facts.tool_result_count
+        errors += facts.tool_error_count
+    if total < 50:
+        return None
+    rate = errors / total
+    if rate < 0.05:
+        return None
+    return Insight(
+        severity="warn" if rate >= 0.15 else "info",
+        title="Tool calls are erroring more than usual",
+        detail=(
+            f"{rate:.0%} of the AI's {total:,} tool results came back as errors "
+            f"({errors:,} failures). A high rate often means failing commands or "
+            "tests sending the agent down dead ends, which burns tokens."
+        ),
+        action="Open the noisiest sessions to see which tools fail.",
+        scope=SCOPE_SESSIONS,
+        evidence=(f"{errors:,} of {total:,} tool results errored",),
+        category="usage",
+        priority=68,
+        confidence="high",
+        evidence_metrics={"tool_error_rate": rate, "tool_results": total},
+        commands=("caliper session",),
+    )
+
+
+def _code_churn_insight(result: LoadResult, total) -> Insight | None:
+    """What the spend moved in the codebase: lines added/removed, cost per line.
+
+    Turns spend into a leverage figure. Built from edit/write ``structuredPatch``
+    line counts already parsed per turn.
+    """
+    added = removed = 0
+    for event in result.events:
+        facts = event.turn_facts
+        if facts is None:
+            continue
+        added += facts.lines_added
+        removed += facts.lines_removed
+    changed = added + removed
+    if changed < 100:
+        return None
+    cost = float(total.costs.cost_usd)
+    per_line = f"${cost / changed:,.3f}" if changed and cost > 0 else "n/a"
+    return Insight(
+        severity="info",
+        title="Code your spend moved",
+        detail=(
+            f"AI edits changed {changed:,} lines ({added:,} added, {removed:,} "
+            f"removed) in this window, about {per_line} per line changed. A rough "
+            "leverage measure, not a code-quality judgment."
+        ),
+        action="Pair this with the commits-authored tile for a fuller picture.",
+        scope=SCOPE_HOME,
+        evidence=(f"{added:,} added / {removed:,} removed lines",),
+        category="usage",
+        priority=60,
+        confidence="medium",
+        evidence_metrics={"lines_added": added, "lines_removed": removed},
         commands=("caliper session",),
     )
 
