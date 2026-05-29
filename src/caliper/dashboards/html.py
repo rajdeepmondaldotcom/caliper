@@ -4604,18 +4604,26 @@ def _section_output(d: Dashboard, *, rhythm: str) -> str:
 
     tiles: list[str] = []
     if o.has_git:
+        if o.commits_from_git:
+            commit_label = "Commits authored"
+            commit_detail = "Authored in the repos your sessions touched, this window."
+            cost_detail = "Total spend divided by commits authored."
+        else:
+            commit_label = "Commits touched"
+            commit_detail = "Distinct commits checked out while AI was working."
+            cost_detail = "Git-linked spend divided by commits touched."
         tiles.append(
             _tile(
                 f"{o.commits_touched:,}",
-                "Commits touched",
-                "Distinct commits checked out while AI was working.",
+                commit_label,
+                commit_detail,
             )
         )
         tiles.append(
             _tile(
                 fmt_money(o.cost_per_commit_usd),
                 "Cost per commit",
-                "Git-linked spend divided by commits touched.",
+                cost_detail,
             )
         )
         tiles.append(

@@ -2,6 +2,22 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.78 - 2026-05-29
+
+"What this produced" now counts the commits you actually shipped.
+
+- **"Commits touched" was undercounting badly.** It only counted commits whose
+  checked-out SHA a source happened to log on a spend event. Codex records
+  that, but Claude Code (often the bulk of usage) records no commit SHA at all,
+  so its sessions contributed zero and the headline number could read 36 when
+  the real figure was in the hundreds. The tile now reports **commits authored**
+  in the window in the repos your sessions touched, read from local `git log`
+  (no network). It counts every source, and cost per commit becomes total spend
+  divided by commits authored. Honestly labeled: it does not claim every commit
+  was AI-written, and the "linked to a commit" share still reflects only spend a
+  source tied to a specific commit. Falls back to the old SHA proxy when local
+  git is unavailable, so the demo and exports are unchanged.
+
 ## 0.0.77 - 2026-05-29
 
 Faster first dashboard load — same numbers, less work.

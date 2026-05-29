@@ -175,6 +175,7 @@ def build_handoff_dashboard(
     progress: Any | None = None,
     wide_result: LoadResult | None = None,
     wide_start: dt.datetime | None = None,
+    authored_commits: int | None = None,
 ) -> Dashboard:
     """Assemble the handoff `Dashboard` payload for `render_dashboard`."""
     from caliper import __version__
@@ -368,7 +369,9 @@ def build_handoff_dashboard(
         else []
     )
     budgets = _build_budget_rows(result, options, rate_card, budget_config)
-    output_summary = _build_output_summary(result, rate_card, shape_report)
+    output_summary = _build_output_summary(
+        result, rate_card, shape_report, authored_commits=authored_commits
+    )
     _advance_build(progress, "forecasts")
 
     # v2 design: the verdict strip shows up to 4 findings sorted by tone, so
@@ -436,13 +439,21 @@ def _build_output_summary(
     result: LoadResult,
     rate_card: RateCard,
     shape_report: SessionShapeReport,
+    *,
+    authored_commits: int | None = None,
 ) -> OutputSummary | None:
     """Answer "what did this spend produce?" from local git + tool evidence.
 
     Returns ``None`` when there is neither git linkage nor classified tool
     activity, so the renderer drops the section rather than showing zeros.
-    Every figure is sourced from logs already on disk. The function is pure:
-    no network, no git shell-out (git SHAs are read from parsed events).
+    Tool counts and spend come from logs already on disk.
+
+    ``authored_commits``: when provided (by the CLI, which can read local git),
+    it's the count of commits authored in the window in the repos the sessions
+    touched. This is the truthful "what shipped" figure and counts every source
+    — used in preference to the git-SHA proxy below, which only counts commits
+    whose checkout a source happened to log on a spend event (Codex does, Claude
+    Code does not). When ``None`` (tests, HTML export, demo), the proxy is used.
     """
     if not result.events:
         return None
@@ -458,9 +469,16 @@ def _build_output_summary(
             commit_cost[sha] += cost.cost_usd
             linked += cost.cost_usd
 
-    commits_touched = len(commit_cost)
+    if authored_commits is not None and authored_commits > 0:
+        commits_from_git = True
+        commits_touched = authored_commits
+        # Total AI spend per shipped commit — the value question, not a bill.
+        cost_per_commit = float(total / commits_touched) if commits_touched else 0.0
+    else:
+        commits_from_git = False
+        commits_touched = len(commit_cost)
+        cost_per_commit = float(linked / commits_touched) if commits_touched else 0.0
     has_git = commits_touched > 0
-    cost_per_commit = float(linked / commits_touched) if commits_touched else 0.0
     linked_pct = float(linked / total) if total > 0 else 0.0
 
     edits = diagnostics = exploration = classified = 0
@@ -487,6 +505,14 @@ def _build_output_summary(
             "commits. The edit-vs-diagnostic mix below is still measured from "
             "tool calls."
         )
+    elif commits_from_git:
+        caveat = (
+            "Commits authored in this window in the repos your sessions touched, "
+            "read from local git. Cost per commit divides total spend by that "
+            "count. It is a rough unit cost, not a per-commit invoice, and it "
+            "does not claim every commit was AI-written. Linked % below is the "
+            "share of spend a source tied to a specific commit."
+        )
     else:
         caveat = (
             "Cost per commit divides git-linked spend by commits touched. It is "
@@ -506,6 +532,7 @@ def _build_output_summary(
         classified_tool_calls=classified,
         has_git=has_git,
         caveat=caveat,
+        commits_from_git=commits_from_git,
     )
 
 

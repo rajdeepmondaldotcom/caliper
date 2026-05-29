@@ -64,7 +64,14 @@ from caliper.exporters import (
     render_receipt_markdown,
 )
 from caliper.forecasts import project as project_forecast
-from caliper.git import commit_for_sha, commits_for_revspec, gh_pr_commit_shas, local_pull_ref
+from caliper.git import (
+    commit_for_sha,
+    commits_for_revspec,
+    count_commits_in_window,
+    discover_repo_roots,
+    gh_pr_commit_shas,
+    local_pull_ref,
+)
 from caliper.health import (
     HEALTH_EXIT_CODES,
     HEALTH_STATUS_STYLES,
@@ -2587,6 +2594,22 @@ def dashboard(
             )
             prog.stage_start("build", total=DASHBOARD_BUILD_STEPS)
             budget_config = load_config(config) if config else load_config()
+            # Count commits actually authored in the window in the repos these
+            # sessions touched, from local git. This is the truthful "what
+            # shipped" figure and counts every source, unlike the git-SHA proxy
+            # (only some sources log a checked-out SHA). Best-effort: any git
+            # failure leaves it None and the builder falls back to the proxy.
+            authored_commits: int | None = None
+            try:
+                repo_roots = discover_repo_roots(
+                    event.thread.cwd for event in result.events if event.thread.cwd
+                )
+                if repo_roots:
+                    authored_commits = count_commits_in_window(
+                        repo_roots, options.start, options.end
+                    )
+            except Exception:  # noqa: BLE001 - never let git break the dashboard
+                authored_commits = None
             payload = build_handoff_dashboard(
                 result,
                 options,
@@ -2597,6 +2620,7 @@ def dashboard(
                 progress=prog,
                 wide_result=loaded_result,
                 wide_start=load_options.start,
+                authored_commits=authored_commits,
             )
             t = payload.totals
             prog.stage_done(
