@@ -27,7 +27,7 @@ wheels = [
 
 [[package]]
 name = "caliper-ai"
-version = "0.0.82"
+version = "0.0.83"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
