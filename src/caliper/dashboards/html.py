@@ -3676,6 +3676,24 @@ def render_models(rows: Sequence[ModelRow], *, total_cost: float | None = None) 
             + _td(_sparkline(r.daily_cost_sparkline, width=80, height=18), align="right")
             + "</tr>"
         )
+    # Honest tail: when the displayed rows don't account for the full window
+    # cost (e.g. the row set is truncated), name the remainder instead of
+    # letting the table silently under-sum. Mirrors the projects table.
+    other_share = max(0.0, 1.0 - sum(r.cost_usd for r in sorted_rows) / total) if total else 0.0
+    other_row = ""
+    if other_share > 0.01:
+        other_row = (
+            '<tr style="border-top:1px solid var(--border);color:var(--mute);font-style:italic">'
+            + _td("Other models/tiers")
+            + _td("")
+            + _td(fmt_money(other_share * total), align="right", mono=True)
+            + _td(f"{int(round(other_share * 100))}%", align="right")
+            + _td("—", align="right")
+            + _td("—", align="right")
+            + _td("—", align="right")
+            + _td("")
+            + "</tr>"
+        )
     return (
         # overflow-x:auto + tabindex so wide sortable tables scroll (and are
         # keyboard-scrollable) on narrow screens instead of clipping columns.
@@ -3686,6 +3704,7 @@ def render_models(rows: Sequence[ModelRow], *, total_cost: float | None = None) 
         + head
         + "<tbody>"
         + "".join(body_rows)
+        + other_row
         + "</tbody></table></div>"
     )
 
@@ -3922,7 +3941,7 @@ def _anomaly_action(kind: str) -> str:
 def _anomaly_command(kind: str) -> str:
     """The command that drills straight into the source of a spike."""
     normalized = kind.lower()
-    if "session" in normalized:
+    if "session" in normalized or "efficiency" in normalized:
         return "caliper session"
     if "project" in normalized:
         return "caliper project"
@@ -4604,18 +4623,26 @@ def _section_output(d: Dashboard, *, rhythm: str) -> str:
 
     tiles: list[str] = []
     if o.has_git:
+        if o.commits_from_git:
+            commit_label = "Commits authored"
+            commit_detail = "Authored in the repos your sessions touched, this window."
+            cost_detail = "Total spend divided by commits authored."
+        else:
+            commit_label = "Commits touched"
+            commit_detail = "Distinct commits checked out while AI was working."
+            cost_detail = "Git-linked spend divided by commits touched."
         tiles.append(
             _tile(
                 f"{o.commits_touched:,}",
-                "Commits touched",
-                "Distinct commits checked out while AI was working.",
+                commit_label,
+                commit_detail,
             )
         )
         tiles.append(
             _tile(
                 fmt_money(o.cost_per_commit_usd),
                 "Cost per commit",
-                "Git-linked spend divided by commits touched.",
+                cost_detail,
             )
         )
         tiles.append(

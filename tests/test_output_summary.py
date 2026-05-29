@@ -109,6 +109,58 @@ def test_output_summary_without_git_still_reports_tool_mix() -> None:
     assert "No git history" in summary.caveat
 
 
+def test_output_summary_uses_authored_commits_when_provided() -> None:
+    card = _card()
+    events = [
+        # One linked event (carries a SHA) and one unlinked, so total > linked.
+        _event(session_id="s1", turn_index=0, tools=("Edit",), git_sha="aaa", minute=1),
+        _event(session_id="s2", turn_index=0, tools=("Edit",), minute=2),
+    ]
+    result = _result(events)
+    summary = _build_output_summary(result, card, compute_session_shape(result), authored_commits=5)
+
+    assert summary is not None
+    assert summary.has_git is True
+    assert summary.commits_from_git is True
+    # The git-authored count wins over the 1-distinct-SHA proxy.
+    assert summary.commits_touched == 5
+    # Cost per commit is TOTAL window spend over authored commits, not just
+    # the git-linked slice, so it exceeds linked_cost / 5.
+    assert summary.cost_per_commit_usd * 5 > summary.linked_cost_usd
+    assert summary.linked_cost_pct < 1.0
+    assert "Commits authored" in summary.caveat
+
+
+def test_output_summary_zero_authored_commits_falls_back_to_proxy() -> None:
+    # authored_commits=0 means local git surfaced nothing; keep the proxy.
+    card = _card()
+    events = [_event(session_id="s1", turn_index=0, tools=("Edit",), git_sha="aaa")]
+    result = _result(events)
+    summary = _build_output_summary(result, card, compute_session_shape(result), authored_commits=0)
+
+    assert summary is not None
+    assert summary.commits_from_git is False
+    assert summary.commits_touched == 1
+
+
+def test_output_summary_caveats_unclassified_tools() -> None:
+    # A tool that isn't in the edit/diagnose/explore sets must be disclosed,
+    # not silently dropped from the denominator behind a clean-looking 100%.
+    card = _card()
+    events = [
+        _event(session_id="s1", turn_index=0, tools=("Edit",), minute=1),
+        _event(session_id="s1", turn_index=1, tools=("TotallyNewTool",), minute=2),
+    ]
+    result = _result(events)
+    summary = _build_output_summary(result, card, compute_session_shape(result))
+
+    assert summary is not None
+    # Only the Edit call is classified; the unknown tool is the other half.
+    assert summary.classified_tool_calls == 1
+    assert "unrecognized kind" in summary.caveat
+    assert "50%" in summary.caveat
+
+
 def test_output_summary_none_on_empty_window() -> None:
     assert _build_output_summary(_result([]), _card(), compute_session_shape(_result([]))) is None
 

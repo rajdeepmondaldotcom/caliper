@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 
 from caliper.aggregation import (
     aggregate_daily,
     aggregate_projects,
     aggregate_total,
     event_cache_savings,
+    event_cost,
+)
+from caliper.analysis.session_shape import (
+    DIAGNOSTIC_TOOLS,
+    EXECUTION_TOOLS,
 )
 from caliper.evidence import (
     OVERALL_EVIDENCE_DIMENSION_NAMES,
@@ -113,6 +119,10 @@ def build_insights_from(
         _vendor_mix_insight(total),
         _top_waste_insight(result, rate_card, audit_findings=audit_findings),
         _demand_shift_insight(result, rate_card),
+        _spinning_session_insight(result, rate_card),
+        _turn_latency_insight(result),
+        _tool_error_insight(result),
+        _code_churn_insight(result, total),
     ]
     return sorted(
         [item for item in candidates if item is not None],
@@ -397,6 +407,199 @@ def _vendor_mix_insight(total) -> Insight | None:
         confidence="medium",
         evidence_metrics={"vendor_cost_share": by_vendor},
         commands=("caliper models --per-model", "caliper models --by vendor"),
+    )
+
+
+def _spinning_session_insight(result: LoadResult, card: RateCard) -> Insight | None:
+    """Name the single session that spent the most while spinning its wheels.
+
+    The window-level edit-vs-diagnose mix can read "fine" while one session quietly
+    burned money debugging in circles. This finds that session: a high diagnostic
+    tool share with almost no edits, over enough tool calls and dollars to matter.
+    Built only from already-parsed TurnFacts tool names plus per-event cost, so it
+    needs no new parsing.
+    """
+    MIN_CLASSIFIED = 15
+    MIN_COST = 2.0
+    DIAGNOSTIC_FLOOR = 0.6
+    EDIT_CEILING = 0.1
+
+    by_session: dict[str, dict[str, float]] = {}
+    for event in result.events:
+        facts = event.turn_facts
+        if facts is None:
+            continue
+        item = by_session.setdefault(
+            event.session_id, {"cost": 0.0, "edits": 0, "diag": 0, "classified": 0}
+        )
+        cost, _, _ = event_cost(card, event)
+        item["cost"] += float(cost.cost_usd)
+        for name in facts.tool_names:
+            if name in EXECUTION_TOOLS:
+                item["edits"] += 1
+                item["classified"] += 1
+            elif name in DIAGNOSTIC_TOOLS:
+                item["diag"] += 1
+                item["classified"] += 1
+
+    worst: tuple[str, dict[str, float]] | None = None
+    for session_id, item in by_session.items():
+        classified = int(item["classified"])
+        if classified < MIN_CLASSIFIED or item["cost"] < MIN_COST:
+            continue
+        diag_share = item["diag"] / classified
+        edit_share = item["edits"] / classified
+        if (
+            diag_share >= DIAGNOSTIC_FLOOR
+            and edit_share <= EDIT_CEILING
+            and (worst is None or item["cost"] > worst[1]["cost"])
+        ):
+            worst = (session_id, item)
+
+    if worst is None:
+        return None
+
+    _session_id, item = worst
+    classified = int(item["classified"])
+    diag_share = item["diag"] / classified
+    cost = item["cost"]
+    edits = int(item["edits"])
+    return Insight(
+        severity="warn",
+        title="A session spun more than it shipped",
+        detail=(
+            f"One session ran {classified:,} classified tool calls, "
+            f"{diag_share:.0%} of them diagnostic (bash, tests, search) with only "
+            f"{edits} edit{'s' if edits != 1 else ''}, at ${cost:,.2f}. That is the "
+            "rough shape of debugging in circles rather than shipping changes."
+        ),
+        action="Open it to see where it got stuck.",
+        scope=SCOPE_SESSIONS,
+        evidence=(
+            f"{diag_share:.0%} diagnostic share",
+            f"{edits} edits over {classified:,} tool calls",
+        ),
+        category="usage",
+        priority=74,
+        confidence="medium",
+        impact_usd_exact=decimal_string(Decimal(str(cost))),
+        impact_label=f"${cost:,.2f} session",
+        evidence_metrics={"diagnostic_share": diag_share, "tool_calls": classified},
+        commands=("caliper session",),
+    )
+
+
+def _turn_latency_insight(result: LoadResult) -> Insight | None:
+    """How long turns typically take to come back (a velocity signal).
+
+    Derived from the gap between each reply and the previous logged event
+    (parsed into TurnFacts.latency_ms), so it reflects model time plus any
+    in-turn tool runs. Needs a stable sample before it's worth showing.
+    """
+    latencies = sorted(
+        event.turn_facts.latency_ms
+        for event in result.events
+        if event.turn_facts is not None and event.turn_facts.latency_ms is not None
+    )
+    n = len(latencies)
+    if n < 20:
+        return None
+    median_ms = latencies[n // 2] if n % 2 else (latencies[n // 2 - 1] + latencies[n // 2]) / 2
+    p90_ms = latencies[min(n - 1, int(n * 0.9))]
+    median_s = median_ms / 1000
+    p90_s = p90_ms / 1000
+    return Insight(
+        severity="info",
+        title="Typical turn response time",
+        detail=(
+            f"Half your turns came back within {median_s:.1f}s and 90% within "
+            f"{p90_s:.1f}s, measured from the previous event to the reply across "
+            f"{n:,} turns. This includes any tool runs inside the turn; idle gaps "
+            "over 10 minutes are excluded."
+        ),
+        action="Slower turns usually mean larger context or heavier tool loops.",
+        scope=SCOPE_SESSIONS,
+        evidence=(f"median {median_s:.1f}s over {n:,} turns",),
+        category="usage",
+        priority=58,
+        confidence="medium",
+        evidence_metrics={"median_latency_ms": median_ms, "turns": n},
+        commands=("caliper session",),
+    )
+
+
+def _tool_error_insight(result: LoadResult) -> Insight | None:
+    """Share of the AI's tool calls that came back as errors (Claude Code).
+
+    A high error rate means the agent is thrashing — wrong commands, failing
+    tests, bad paths — and burning tokens on dead ends. Derived from
+    ``tool_result.is_error`` recorded per turn.
+    """
+    errors = total = 0
+    for event in result.events:
+        facts = event.turn_facts
+        if facts is None:
+            continue
+        total += facts.tool_result_count
+        errors += facts.tool_error_count
+    if total < 50:
+        return None
+    rate = errors / total
+    if rate < 0.05:
+        return None
+    return Insight(
+        severity="warn" if rate >= 0.15 else "info",
+        title="Tool calls are erroring more than usual",
+        detail=(
+            f"{rate:.0%} of the AI's {total:,} tool results came back as errors "
+            f"({errors:,} failures). A high rate often means failing commands or "
+            "tests sending the agent down dead ends, which burns tokens."
+        ),
+        action="Open the noisiest sessions to see which tools fail.",
+        scope=SCOPE_SESSIONS,
+        evidence=(f"{errors:,} of {total:,} tool results errored",),
+        category="usage",
+        priority=68,
+        confidence="high",
+        evidence_metrics={"tool_error_rate": rate, "tool_results": total},
+        commands=("caliper session",),
+    )
+
+
+def _code_churn_insight(result: LoadResult, total) -> Insight | None:
+    """What the spend moved in the codebase: lines added/removed, cost per line.
+
+    Turns spend into a leverage figure. Built from edit/write ``structuredPatch``
+    line counts already parsed per turn.
+    """
+    added = removed = 0
+    for event in result.events:
+        facts = event.turn_facts
+        if facts is None:
+            continue
+        added += facts.lines_added
+        removed += facts.lines_removed
+    changed = added + removed
+    if changed < 100:
+        return None
+    cost = float(total.costs.cost_usd)
+    per_line = f"${cost / changed:,.3f}" if changed and cost > 0 else "n/a"
+    return Insight(
+        severity="info",
+        title="Code your spend moved",
+        detail=(
+            f"AI edits changed {changed:,} lines ({added:,} added, {removed:,} "
+            f"removed) in this window, about {per_line} per line changed. A rough "
+            "leverage measure, not a code-quality judgment."
+        ),
+        action="Pair this with the commits-authored tile for a fuller picture.",
+        scope=SCOPE_HOME,
+        evidence=(f"{added:,} added / {removed:,} removed lines",),
+        category="usage",
+        priority=60,
+        confidence="medium",
+        evidence_metrics={"lines_added": added, "lines_removed": removed},
+        commands=("caliper session",),
     )
 
 

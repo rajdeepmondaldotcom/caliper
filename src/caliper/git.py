@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import subprocess  # nosec
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,6 +84,58 @@ def gh_pr_commit_shas(pr_number: int, repo: Path | None = None) -> list[str]:
     if completed.returncode != 0:
         return []
     return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+
+
+def discover_repo_roots(cwds: Iterable[Path | str]) -> list[Path]:
+    """Resolve the unique git repository roots for a set of working dirs.
+
+    Best-effort: working dirs that no longer exist, sit outside any repo, or
+    fail `git rev-parse` are silently skipped. Returns roots in first-seen
+    order so callers get a stable, deduped list. Each distinct path is probed
+    once even if many sessions share it.
+    """
+    roots: dict[str, Path] = {}
+    seen_cwds: set[str] = set()
+    for cwd in cwds:
+        if not cwd:
+            continue
+        key = str(cwd)
+        if key in seen_cwds:
+            continue
+        seen_cwds.add(key)
+        try:
+            root = repo_root(Path(key))
+        except (ValueError, OSError):
+            continue
+        roots.setdefault(str(root), root)
+    return list(roots.values())
+
+
+def count_commits_in_window(
+    repo_roots: Iterable[Path],
+    start: dt.datetime,
+    end: dt.datetime,
+) -> int:
+    """Count distinct commits authored in ``[start, end)`` across repos.
+
+    Reads local `git log` only (no network). Commit SHAs are globally unique,
+    so the union across repos deduplicates naturally. Any repo that fails
+    (detached, corrupt, permission) is skipped rather than failing the whole
+    count, so the figure is a floor, never an error.
+    """
+    start_iso = start.astimezone(dt.UTC).isoformat()
+    end_iso = end.astimezone(dt.UTC).isoformat()
+    shas: set[str] = set()
+    for root in repo_roots:
+        try:
+            output = _git(
+                ["log", f"--since={start_iso}", f"--until={end_iso}", "--format=%H"],
+                cwd=root,
+            )
+        except (ValueError, OSError):
+            continue
+        shas.update(line.strip() for line in output.splitlines() if line.strip())
+    return len(shas)
 
 
 def _git(args: list[str], cwd: Path) -> str:

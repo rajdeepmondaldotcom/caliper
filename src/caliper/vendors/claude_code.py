@@ -27,7 +27,7 @@ from caliper.progress import NULL_PROGRESS, ParseProgress
 from caliper.timeutil import parse_event_timestamp
 
 SUPPORTED_SCHEMAS = ("1",)
-PARSER_VERSION = "claude-code-v4"
+PARSER_VERSION = "claude-code-v6"
 
 
 @dataclass(frozen=True)
@@ -268,12 +268,17 @@ def _parse_session(
 ) -> list[UsageEvent]:
     events: list[UsageEvent] = []
     turn_counter: dict[str, int] = {}
+    prev_ts: dt.datetime | None = None
     try:
         total_bytes = path.stat().st_size
     except OSError:
         total_bytes = 0
     bytes_read = 0
     next_report = 1_000_000
+    # First streaming pass: keep the JSON lines (with their original line
+    # numbers) and report progress. Tool RESULTS arrive in later events than the
+    # tool_use that spawned them, so a second pass cross-references them.
+    raws: list[tuple[int, dict[str, Any]]] = []
     with path.open(encoding="utf-8", errors="replace") as handle:
         for line_number, line in enumerate(handle, start=1):
             bytes_read += len(line)
@@ -283,11 +288,27 @@ def _parse_session(
                 report_file_progress(progress, path, min(bytes_read, total_bytes), total_bytes)
                 next_report = bytes_read + 1_000_000
             raw = _json_event_from_line(line)
-            if raw is None:
-                continue
-            event = _usage_event(raw, path, line_number, options, turn_counter)
-            if event is not None:
-                events.append(event)
+            if raw is not None:
+                raws.append((line_number, raw))
+    results_by_id = _tool_results_by_id(raw for _ln, raw in raws)
+    for line_number, raw in raws:
+        event = _usage_event(
+            raw,
+            path,
+            line_number,
+            options,
+            turn_counter,
+            prev_ts=prev_ts,
+            results_by_id=results_by_id,
+        )
+        if event is not None:
+            events.append(event)
+        # Track the timestamp of every line (user prompts, tool results,
+        # assistant replies) so the next turn's response time is the gap
+        # from the immediately preceding event, not the prior usage event.
+        line_ts = parse_event_timestamp(str(raw.get("timestamp") or ""))
+        if line_ts is not None:
+            prev_ts = line_ts
     if total_bytes:
         from caliper.progress import report_file_progress
 
@@ -303,12 +324,85 @@ def _json_event_from_line(line: str) -> dict[str, Any] | None:
     return raw if isinstance(raw, dict) else None
 
 
+# Wall-clock gaps longer than this read as the human stepping away between
+# turns, not the model thinking — excluded from the turn-response-time proxy.
+_MAX_TURN_LATENCY_S = 600.0
+
+
+def _structured_patch_churn(patch: object) -> tuple[int, int]:
+    """Lines added / removed from a Claude Code ``structuredPatch`` hunk list."""
+    added = removed = 0
+    if not isinstance(patch, list):
+        return 0, 0
+    for hunk in patch:
+        if not isinstance(hunk, dict):
+            continue
+        for line in hunk.get("lines") or []:
+            if isinstance(line, str):
+                if line.startswith("+"):
+                    added += 1
+                elif line.startswith("-"):
+                    removed += 1
+    return added, removed
+
+
+def _tool_results_by_id(
+    raws: Iterable[dict[str, Any]],
+) -> dict[str, tuple[bool, int, int]]:
+    """Map each ``tool_use_id`` to ``(is_error, lines_added, lines_removed)``.
+
+    Tool results land in the user event that follows the assistant's tool call,
+    carrying ``is_error`` on the ``tool_result`` content block and a
+    ``structuredPatch`` (for edits) on the top-level ``toolUseResult``. Indexing
+    by ``tool_use_id`` lets the turn that issued the call pick its outcomes back
+    up in the second pass.
+    """
+    out: dict[str, tuple[bool, int, int]] = {}
+    for raw in raws:
+        message = raw.get("message")
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        tool_use_result = raw.get("toolUseResult")
+        added, removed = (
+            _structured_patch_churn(tool_use_result.get("structuredPatch"))
+            if isinstance(tool_use_result, dict)
+            else (0, 0)
+        )
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            tool_use_id = str(block.get("tool_use_id") or "")
+            if tool_use_id:
+                out[tool_use_id] = (bool(block.get("is_error")), added, removed)
+    return out
+
+
+def _turn_latency_ms(prev_ts: dt.datetime | None, ts: dt.datetime) -> int | None:
+    """Milliseconds from the previous logged event to this reply, or None.
+
+    A proxy for how long the turn took to come back (model time plus any
+    in-turn tool runs). Negative or idle-length gaps are dropped so the median
+    reflects real responsiveness, not a lunch break.
+    """
+    if prev_ts is None:
+        return None
+    gap = (ts - prev_ts).total_seconds()
+    if gap < 0 or gap > _MAX_TURN_LATENCY_S:
+        return None
+    return int(gap * 1000)
+
+
 def _usage_event(
     raw: dict[str, Any],
     path: Path,
     line_number: int,
     options: RuntimeOptions,
     turn_counter: dict[str, int],
+    prev_ts: dt.datetime | None = None,
+    results_by_id: dict[str, tuple[bool, int, int]] | None = None,
 ) -> UsageEvent | None:
     message = raw.get("message")
     if not isinstance(message, dict):
@@ -342,7 +436,13 @@ def _usage_event(
     session_id = str(raw.get("sessionId") or path.stem)
     turn_index = turn_counter.get(session_id, 0)
     turn_counter[session_id] = turn_index + 1
-    turn_facts = _turn_facts_from_message(message, raw, turn_index)
+    turn_facts = _turn_facts_from_message(
+        message,
+        raw,
+        turn_index,
+        latency_ms=_turn_latency_ms(prev_ts, timestamp),
+        results_by_id=results_by_id,
+    )
     return UsageEvent(
         timestamp=timestamp,
         path=path,
@@ -370,10 +470,14 @@ def _turn_facts_from_message(
     message: dict[str, Any],
     raw: dict[str, Any],
     turn_index: int,
+    *,
+    latency_ms: int | None = None,
+    results_by_id: dict[str, tuple[bool, int, int]] | None = None,
 ) -> TurnFacts:
     content = message.get("content")
     tool_names: list[str] = []
     skill_names: list[str] = []
+    tool_use_ids: list[str] = []
     tool_use_count = 0
     has_thinking = False
     if isinstance(content, list):
@@ -386,12 +490,26 @@ def _turn_facts_from_message(
                 name = block.get("name")
                 if isinstance(name, str) and name:
                     tool_names.append(name)
+                block_id = block.get("id")
+                if isinstance(block_id, str) and block_id:
+                    tool_use_ids.append(block_id)
                 if name == "Skill":
                     skill_name = _skill_name_from_tool_use(block)
                     if skill_name:
                         skill_names.append(skill_name)
             elif block_type == "thinking":
                 has_thinking = True
+    tool_result_count = tool_error_count = lines_added = lines_removed = 0
+    if results_by_id:
+        for tool_use_id in tool_use_ids:
+            result = results_by_id.get(tool_use_id)
+            if result is None:
+                continue
+            is_error, added, removed = result
+            tool_result_count += 1
+            tool_error_count += int(is_error)
+            lines_added += added
+            lines_removed += removed
     return TurnFacts(
         turn_index=turn_index,
         parent_uuid=str(raw.get("parentUuid") or ""),
@@ -399,6 +517,11 @@ def _turn_facts_from_message(
         tool_names=tuple(tool_names),
         skill_names=tuple(skill_names),
         has_thinking_block=has_thinking,
+        latency_ms=latency_ms,
+        tool_result_count=tool_result_count,
+        tool_error_count=tool_error_count,
+        lines_added=lines_added,
+        lines_removed=lines_removed,
     )
 
 

@@ -379,6 +379,7 @@ class DailyPoint:
     cost_usd: float
     events: int
     shape: SessionShapeName
+    tokens: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +567,12 @@ class OutputSummary:
     classified_tool_calls: int
     has_git: bool
     caveat: str = ""
+    # When True, ``commits_touched`` is the count of commits authored in the
+    # window in the repos the sessions touched (read from local ``git log``),
+    # and ``cost_per_commit_usd`` is total window spend divided by that count.
+    # When False, both fall back to the git-SHA proxy (commits whose checkout
+    # was recorded on a spend event), which only some sources log.
+    commits_from_git: bool = False
 
 
 # ---------------------------------------------------------------------------

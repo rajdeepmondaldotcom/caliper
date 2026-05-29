@@ -24,7 +24,7 @@ uvx --isolated --from caliper-ai caliper dashboard --demo --open
 
 ![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/hero.png)
 
-<p align="center"><sub>Safe Share mode: paths, projects, and session labels are redacted while costs, evidence status, and next actions stay visible.</sub></p>
+<p align="center"><sub>Screenshot in Safe Share mode (<code>--share-safe</code>): paths, projects, and session labels are redacted while costs, evidence, and next actions stay visible. By default the dashboard shows your real labels for local analysis; add <code>--share-safe</code> when you forward it.</sub></p>
 
 ---
 
@@ -35,13 +35,14 @@ already on your machine:
 
 ![What this produced: commits touched, cost per commit, share of spend linked to a commit, and the edit-vs-diagnose ratio](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/output.png)
 
-- **Commits touched.** How many distinct commits were checked out while the AI
-  was working.
-- **Cost per commit.** Git-linked spend divided by commits touched. A unit cost,
+- **Commits authored.** How many commits you actually shipped in this window, in
+  the repos your sessions touched — read from local `git log`, counting every
+  source. It does not claim every commit was AI-written.
+- **Cost per commit.** Total spend divided by commits authored. A unit cost,
   not an invoice.
-- **Linked to a commit.** The share of spend recorded at a known commit. The
-  rest is exploration, planning, or work that never reached a commit. That is
-  not automatically waste, and Caliper says so.
+- **Linked to a commit.** The share of spend a source tied to a specific commit.
+  The rest is exploration, planning, or work that never reached a commit. That
+  is not automatically waste, and Caliper says so.
 - **Edits vs. diagnose/run.** The share of tool calls that changed files versus
   ran shells and tests. A lot of diagnosing and very little editing is the rough
   shape of a session that spun instead of shipped.
@@ -81,6 +82,12 @@ Caliper · Last 30 days · $1,243 · trend +8.2% · top fix: Move low-output
 Avoidable: $176.64 across 3 recommendations. Reproduce with `caliper recommend`.
 Theme: dark · local-only · re-render: caliper dashboard --open
 ```
+
+By default the dashboard shows your **real** project names, paths, and session
+labels — it's your machine and your analysis. When you want to forward the file,
+add `--share-safe` (or set `dashboard.privacy = "always"`) and Caliper swaps every
+name for an indexed placeholder, tags the filename, and keeps the costs and
+evidence intact.
 
 If Caliper detects a flat-rate subscription, it labels the headline cost
 **API-equivalent value, not a bill**, right where you read it. Nobody mistakes
@@ -132,9 +139,12 @@ real report layout without exposing local paths or session identities.
 |---|---|
 | <img alt="Spend spikes above the expected band, each with actual vs expected spend, cost impact, the detector sigma, and a copyable drill-in command" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/anomalies.png"> | <img alt="Ranked avoidable-spend findings with re-pricing caveats and cache reuse panels" src="https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/inefficiencies.png"> |
 
-Anomalies flag the days and sessions that ran above their expected band, and
-each row ends in the command that opens its source — paste it and you are
-looking at the cause, not just the spike.
+Anomalies go past "you spent a lot that day" — which is usually just a busy day
+you already know about. Alongside raw spikes, Caliper flags **efficiency
+regressions**: a session that paid more *per 1M tokens* than prior sessions of
+the same size in the same project and model (cache loss, model drift, tool
+thrash), with the extra dollars quantified. Each row ends in the command that
+opens its source — paste it and you are looking at the cause, not just the spike.
 
 ![Plan limits used: per-source Codex and Claude Code panels with Current session and Peak this window meters, each with a human-readable reset time](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/ratelimits.png)
 
@@ -255,7 +265,18 @@ evidence supports.
   separate from standard-tier usage in dashboard spend drivers.
 - Unknown pricing is surfaced as a warning, not silently guessed.
 - Anomaly detection uses robust σ (MAD × 1.4826, IQR / 1.349) with a $1
-  absolute floor — no more "354,210σ" on a sparse Tuesday.
+  absolute floor — no more "354,210σ" on a sparse Tuesday. Beyond raw spikes,
+  an efficiency-regression detector flags sessions that cost more per 1M tokens
+  than their project/model peers, so the section surfaces waste you can act on,
+  not just busy days.
+- Tool-mix shares disclose any unrecognized-tool remainder instead of quietly
+  normalizing it away, and per-day token sparklines plot tokens, not event
+  counts.
+- Velocity and quality signals mined from the session data: a **typical turn
+  response time** (median and p90), a callout for any **session that spun more
+  than it shipped** (mostly diagnostics, almost no edits), the **tool-error
+  rate** (how often the AI's commands fail), and **code churn** (lines added /
+  removed and a rough cost per line changed).
 - Evidence is graded `exact`, `estimated`, `partial`, or `unsupported`. Each
   KPI exposes its formula inline.
 

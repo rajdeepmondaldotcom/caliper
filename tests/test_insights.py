@@ -245,3 +245,145 @@ def test_insights_markdown_escapes_pipe_characters() -> None:
 
     assert "A \\| B" in output
     assert "one \\| two" in output
+
+
+def test_turn_latency_insight_reports_median() -> None:
+    import datetime as dt2
+    from pathlib import Path
+
+    from caliper.insights import _turn_latency_insight
+    from caliper.models import ThreadMeta, TurnFacts, Usage, UsageEvent
+
+    base = dt2.datetime(2026, 5, 12, 10, 0, tzinfo=dt2.UTC)
+    events = [
+        UsageEvent(
+            timestamp=base + dt2.timedelta(minutes=i),
+            path=Path("/tmp/r.jsonl"),
+            session_id="s1",
+            usage=Usage(input_tokens=100, output_tokens=20, total_tokens=120),
+            model="claude-sonnet-4-6",
+            service_tier="standard",
+            tier_source="logged",
+            thread=ThreadMeta(cwd="/tmp/p"),
+            # 25 turns, all 5s → median 5000ms.
+            turn_facts=TurnFacts(turn_index=i, latency_ms=5000),
+        )
+        for i in range(25)
+    ]
+    result = LoadResult(
+        events=events,
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[],
+        warnings=[],
+    )
+    insight = _turn_latency_insight(result)
+    assert insight is not None
+    assert insight.evidence_metrics["median_latency_ms"] == 5000
+    assert insight.evidence_metrics["turns"] == 25
+    assert "5.0s" in insight.detail
+
+
+def test_turn_latency_insight_needs_enough_turns() -> None:
+    import datetime as dt2
+    from pathlib import Path
+
+    from caliper.insights import _turn_latency_insight
+    from caliper.models import ThreadMeta, TurnFacts, Usage, UsageEvent
+
+    base = dt2.datetime(2026, 5, 12, 10, 0, tzinfo=dt2.UTC)
+    events = [
+        UsageEvent(
+            timestamp=base,
+            path=Path("/tmp/r.jsonl"),
+            session_id="s1",
+            usage=Usage(input_tokens=100, output_tokens=20, total_tokens=120),
+            model="claude-sonnet-4-6",
+            service_tier="standard",
+            tier_source="logged",
+            thread=ThreadMeta(cwd="/tmp/p"),
+            turn_facts=TurnFacts(latency_ms=5000),
+        )
+        for _ in range(5)
+    ]
+    result = LoadResult(
+        events=events,
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[],
+        warnings=[],
+    )
+    # Below the 20-turn floor → no insight (medians on tiny samples are noise).
+    assert _turn_latency_insight(result) is None
+
+
+def _latency_event(latency_ms=None, errors=0, results=0, added=0, removed=0):
+    import datetime as dt2
+    from pathlib import Path
+
+    from caliper.models import ThreadMeta, TurnFacts, Usage, UsageEvent
+
+    return UsageEvent(
+        timestamp=dt2.datetime(2026, 5, 12, 10, 0, tzinfo=dt2.UTC),
+        path=Path("/tmp/r.jsonl"),
+        session_id="s1",
+        usage=Usage(input_tokens=100, output_tokens=20, total_tokens=120),
+        model="claude-sonnet-4-6",
+        service_tier="standard",
+        tier_source="logged",
+        thread=ThreadMeta(cwd="/tmp/p"),
+        turn_facts=TurnFacts(
+            latency_ms=latency_ms,
+            tool_result_count=results,
+            tool_error_count=errors,
+            lines_added=added,
+            lines_removed=removed,
+        ),
+    )
+
+
+def _result_of(events):
+    return LoadResult(
+        events=events,
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[],
+        warnings=[],
+    )
+
+
+def test_tool_error_insight_fires_above_threshold() -> None:
+    from caliper.insights import _tool_error_insight
+
+    # 100 tool results, 20 errors = 20% → warn.
+    events = [_latency_event(results=10, errors=2) for _ in range(10)]
+    insight = _tool_error_insight(_result_of(events))
+    assert insight is not None
+    assert insight.severity == "warn"
+    assert insight.evidence_metrics["tool_results"] == 100
+    assert round(insight.evidence_metrics["tool_error_rate"], 2) == 0.20
+
+
+def test_tool_error_insight_silent_when_healthy() -> None:
+    from caliper.insights import _tool_error_insight
+
+    # 100 results, 2 errors = 2% → below the 5% floor, no insight.
+    events = [_latency_event(results=10, errors=0) for _ in range(9)]
+    events.append(_latency_event(results=10, errors=2))
+    assert _tool_error_insight(_result_of(events)) is None
+
+
+def test_code_churn_insight_reports_lines() -> None:
+    from caliper.aggregation import aggregate_total
+    from caliper.insights import _code_churn_insight
+
+    events = [_latency_event(added=200, removed=100)]
+    result = _result_of(events)
+    total = aggregate_total(result, build_options(timezone="UTC"))
+    insight = _code_churn_insight(result, total)
+    assert insight is not None
+    assert insight.evidence_metrics["lines_added"] == 200
+    assert insight.evidence_metrics["lines_removed"] == 100

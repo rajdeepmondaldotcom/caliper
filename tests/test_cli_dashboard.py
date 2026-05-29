@@ -95,28 +95,28 @@ def test_dashboard_safe_share_alias_writes_safe_file(tmp_path) -> None:
     assert "Project 1" in html
 
 
-def test_dashboard_ignores_generated_legacy_privacy_off(monkeypatch, tmp_path) -> None:
+def test_dashboard_respects_config_privacy_off(monkeypatch, tmp_path) -> None:
+    # A config that sets privacy="off" is honored: local-only render with real
+    # labels. (Earlier versions force-flipped a generated "off" config to
+    # "always"; that override is gone now that "off" is the intended default.)
     user_config = tmp_path / "config.toml"
     user_config.write_text(
         """\
 [dashboard]
-# Privacy / redaction (opt-in)
-# Default is "off". Switch with the CLI flag --privacy <mode> or by editing this line.
 privacy = "off"
 """
     )
     monkeypatch.setattr("caliper.config.USER_CONFIG", user_config)
     monkeypatch.setattr("caliper.config.LOCAL_CONFIG", tmp_path / "missing-local.toml")
-    out = tmp_path / "legacy.html"
+    out = tmp_path / "local.html"
 
     result = runner.invoke(app, ["dashboard", "--demo", "--output", str(out)])
 
     assert result.exit_code == 0, result.output
-    assert 'ignoring privacy="off" from the auto-generated config' in result.output
+    assert "ignoring" not in result.output
     html = out.read_text(encoding="utf-8")
-    assert 'data-share-safe="true"' in html
-    assert 'data-privacy="always"' in html
-    assert "api-server" not in html
+    assert 'data-share-safe="false"' in html
+    assert 'data-privacy="off"' in html
 
 
 def test_dashboard_no_share_safe_keeps_local_labels(tmp_path) -> None:
@@ -214,10 +214,11 @@ def test_dashboard_default_opens_browser_for_interactive_terminal(monkeypatch, t
     assert "Opened" in result.output
     assert opened
     opened_path = Path(urlparse(opened[0]).path)
-    # v0.0.54 default: share-safe filenames carry the privacy mode.
+    # Default privacy is now "off" (local-only real labels), so the filename
+    # stays clean — no privacy suffix. Redacted exports get a -privacy-* tag.
     assert opened_path.name.startswith("caliper-dashboard-")
     assert opened_path.name.endswith(".html")
-    assert "privacy-always" in opened_path.name
+    assert "privacy-" not in opened_path.name
     assert opened_path.exists()
     assert opened_path.read_text(encoding="utf-8").startswith("<!doctype html>")
     # Cleanup the generated file so re-running tests doesn't litter ~/Downloads.

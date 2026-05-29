@@ -22,9 +22,8 @@ from typing import Any
 
 from caliper.aggregation import (
     aggregate_daily,
-    aggregate_model_mode,
+    aggregate_dashboard_groups,
     aggregate_overview_windows,
-    aggregate_projects,
     aggregate_sessions,
     aggregate_total,
     event_cost,
@@ -98,7 +97,7 @@ from caliper.humanize import session_label_lookup
 from caliper.inefficiencies import build_inefficiency_findings
 from caliper.insights import _inefficiency_insight, build_insights_from
 from caliper.models import UNKNOWN_PROJECT, Aggregate, LoadResult, RuntimeOptions
-from caliper.parser import load_usage
+from caliper.parser import load_usage, scope_load_result
 from caliper.predict import (
     forecast_project_burn,
     forecast_rate_limits,
@@ -174,6 +173,9 @@ def build_handoff_dashboard(
     rolling_options: RuntimeOptions | None = None,
     budget_config: dict[str, Any] | None = None,
     progress: Any | None = None,
+    wide_result: LoadResult | None = None,
+    wide_start: dt.datetime | None = None,
+    authored_commits: int | None = None,
 ) -> Dashboard:
     """Assemble the handoff `Dashboard` payload for `render_dashboard`."""
     from caliper import __version__
@@ -181,8 +183,16 @@ def build_handoff_dashboard(
     rate_card = load_rate_card(options)
     rolling_source = rolling_result or result
     rolling_runtime = rolling_options or options
-    total = aggregate_total(result, options, rate_card=rate_card)
-    daily_aggregates = aggregate_daily(result, options, rate_card=rate_card)
+    # One event pass for the five core groupings (total / daily / model /
+    # project / session) instead of five — the dominant cost of the serial
+    # build phase. Byte-identical to the individual aggregate_* wrappers.
+    (
+        total,
+        daily_aggregates,
+        model_mode_aggregates,
+        project_aggregates,
+        session_aggregates,
+    ) = aggregate_dashboard_groups(result, options, rate_card=rate_card)
     shape_report = compute_session_shape(result)
     _advance_build(progress, "totals")
 
@@ -190,7 +200,9 @@ def build_handoff_dashboard(
     daily_points = _build_daily(daily_aggregates, shape_report, options)
     daily_cache_rate = _daily_cache_sparkline(result, options, daily_points)
     deltas = (
-        _compute_period_deltas(options, total, shape_report)
+        _compute_period_deltas(
+            options, total, shape_report, wide_result=wide_result, wide_start=wide_start
+        )
         if with_deltas
         else (None, None, None, None)
     )
@@ -212,7 +224,7 @@ def build_handoff_dashboard(
         lambda event: (event.model or "unknown", event.model or "unknown"),
     )
     by_model = _build_model_rows(
-        aggregate_model_mode(result, options, rate_card=rate_card),
+        model_mode_aggregates,
         daily_by_model=model_daily_cost,
     )
     _advance_build(progress, "models")
@@ -222,7 +234,6 @@ def build_handoff_dashboard(
         rate_card,
         lambda event: (event.thread.cwd or UNKNOWN_PROJECT, event.thread.cwd or UNKNOWN_PROJECT),
     )
-    project_aggregates = aggregate_projects(result, options, rate_card=rate_card)
     project_forecast_bands = _build_project_forecast_bands(
         project_aggregates,
         options,
@@ -288,7 +299,6 @@ def build_handoff_dashboard(
         audit_findings=audit_findings,
     )
     _advance_build(progress, "recommendations")
-    session_aggregates = aggregate_sessions(result, options, rate_card=rate_card)
     top_sessions = _build_top_sessions(
         result,
         options,
@@ -351,9 +361,17 @@ def build_handoff_dashboard(
         session_aggregates=session_aggregates,
     )
     long_context_histogram = _build_long_context_histogram(result, rate_card)
-    cohort_deltas = _build_cohort_deltas(result, options, rate_card, total) if with_deltas else []
+    cohort_deltas = (
+        _build_cohort_deltas(
+            result, options, rate_card, total, wide_result=wide_result, wide_start=wide_start
+        )
+        if with_deltas
+        else []
+    )
     budgets = _build_budget_rows(result, options, rate_card, budget_config)
-    output_summary = _build_output_summary(result, rate_card, shape_report)
+    output_summary = _build_output_summary(
+        result, rate_card, shape_report, authored_commits=authored_commits
+    )
     _advance_build(progress, "forecasts")
 
     # v2 design: the verdict strip shows up to 4 findings sorted by tone, so
@@ -421,13 +439,21 @@ def _build_output_summary(
     result: LoadResult,
     rate_card: RateCard,
     shape_report: SessionShapeReport,
+    *,
+    authored_commits: int | None = None,
 ) -> OutputSummary | None:
     """Answer "what did this spend produce?" from local git + tool evidence.
 
     Returns ``None`` when there is neither git linkage nor classified tool
     activity, so the renderer drops the section rather than showing zeros.
-    Every figure is sourced from logs already on disk. The function is pure:
-    no network, no git shell-out (git SHAs are read from parsed events).
+    Tool counts and spend come from logs already on disk.
+
+    ``authored_commits``: when provided (by the CLI, which can read local git),
+    it's the count of commits authored in the window in the repos the sessions
+    touched. This is the truthful "what shipped" figure and counts every source
+    — used in preference to the git-SHA proxy below, which only counts commits
+    whose checkout a source happened to log on a spend event (Codex does, Claude
+    Code does not). When ``None`` (tests, HTML export, demo), the proxy is used.
     """
     if not result.events:
         return None
@@ -443,12 +469,19 @@ def _build_output_summary(
             commit_cost[sha] += cost.cost_usd
             linked += cost.cost_usd
 
-    commits_touched = len(commit_cost)
+    if authored_commits is not None and authored_commits > 0:
+        commits_from_git = True
+        commits_touched = authored_commits
+        # Total AI spend per shipped commit — the value question, not a bill.
+        cost_per_commit = float(total / commits_touched) if commits_touched else 0.0
+    else:
+        commits_from_git = False
+        commits_touched = len(commit_cost)
+        cost_per_commit = float(linked / commits_touched) if commits_touched else 0.0
     has_git = commits_touched > 0
-    cost_per_commit = float(linked / commits_touched) if commits_touched else 0.0
     linked_pct = float(linked / total) if total > 0 else 0.0
 
-    edits = diagnostics = exploration = classified = 0
+    edits = diagnostics = exploration = classified = unclassified = 0
     for name, count in shape_report.tool_use.per_tool:
         if name in EXECUTION_TOOLS:
             edits += count
@@ -459,6 +492,8 @@ def _build_output_summary(
         elif name in EXPLORATION_TOOLS:
             exploration += count
             classified += count
+        else:
+            unclassified += count
 
     if not has_git and classified == 0:
         return None
@@ -466,11 +501,29 @@ def _build_output_summary(
     def _share(part: int) -> float:
         return (part / classified) if classified else 0.0
 
+    # Be honest when some tool calls don't fall into the edit/diagnose/explore
+    # buckets: the shares are of the classified subset, not all tool activity.
+    unclassified_note = ""
+    total_tool_calls = classified + unclassified
+    if unclassified and total_tool_calls:
+        unclassified_note = (
+            f" {unclassified / total_tool_calls:.0%} of tool calls are an "
+            "unrecognized kind and sit outside the mix below."
+        )
+
     if not has_git:
         caveat = (
             "No git history recorded in this window, so spend can't be tied to "
             "commits. The edit-vs-diagnostic mix below is still measured from "
             "tool calls."
+        )
+    elif commits_from_git:
+        caveat = (
+            "Commits authored in this window in the repos your sessions touched, "
+            "read from local git. Cost per commit divides total spend by that "
+            "count. It is a rough unit cost, not a per-commit invoice, and it "
+            "does not claim every commit was AI-written. Linked % below is the "
+            "share of spend a source tied to a specific commit."
         )
     else:
         caveat = (
@@ -479,6 +532,7 @@ def _build_output_summary(
             "exploration, planning, or work that never reached a commit, not "
             "automatically waste."
         )
+    caveat += unclassified_note
 
     return OutputSummary(
         commits_touched=commits_touched,
@@ -491,6 +545,7 @@ def _build_output_summary(
         classified_tool_calls=classified,
         has_git=has_git,
         caveat=caveat,
+        commits_from_git=commits_from_git,
     )
 
 
@@ -608,7 +663,7 @@ def _build_totals(
         delta_sessions_pct=delta_sessions,
         daily_cost_sparkline=[float(p.cost_usd) for p in daily_points],
         daily_cache_sparkline=daily_cache_rate,
-        daily_token_sparkline=[float(p.events) for p in daily_points],
+        daily_token_sparkline=[float(p.tokens) for p in daily_points],
         daily_session_sparkline=[float(n) for n in daily_session_count],
     )
 
@@ -671,15 +726,41 @@ def _daily_session_counts(result: LoadResult, options: RuntimeOptions) -> list[i
 # ---------------------------------------------------------------------------
 
 
+def _load_prior_window(
+    prior_options: RuntimeOptions,
+    *,
+    wide_result: LoadResult | None,
+    wide_start: dt.datetime | None,
+) -> LoadResult:
+    """Materialize the prior comparison window.
+
+    The dashboard command parses one wide window up front (today back through
+    the 90-day rolling span). When the requested prior window falls inside
+    what was already loaded, slice it in memory instead of re-parsing every
+    log file a second time. Older windows (e.g. `--days 180`) fall back to a
+    fresh `load_usage`, which the parse cache still keeps cheap.
+    """
+    if wide_result is not None and wide_start is not None and prior_options.start >= wide_start:
+        return scope_load_result(
+            wide_result,
+            start=prior_options.start,
+            end=prior_options.end,
+        )
+    return load_usage(prior_options)
+
+
 def _compute_period_deltas(
     options: RuntimeOptions,
     total: Aggregate,
     shape_report: SessionShapeReport,
+    *,
+    wide_result: LoadResult | None = None,
+    wide_start: dt.datetime | None = None,
 ) -> tuple[float | None, float | None, float | None, float | None]:
     """Return (Δcost, Δcache, Δtokens, Δsessions) vs. the prior equal window.
 
-    Runs `load_usage()` for the prior window. The parse cache makes this
-    cheap on warm runs.
+    Reuses the already-loaded wide window when it covers the prior period;
+    otherwise loads it (cheap on warm runs thanks to the parse cache).
     """
     span = options.end - options.start
     prior_options = dataclasses.replace(
@@ -688,7 +769,9 @@ def _compute_period_deltas(
         end=options.start,
     )
     try:
-        prior_result = load_usage(prior_options)
+        prior_result = _load_prior_window(
+            prior_options, wide_result=wide_result, wide_start=wide_start
+        )
     except Exception:
         # Don't let prior-window load failures kill the dashboard.
         return (None, None, None, None)
@@ -754,8 +837,9 @@ def _build_daily(
         agg = by_key.get(key)
         cost = float(agg.costs.cost_usd) if agg else 0.0
         events = agg.totals.events if agg else 0
+        tokens = agg.totals.total_tokens if agg else 0
         shape = _SHAPE_NAME_MAP.get(shape_by_day.get(key, CATEGORY_NONE), "no-tools")
-        out.append(DailyPoint(day=key, cost_usd=cost, events=events, shape=shape))
+        out.append(DailyPoint(day=key, cost_usd=cost, events=events, shape=shape, tokens=tokens))
         day = day + dt.timedelta(days=1)
     return out
 
@@ -1547,11 +1631,15 @@ def _build_cohort_deltas(
     options: RuntimeOptions,
     rate_card: RateCard,
     total: Aggregate,
+    *,
+    wide_result: LoadResult | None = None,
+    wide_start: dt.datetime | None = None,
 ) -> list[CohortDeltaRow]:
     """Side-by-side comparison vs. the prior equal-length window.
 
     Best-effort: returns ``[]`` when the prior window parses cleanly to zero
     activity (avoids meaningless 0→x deltas) or when the prior load fails.
+    Reuses the wide pre-load when it covers the prior window.
     """
     span = options.end - options.start
     prior_options = dataclasses.replace(
@@ -1560,7 +1648,7 @@ def _build_cohort_deltas(
         end=options.start,
     )
     try:
-        prior = load_usage(prior_options)
+        prior = _load_prior_window(prior_options, wide_result=wide_result, wide_start=wide_start)
     except Exception:
         return []
     prior_total = aggregate_total(prior, prior_options, rate_card=rate_card)
@@ -1854,7 +1942,7 @@ def _build_anomaly_rows(
     rows: list[AnomalyRow] = []
     for item in raw:
         label = _anomaly_label(item.kind, item.label, show_paths=options.show_paths)
-        if item.kind == "session_spike":
+        if item.kind in {"session_spike", "efficiency_regression"}:
             label = session_labels.get(
                 item.label,
                 _human_session_label(item.timestamp, options.timezone, fallback=label),
@@ -1886,6 +1974,7 @@ def _anomaly_kind_label(kind: str) -> str:
         "model_day_spike": "Model-day spike",
         "project_day_spike": "Project-day spike",
         "session_spike": "Session spike",
+        "efficiency_regression": "Efficiency regression",
     }.get(kind, kind.replace("_", " ").title())
 
 

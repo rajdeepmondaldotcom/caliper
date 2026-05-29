@@ -7,6 +7,7 @@ from pathlib import Path
 from caliper.anomaly import (
     detect_actionable_anomalies,
     detect_daily_anomalies,
+    detect_efficiency_regressions,
     detect_model_anomalies,
     detect_project_daily_anomalies,
     detect_session_anomalies,
@@ -52,6 +53,59 @@ def _event(
         thread=ThreadMeta(cwd=cwd),
         turn_facts=TurnFacts(),
     )
+
+
+def _priced_event(*, session: str, ts: dt.datetime, tokens: int, cost: float) -> UsageEvent:
+    """An event whose cost is pinned via vendor_reported_cost_usd, so the
+    cost-per-1M-tokens rate is exactly ``cost / (tokens / 1e6)``."""
+    return UsageEvent(
+        timestamp=ts,
+        path=Path("/tmp/r.jsonl"),
+        session_id=session,
+        usage=Usage(input_tokens=tokens, total_tokens=tokens),
+        model="claude-opus-4.7",
+        service_tier="standard",
+        tier_source="logged",
+        thread=ThreadMeta(cwd="/tmp/p"),
+        turn_facts=TurnFacts(),
+        vendor_reported_cost_usd=Decimal(str(cost)),
+    )
+
+
+def test_detect_efficiency_regressions_flags_inefficient_session():
+    base = dt.datetime(2026, 5, 1, 10, 0, tzinfo=dt.UTC)
+    # Six prior sessions all at ~$1 per 1M tokens (1M tokens, $1 each).
+    events = [
+        _priced_event(session=f"s{i}", ts=base + dt.timedelta(days=i), tokens=1_000_000, cost=1.0)
+        for i in range(6)
+    ]
+    # Then one session of the same size that cost $6 — $6/1M tokens, an
+    # efficiency outlier even though its absolute cost isn't extreme.
+    events.append(
+        _priced_event(session="bad", ts=base + dt.timedelta(days=7), tokens=1_000_000, cost=6.0)
+    )
+    out = detect_efficiency_regressions(events, _card())
+    assert len(out) == 1
+    anomaly = out[0]
+    assert anomaly.kind == "efficiency_regression"
+    assert anomaly.label == "bad"
+    # observed = actual cost; baseline = cost at the cohort-typical rate;
+    # impact = the extra dollars from being less efficient (~$6 - $1).
+    assert round(anomaly.observed, 2) == 6.0
+    assert round(anomaly.baseline_center, 2) == 1.0
+    assert round(float(anomaly.impact_usd_exact), 2) == 5.0
+    assert "per 1M tokens" in anomaly.reason
+
+
+def test_detect_efficiency_regressions_ignores_small_sessions():
+    # Sessions below the token-exposure floor have noisy rates and are skipped,
+    # even with a wild cost, so we don't flag a tiny session as "inefficient".
+    base = dt.datetime(2026, 5, 1, 10, 0, tzinfo=dt.UTC)
+    events = [
+        _priced_event(session=f"s{i}", ts=base + dt.timedelta(days=i), tokens=10_000, cost=5.0)
+        for i in range(8)
+    ]
+    assert detect_efficiency_regressions(events, _card()) == []
 
 
 def test_detect_session_anomalies_under_min_samples_returns_empty():

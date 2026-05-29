@@ -2,6 +2,115 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.82 - 2026-05-29
+
+Two more signals mined from the session logs: tool errors and code churn.
+
+- **Tool-error rate.** The Claude Code parser now links each turn's tool calls
+  to their results (`tool_result.is_error`) in a second pass, recording per-turn
+  error counts on `TurnFacts`. Surfaced as a gated insight that fires when more
+  than 5% of tool results errored — a "the agent is thrashing" signal that burns
+  tokens on dead ends. Stays silent when your tooling is healthy.
+- **Code churn.** Edit/Write `structuredPatch` hunks are summed into lines
+  added / removed per turn, surfaced as a "code your spend moved" insight with a
+  rough cost per line changed — turning spend into a leverage figure (not a
+  code-quality judgment).
+- Claude parser cache version bumped (v6) for the one-time re-parse. Codex
+  equivalents (`function_call_output` failures, `patch_apply_end` diffs) are the
+  next extension.
+
+## 0.0.81 - 2026-05-29
+
+How long are your turns taking? A velocity signal from the session data.
+
+- **Turn response time.** The Claude Code parser now records, per turn, the gap
+  from the previous logged event to the reply (`TurnFacts.latency_ms`) — model
+  time plus any tool runs inside the turn, with idle gaps over 10 minutes
+  dropped. Surfaced as a "Typical turn response time" insight: the median and
+  p90 across the window's turns. The first analysis on local data showed a
+  median around 6.7s and p90 around 17.5s across ~46k turns.
+- This bumps the Claude parser cache version, so the next run re-parses your
+  Claude logs once (later runs reuse the cache as usual). Codex's explicit
+  `time_to_first_token_ms` / `duration_ms` is the next step.
+
+## 0.0.80 - 2026-05-29
+
+Dashboard defaults to real labels for your own analysis; one flag to share.
+
+- **Privacy now defaults to `off` (local-only real labels).** `caliper dashboard`
+  shows your real project names, paths, and session titles by default — it's your
+  machine and your analysis, and redacted placeholders made the report less
+  useful to you. Forward-safe rendering is one flag away: `--share-safe` (or
+  `dashboard.privacy = "always"`) redacts everything and tags the filename.
+- **A config's `privacy = "off"` is now honored.** Removed the override that
+  force-flipped a generated `off` config back to `always`; it was overriding the
+  user's own setting. (The redacted screenshots in the README are produced with
+  `--share-safe`.)
+- **New insight: a session that spun more than it shipped.** Names the single
+  session that spent the most while running mostly diagnostics (bash, tests,
+  search) with almost no edits — the rough shape of debugging in circles. Built
+  from already-parsed tool names, drills into `caliper session`.
+
+## 0.0.79 - 2026-05-29
+
+Accuracy audit + anomalies that surface waste, not just busy days.
+
+A first-principles pass over every dashboard statistic (design-brief/
+ACCURACY-AUDIT.md). The money foundation (pricing, dedup, token accounting,
+tier/model inference) audited clean. The real fixes:
+
+- **Token KPI sparkline plotted event counts under a "tokens" label.** It now
+  plots tokens (new `DailyPoint.tokens`); an invariant test pins it to the
+  window's total tokens.
+- **"What this produced" tool-mix shares silently dropped unclassified tool
+  calls,** so they read as 100% of a hidden subset. The unrecognized remainder
+  is now counted and disclosed in the caveat; `LSP` is classified.
+- **The models table had no "Other" residual row** while the projects table did,
+  so a truncated model list under-summed silently. Added the residual row.
+- **New anomaly detector: efficiency regressions.** The old detectors all flag
+  raw cost spikes, which mostly means "a busy day." This one flags a session
+  that paid more *per 1M tokens* than prior sessions of the same size in the
+  same project+model cohort (cache loss, model drift, tool thrash), with the
+  extra dollars quantified. Rate-appropriate robust stats, dollar-denominated
+  output, drills into `caliper session`.
+- README updated to match; full accuracy audit + new-metric roadmap recorded in
+  `design-brief/ACCURACY-AUDIT.md`.
+
+## 0.0.78 - 2026-05-29
+
+"What this produced" now counts the commits you actually shipped.
+
+- **"Commits touched" was undercounting badly.** It only counted commits whose
+  checked-out SHA a source happened to log on a spend event. Codex records
+  that, but Claude Code (often the bulk of usage) records no commit SHA at all,
+  so its sessions contributed zero and the headline number could read 36 when
+  the real figure was in the hundreds. The tile now reports **commits authored**
+  in the window in the repos your sessions touched, read from local `git log`
+  (no network). It counts every source, and cost per commit becomes total spend
+  divided by commits authored. Honestly labeled: it does not claim every commit
+  was AI-written, and the "linked to a commit" share still reflects only spend a
+  source tied to a specific commit. Falls back to the old SHA proxy when local
+  git is unavailable, so the demo and exports are unchanged.
+
+## 0.0.77 - 2026-05-29
+
+Faster first dashboard load — same numbers, less work.
+
+- **No more redundant prior-window parses.** Building the dashboard's
+  period-over-period deltas (`_compute_period_deltas`) and the cohort
+  comparison (`_build_cohort_deltas`) each re-ran a full parse of the prior
+  comparison window. But `caliper dashboard` already loads one wide window
+  (today back through the 90-day rolling span) that contains that period for
+  any `--days <= 90`. Both now slice the already-loaded events in memory and
+  fall back to a real parse only for longer windows. The two delta passes drop
+  from seconds to milliseconds on warm runs and avoid re-reading every log
+  file on cold runs.
+- **One aggregation pass for the core groupings.** `build_handoff_dashboard`
+  iterated the event set five separate times (total / daily / model / project /
+  session). A new single-pass `aggregate_dashboard_groups` produces all five
+  in one traversal. Output is byte-for-byte identical — verified on the
+  deterministic `--demo` dashboard — so this is purely a speed change.
+
 ## 0.0.76 - 2026-05-28
 
 Plan limits: honest about what's actually parsed.
