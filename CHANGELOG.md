@@ -2,6 +2,24 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.83 - 2026-05-29
+
+Surface the findings: the Insights section was hidden, now it leads "Worth a look."
+
+- **The Insights section was effectively dead.** Its render gate suppressed it
+  whenever richer sections existed — which, because the check included
+  `top_sessions`, meant *every active user never saw it*. On top of that it sat
+  in the collapsed "Technical appendix." So the actionable findings built
+  recently — turn response time, tool-error rate, code churn, spinning sessions,
+  efficiency notes — were doubly hidden and effectively never displayed.
+- **Fix:** Insights moved to the visible "Worth a look" tier (after the
+  descriptive core, before the collapsed appendix) and now render whenever there
+  are any, since they carry operational signal no other section covers. The
+  collapsed appendix is now just the audit detail (attribution, rate limits).
+- Documented a Codex log analysis + parity roadmap (exact turn latency from
+  `task_complete.duration_ms`, tool mix, churn, abort waste) in
+  `design-brief/ACCURACY-AUDIT.md` — each its own future parser increment.
+
 ## 0.0.82 - 2026-05-29
 
 Two more signals mined from the session logs: tool errors and code churn.

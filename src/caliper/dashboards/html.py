@@ -1755,11 +1755,6 @@ _SHAPE_COLORS: dict[str, str] = {
 }
 
 
-def _has_rich_operator_findings(d: Dashboard) -> bool:
-    """Return true when richer, more actionable sections supersede Insights."""
-    return bool(d.advisor_recommendations or d.inefficiencies or d.anomalies or d.top_sessions)
-
-
 def _rate_limit_is_actionable(d: Dashboard) -> bool:
     # Surface the section when ANY source — per-source list or the legacy
     # aggregate — shows warn/critical pressure or a recorded breach.
@@ -1794,7 +1789,11 @@ def _should_render(section_id: str, d: Dashboard) -> bool:
     if section_id == "rate-limits":
         return _rate_limit_is_actionable(d)
     if section_id == "insights":
-        return d.totals.events > 0 and bool(d.insights) and not _has_rich_operator_findings(d)
+        # Insights now carry unique operational findings (turn latency,
+        # tool-error rate, code churn, spinning sessions) that no other section
+        # covers, so render whenever there are any — don't suppress them just
+        # because richer flag sections also exist.
+        return d.totals.events > 0 and bool(d.insights)
     if section_id == "evidence":
         return bool(d.evidence)
     return False
@@ -4317,14 +4316,18 @@ _SECTION_TIER: dict[str, str] = {
     "models": "trajectory",
     "projects": "trajectory",
     "sessions": "trajectory",
-    # Flags — only render when there's something real to flag (gated).
+    # Flags + findings worth a look — only render when there's signal (gated).
+    # Insights live here, not the collapsed appendix: they now carry the
+    # actionable findings (efficiency regressions, spinning sessions, turn
+    # latency, tool-error rate, code churn), so hiding them behind a click
+    # buried the highest-value, act-on-it layer of the report.
     "anomalies": "decisions",
     "budgets": "decisions",
     "inefficiencies": "decisions",
-    # Supporting detail — collapsed by default.
+    "insights": "decisions",
+    # Supporting audit detail — collapsed by default.
     "attribution": "appendix",
     "rate-limits": "appendix",
-    "insights": "appendix",
     # Trust footer.
     "evidence": "trust",
 }
