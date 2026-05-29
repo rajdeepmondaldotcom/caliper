@@ -3941,7 +3941,7 @@ def _anomaly_action(kind: str) -> str:
 def _anomaly_command(kind: str) -> str:
     """The command that drills straight into the source of a spike."""
     normalized = kind.lower()
-    if "session" in normalized:
+    if "session" in normalized or "efficiency" in normalized:
         return "caliper session"
     if "project" in normalized:
         return "caliper project"

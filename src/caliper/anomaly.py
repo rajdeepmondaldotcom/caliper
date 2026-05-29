@@ -44,6 +44,20 @@ FOLD_CHANGE_MIN = 3.0
 MIN_IMPACT_USD = 1.0
 SIGMA_DISPLAY_CAP = 20.0
 
+# Efficiency-regression detector. The raw-cost detectors above answer "what
+# cost a lot" — which mostly means "a busy day", something the user already
+# knows. This one answers the more useful question: "where did I pay MORE PER
+# UNIT OF WORK than usual?" It scores each substantial session on its cost per
+# 1M tokens against prior sessions of similar size in the same project+model
+# cohort, so a normal-volume-but-inefficient session (cache loss, model drift,
+# tool thrash) surfaces even when its absolute cost is unremarkable. Stats are
+# rate-appropriate (not the dollar-calibrated baseline above): robust z on the
+# rate with a relative scale floor, gated by token exposure and dollar impact.
+EFFICIENCY_SIGMA = 3.0
+MIN_EFFICIENCY_TOKENS = 200_000
+MIN_EFFICIENCY_COHORT = 4
+EFFICIENCY_SCALE_FLOOR_FRAC = 0.10
+
 
 @dataclass(frozen=True)
 class _Observation:
@@ -495,6 +509,7 @@ def detect_actionable_anomalies(
         + ([] if daily is None else detect_daily_anomalies(daily))
         + detect_model_anomalies(event_list, rate_card, timezone=timezone)
         + detect_project_daily_anomalies(event_list, rate_card, timezone)
+        + detect_efficiency_regressions(event_list, rate_card)
     )
     return _dedupe_anomalies(raw)
 
@@ -564,6 +579,126 @@ def detect_project_daily_anomalies(
     )
 
 
+@dataclass(frozen=True)
+class _EfficiencyRecord:
+    session_id: str
+    last_seen: dt.datetime
+    project: str
+    model: str
+    cost: float
+    tokens: int
+    rate: float  # USD per 1M tokens
+
+
+def _session_efficiency_records(
+    events: Iterable[UsageEvent], rate_card: RateCard
+) -> list[_EfficiencyRecord]:
+    sessions: dict[str, dict[str, object]] = {}
+    for event in events:
+        if not event.session_id:
+            continue
+        cost, _, _ = event_cost(rate_card, event)
+        item = sessions.setdefault(
+            event.session_id,
+            {
+                "last_seen": event.timestamp,
+                "cost": 0.0,
+                "tokens": 0,
+                "projects": Counter(),
+                "models": Counter(),
+            },
+        )
+        item["last_seen"] = max(item["last_seen"], event.timestamp)  # type: ignore[arg-type]
+        item["cost"] = float(item["cost"]) + float(cost.cost_usd)
+        item["tokens"] = int(item["tokens"]) + int(event.usage.total_tokens)  # type: ignore[arg-type]
+        item["projects"][event.thread.cwd or UNKNOWN_PROJECT] += 1  # type: ignore[index]
+        item["models"][event.model or "unknown-model"] += 1  # type: ignore[index]
+
+    records: list[_EfficiencyRecord] = []
+    for session_id, item in sessions.items():
+        tokens = int(item["tokens"])  # type: ignore[arg-type]
+        if tokens < MIN_EFFICIENCY_TOKENS:
+            continue
+        cost = float(item["cost"])  # type: ignore[arg-type]
+        last_seen = item["last_seen"]
+        assert isinstance(last_seen, dt.datetime)
+        records.append(
+            _EfficiencyRecord(
+                session_id=session_id,
+                last_seen=last_seen,
+                project=_most_common(item["projects"], UNKNOWN_PROJECT),  # type: ignore[arg-type]
+                model=_most_common(item["models"], "unknown-model"),  # type: ignore[arg-type]
+                cost=cost,
+                tokens=tokens,
+                rate=cost / (tokens / 1_000_000),
+            )
+        )
+    return records
+
+
+def detect_efficiency_regressions(
+    events: Iterable[UsageEvent],
+    rate_card: RateCard,
+    *,
+    sigma_threshold: float = EFFICIENCY_SIGMA,
+) -> list[Anomaly]:
+    """Flag sessions that cost more PER 1M TOKENS than their cohort's norm.
+
+    Cohort = (project, model). Only sessions above ``MIN_EFFICIENCY_TOKENS``
+    are judged (small sessions have noisy rates), and each is compared only to
+    PRIOR sessions in its cohort (expanding window), so this never flags the
+    first few sessions of a new cohort. The deviation is expressed back in
+    dollars (``observed`` = actual cost, ``baseline`` = what that token volume
+    would have cost at the cohort-typical rate) so it renders in the same
+    dollar-denominated row as the other detectors and the impact is real money.
+    """
+    by_cohort: dict[tuple[str, str], list[_EfficiencyRecord]] = {}
+    for record in _session_efficiency_records(events, rate_card):
+        by_cohort.setdefault((record.project, record.model), []).append(record)
+
+    anomalies: list[Anomaly] = []
+    for (project, model), records in by_cohort.items():
+        prior_rates: list[float] = []
+        for record in sorted(records, key=lambda r: (r.last_seen, r.session_id)):
+            if len(prior_rates) >= MIN_EFFICIENCY_COHORT:
+                center = statistics.median(prior_rates)
+                deviations = sorted(abs(rate - center) for rate in prior_rates)
+                mad = _median_of_sorted(deviations)
+                scale = max(mad * 1.4826, EFFICIENCY_SCALE_FLOOR_FRAC * center)
+                if scale > 0 and record.rate > center:
+                    z = (record.rate - center) / scale
+                    expected_cost = center * (record.tokens / 1_000_000)
+                    impact = record.cost - expected_cost
+                    if z >= sigma_threshold and impact >= MIN_IMPACT_USD:
+                        anomalies.append(
+                            Anomaly(
+                                kind="efficiency_regression",
+                                timestamp=record.last_seen,
+                                label=record.session_id,
+                                observed=record.cost,
+                                baseline_center=expected_cost,
+                                baseline_scale=scale * (record.tokens / 1_000_000),
+                                z_score=min(z, SIGMA_DISPLAY_CAP),
+                                impact_usd_exact=Decimal(str(max(0.0, impact))),
+                                comparison_scope=(
+                                    "prior sessions of similar size in same project/model"
+                                ),
+                                baseline_sample_count=len(prior_rates),
+                                cohort_key="\0".join(("efficiency", project, model)),
+                                cohort_label=f"{project} / {model}",
+                                reason=(
+                                    f"${record.rate:,.2f} per 1M tokens vs "
+                                    f"${center:,.2f} typical for this cohort "
+                                    f"({z:.1f}σ over {len(prior_rates)} prior sessions)"
+                                ),
+                                dedupe_key=f"efficiency:{record.session_id}",
+                                impact_percent=_impact_percent(record.rate, center),
+                            )
+                        )
+            bisect.insort(prior_rates, record.rate)
+    return sorted(anomalies, key=_sort_key)
+
+
 __all__ = [
     "ACTIVE_DAY_THRESHOLD",
     "DAILY_SIGMA_DEFAULT",
@@ -574,6 +709,7 @@ __all__ = [
     "SIGMA_DISPLAY_CAP",
     "detect_actionable_anomalies",
     "detect_daily_anomalies",
+    "detect_efficiency_regressions",
     "detect_model_anomalies",
     "detect_project_daily_anomalies",
     "detect_session_anomalies",

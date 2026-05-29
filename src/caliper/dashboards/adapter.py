@@ -1942,7 +1942,7 @@ def _build_anomaly_rows(
     rows: list[AnomalyRow] = []
     for item in raw:
         label = _anomaly_label(item.kind, item.label, show_paths=options.show_paths)
-        if item.kind == "session_spike":
+        if item.kind in {"session_spike", "efficiency_regression"}:
             label = session_labels.get(
                 item.label,
                 _human_session_label(item.timestamp, options.timezone, fallback=label),
@@ -1974,6 +1974,7 @@ def _anomaly_kind_label(kind: str) -> str:
         "model_day_spike": "Model-day spike",
         "project_day_spike": "Project-day spike",
         "session_spike": "Session spike",
+        "efficiency_regression": "Efficiency regression",
     }.get(kind, kind.replace("_", " ").title())
 
 
