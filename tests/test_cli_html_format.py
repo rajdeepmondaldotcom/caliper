@@ -186,7 +186,7 @@ def test_html_format_self_contained_no_external_resources(setup_environment, tmp
 def test_html_format_dashboard_command_default_privacy(
     setup_environment,
 ) -> None:
-    """``caliper dashboard`` defaults to a file-safe redacted render."""
+    """``caliper dashboard`` defaults to a local-only render with real labels."""
     runner = CliRunner()
     result = runner.invoke(
         app,
@@ -197,12 +197,12 @@ def test_html_format_dashboard_command_default_privacy(
         ],
     )
     assert result.exit_code == 0, result.output
-    # Default privacy is "always" so a generated file can be shared safely.
-    # The user opts out for local-only renders with --privacy off or
-    # --no-share-safe. ``data-share-safe`` mirrors ``privacy == "always"``.
+    # Default privacy is "off" (real labels) for your own analysis. Redact for
+    # sharing with --privacy always or --share-safe. ``data-share-safe`` mirrors
+    # ``privacy == "always"``.
     body_tag = _body_tag(result.stdout)
-    assert 'data-privacy="always"' in body_tag
-    assert 'data-share-safe="true"' in body_tag
+    assert 'data-privacy="off"' in body_tag
+    assert 'data-share-safe="false"' in body_tag
 
 
 def test_html_format_dashboard_command_privacy_always(setup_environment) -> None:

@@ -2,6 +2,24 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.80 - 2026-05-29
+
+Dashboard defaults to real labels for your own analysis; one flag to share.
+
+- **Privacy now defaults to `off` (local-only real labels).** `caliper dashboard`
+  shows your real project names, paths, and session titles by default — it's your
+  machine and your analysis, and redacted placeholders made the report less
+  useful to you. Forward-safe rendering is one flag away: `--share-safe` (or
+  `dashboard.privacy = "always"`) redacts everything and tags the filename.
+- **A config's `privacy = "off"` is now honored.** Removed the override that
+  force-flipped a generated `off` config back to `always`; it was overriding the
+  user's own setting. (The redacted screenshots in the README are produced with
+  `--share-safe`.)
+- **New insight: a session that spun more than it shipped.** Names the single
+  session that spent the most while running mostly diagnostics (bash, tests,
+  search) with almost no edits — the rough shape of debugging in circles. Built
+  from already-parsed tool names, drills into `caliper session`.
+
 ## 0.0.79 - 2026-05-29
 
 Accuracy audit + anomalies that surface waste, not just busy days.

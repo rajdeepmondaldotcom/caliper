@@ -24,7 +24,7 @@ uvx --isolated --from caliper-ai caliper dashboard --demo --open
 
 ![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/hero.png)
 
-<p align="center"><sub>Safe Share mode: paths, projects, and session labels are redacted while costs, evidence status, and next actions stay visible.</sub></p>
+<p align="center"><sub>Screenshot in Safe Share mode (<code>--share-safe</code>): paths, projects, and session labels are redacted while costs, evidence, and next actions stay visible. By default the dashboard shows your real labels for local analysis; add <code>--share-safe</code> when you forward it.</sub></p>
 
 ---
 
@@ -82,6 +82,12 @@ Caliper · Last 30 days · $1,243 · trend +8.2% · top fix: Move low-output
 Avoidable: $176.64 across 3 recommendations. Reproduce with `caliper recommend`.
 Theme: dark · local-only · re-render: caliper dashboard --open
 ```
+
+By default the dashboard shows your **real** project names, paths, and session
+labels — it's your machine and your analysis. When you want to forward the file,
+add `--share-safe` (or set `dashboard.privacy = "always"`) and Caliper swaps every
+name for an indexed placeholder, tags the filename, and keeps the costs and
+evidence intact.
 
 If Caliper detects a flat-rate subscription, it labels the headline cost
 **API-equivalent value, not a bill**, right where you read it. Nobody mistakes

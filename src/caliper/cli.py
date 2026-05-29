@@ -2423,7 +2423,6 @@ def dashboard(
     from caliper.cli_progress import cli_report_progress
     from caliper.config import (
         derive_dashboard_output_path,
-        legacy_dashboard_privacy_off_path,
         load_dashboard_config,
         write_dashboard_defaults,
     )
@@ -2494,18 +2493,6 @@ def dashboard(
     privacy = privacy if privacy is not None else dash_cfg.privacy
     if share_safe_set:
         privacy = "always" if share_safe else "off"
-    elif privacy == "off":
-        legacy_path = legacy_dashboard_privacy_off_path(config)
-        if legacy_path is not None:
-            privacy = "always"
-            if not quiet and not stdout_html and output is not None:
-                typer.echo(
-                    f'Note: ignoring privacy="off" from the auto-generated config at '
-                    f"{legacy_path}; defaulting to share-safe (redacted) output. "
-                    'Pass --no-share-safe for local-only output, or set privacy="off" '
-                    "yourself to keep it.",
-                    err=True,
-                )
     interactive_effective = interactive if interactive is not None else dash_cfg.interactive
 
     if theme not in {"dark", "light", "print"}:

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 
 from caliper.aggregation import (
     aggregate_daily,
     aggregate_projects,
     aggregate_total,
     event_cache_savings,
+    event_cost,
+)
+from caliper.analysis.session_shape import (
+    DIAGNOSTIC_TOOLS,
+    EXECUTION_TOOLS,
 )
 from caliper.evidence import (
     OVERALL_EVIDENCE_DIMENSION_NAMES,
@@ -113,6 +119,7 @@ def build_insights_from(
         _vendor_mix_insight(total),
         _top_waste_insight(result, rate_card, audit_findings=audit_findings),
         _demand_shift_insight(result, rate_card),
+        _spinning_session_insight(result, rate_card),
     ]
     return sorted(
         [item for item in candidates if item is not None],
@@ -397,6 +404,85 @@ def _vendor_mix_insight(total) -> Insight | None:
         confidence="medium",
         evidence_metrics={"vendor_cost_share": by_vendor},
         commands=("caliper models --per-model", "caliper models --by vendor"),
+    )
+
+
+def _spinning_session_insight(result: LoadResult, card: RateCard) -> Insight | None:
+    """Name the single session that spent the most while spinning its wheels.
+
+    The window-level edit-vs-diagnose mix can read "fine" while one session quietly
+    burned money debugging in circles. This finds that session: a high diagnostic
+    tool share with almost no edits, over enough tool calls and dollars to matter.
+    Built only from already-parsed TurnFacts tool names plus per-event cost, so it
+    needs no new parsing.
+    """
+    MIN_CLASSIFIED = 15
+    MIN_COST = 2.0
+    DIAGNOSTIC_FLOOR = 0.6
+    EDIT_CEILING = 0.1
+
+    by_session: dict[str, dict[str, float]] = {}
+    for event in result.events:
+        facts = event.turn_facts
+        if facts is None:
+            continue
+        item = by_session.setdefault(
+            event.session_id, {"cost": 0.0, "edits": 0, "diag": 0, "classified": 0}
+        )
+        cost, _, _ = event_cost(card, event)
+        item["cost"] += float(cost.cost_usd)
+        for name in facts.tool_names:
+            if name in EXECUTION_TOOLS:
+                item["edits"] += 1
+                item["classified"] += 1
+            elif name in DIAGNOSTIC_TOOLS:
+                item["diag"] += 1
+                item["classified"] += 1
+
+    worst: tuple[str, dict[str, float]] | None = None
+    for session_id, item in by_session.items():
+        classified = int(item["classified"])
+        if classified < MIN_CLASSIFIED or item["cost"] < MIN_COST:
+            continue
+        diag_share = item["diag"] / classified
+        edit_share = item["edits"] / classified
+        if (
+            diag_share >= DIAGNOSTIC_FLOOR
+            and edit_share <= EDIT_CEILING
+            and (worst is None or item["cost"] > worst[1]["cost"])
+        ):
+            worst = (session_id, item)
+
+    if worst is None:
+        return None
+
+    _session_id, item = worst
+    classified = int(item["classified"])
+    diag_share = item["diag"] / classified
+    cost = item["cost"]
+    edits = int(item["edits"])
+    return Insight(
+        severity="warn",
+        title="A session spun more than it shipped",
+        detail=(
+            f"One session ran {classified:,} classified tool calls, "
+            f"{diag_share:.0%} of them diagnostic (bash, tests, search) with only "
+            f"{edits} edit{'s' if edits != 1 else ''}, at ${cost:,.2f}. That is the "
+            "rough shape of debugging in circles rather than shipping changes."
+        ),
+        action="Open it to see where it got stuck.",
+        scope=SCOPE_SESSIONS,
+        evidence=(
+            f"{diag_share:.0%} diagnostic share",
+            f"{edits} edits over {classified:,} tool calls",
+        ),
+        category="usage",
+        priority=74,
+        confidence="medium",
+        impact_usd_exact=decimal_string(Decimal(str(cost))),
+        impact_label=f"${cost:,.2f} session",
+        evidence_metrics={"diagnostic_share": diag_share, "tool_calls": classified},
+        commands=("caliper session",),
     )
 
 

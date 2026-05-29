@@ -26,9 +26,9 @@ def test_dashboard_config_defaults_when_section_missing() -> None:
     assert cfg.theme == "dark"
     assert cfg.rhythm == "receipt"
     assert cfg.density == "comfortable"
-    # Default renders safe-to-forward HTML. Real labels are opt-in via
-    # dashboard.privacy="off" or `caliper dashboard --no-share-safe`.
-    assert cfg.privacy == "always"
+    # Default shows real labels for local analysis. Redaction is opt-in via
+    # dashboard.privacy="always" or `caliper dashboard --share-safe`.
+    assert cfg.privacy == "off"
     assert cfg.output_dir == "~/Downloads"
     assert "{timestamp}" in cfg.filename_template
     # Filename uses the auto-suffix placeholder so redacted exports are
@@ -70,7 +70,7 @@ def test_dashboard_config_falls_back_on_invalid_choice() -> None:
     cfg = load_dashboard_config({"dashboard": {"theme": "neon", "privacy": "maybe"}})
     # Unknown values silently revert to defaults — typos don't crash the CLI.
     assert cfg.theme == "dark"
-    assert cfg.privacy == "always"
+    assert cfg.privacy == "off"
 
 
 # ---------------------------------------------------------------------------
@@ -95,9 +95,9 @@ def test_derive_path_default_template_drops_off_suffix(tmp_path: Path) -> None:
     """{privacy_suffix} keeps the default filename clean when privacy=off."""
     cfg = DashboardConfig(output_dir=str(tmp_path))  # uses default template
     moment = dt.datetime(2026, 5, 21, 14, 30)
-    # Default privacy is "always" → suffix appears.
+    # Default privacy is now "off" (local-only) → clean filename, no suffix.
     path_default = derive_dashboard_output_path(cfg, now=moment)
-    assert path_default.name == "caliper-dashboard-2026-05-21-14-30-privacy-always.html"
+    assert path_default.name == "caliper-dashboard-2026-05-21-14-30.html"
     # Explicit local-only output → no suffix.
     path_off = derive_dashboard_output_path(cfg, now=moment, privacy="off")
     assert path_off.name == "caliper-dashboard-2026-05-21-14-30.html"
@@ -163,7 +163,7 @@ def test_write_defaults_refuses_to_overwrite_existing_section(tmp_path: Path) ->
     body = target.read_text()
     assert body.count("[dashboard]") == 1
     assert 'theme = "slate"' not in body  # replaced by template
-    assert 'privacy = "always"' in body
+    assert 'privacy = "off"' in body
 
 
 # ---------------------------------------------------------------------------

@@ -120,9 +120,10 @@ class DashboardConfig:
     theme: str = "dark"
     rhythm: str = "receipt"
     density: str = "comfortable"
-    # Default: safe-to-forward HTML. Users can opt into local-only real labels
-    # with dashboard.privacy="off" or `caliper dashboard --no-share-safe`.
-    privacy: str = "always"
+    # Default: local-only real labels (real project names, paths, session
+    # titles) for your own analysis. Redact for sharing with
+    # `caliper dashboard --share-safe` or dashboard.privacy="always".
+    privacy: str = "off"
     show_paths: bool = False
     output_dir: str = "~/Downloads"
     # ``{privacy_suffix}`` is "" when privacy is off and ``-privacy-<mode>``
@@ -179,44 +180,6 @@ def load_dashboard_config(loaded: dict) -> DashboardConfig:
     )
 
 
-_LEGACY_DASHBOARD_PRIVACY_MARKERS = (
-    "# Privacy / redaction (opt-in)",
-    '# Default is "off".',
-    "Switch with the CLI flag --privacy <mode>",
-)
-
-
-def legacy_dashboard_privacy_off_path(explicit_path: Path | str | None = None) -> Path | None:
-    """Return the config path responsible for a generated legacy privacy=off default.
-
-    Caliper 0.0.53 briefly generated dashboard defaults with privacy opt-in.
-    Treat only that exact generated template as legacy; a hand-written
-    ``privacy = "off"`` remains an intentional local-only choice.
-    """
-    paths: list[Path] = [USER_CONFIG, LOCAL_CONFIG]
-    if explicit_path:
-        paths.append(explicit_path if isinstance(explicit_path, Path) else Path(explicit_path))
-    winner: Path | None = None
-    for path in paths:
-        expanded = path.expanduser()
-        if not expanded.exists():
-            continue
-        try:
-            text = expanded.read_text()
-            loaded = tomllib.loads(text)
-        except (OSError, tomllib.TOMLDecodeError):
-            continue
-        section = loaded.get("dashboard")
-        if not isinstance(section, dict) or "privacy" not in section:
-            continue
-        value = _coerce_choice(section.get("privacy"), VALID_DASHBOARD_PRIVACY, "")
-        if value == "off" and any(marker in text for marker in _LEGACY_DASHBOARD_PRIVACY_MARKERS):
-            winner = expanded
-        else:
-            winner = None
-    return winner
-
-
 def derive_dashboard_output_path(
     cfg: DashboardConfig,
     *,
@@ -270,14 +233,14 @@ rhythm = "receipt"            # receipt | terminal
 density = "comfortable"       # comfortable | compact
 
 # Privacy / redaction
-# always      — indexed placeholders everywhere; safe to forward
+# off         — local-only format: real project names, session labels, paths
 # print-only  — show real names on screen, swap to indexed placeholders
 #               (Project 1, Session 2, [path]) when printing
-# off         — local-only format: real project names, session labels, paths
+# always      — indexed placeholders everywhere; safe to forward
 #
-# Default is "always". Switch with --privacy <mode>, --no-share-safe, or by
-# editing this line when you need local-only real labels.
-privacy = "always"
+# Defaults to local-only real labels for your own analysis. Redact for
+# sharing with --share-safe (or set this to "always").
+privacy = "off"
 show_paths = false            # show full filesystem paths in the projects table
 
 # File output (used when --output is not passed on the CLI)
