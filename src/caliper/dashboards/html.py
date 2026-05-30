@@ -47,6 +47,7 @@ from .data_models import (
     BriefFinding,
     Dashboard,
     Insight,
+    LogSignals,
     ModelRow,
     ProjectRow,
     QualityScore,
@@ -337,6 +338,69 @@ table { font-variant-numeric: tabular-nums lining-nums; }
   flex-direction: column;
 }
 .cal-stat-card-value { overflow-wrap: anywhere; }
+.cal-token-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 2px 0 10px;
+}
+.cal-token-metric { min-width: 0; }
+.cal-token-metric-label {
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--mute);
+  margin-bottom: 4px;
+}
+.cal-token-metric-value {
+  font-size: var(--num-lg);
+  line-height: 1.05;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+.cal-token-metric-detail {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--mute);
+}
+.cal-log-signals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.cal-log-signal {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+}
+.cal-log-signal-label {
+  font-size: 10px;
+  color: var(--ghost);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.cal-log-signal-value {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cal-log-signal-detail {
+  color: var(--mute);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 3px;
+}
 .cal-card-sparkline {
   min-width: 0;
   margin-top: auto;
@@ -381,6 +445,134 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 .cal-hero-verdict:hover { background: var(--panel-hover); }
 .cal-hero-cost { font-variant-numeric: tabular-nums lining-nums; }
 .cal-hero-action-command::selection { background: var(--accent-tint-2); }
+
+.cal-decision-summary {
+  display: grid;
+  gap: 10px;
+}
+.cal-decision-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  padding: 14px 16px;
+  min-width: 0;
+}
+.cal-decision-title {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.cal-decision-subtitle {
+  color: var(--mute);
+  font-size: 12px;
+  margin-top: 3px;
+  line-height: 1.45;
+}
+.cal-decision-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--mute);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.cal-decision-list {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.cal-decision-row.cal-card-link {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 12px 14px;
+  color: inherit;
+  text-decoration: none;
+  border-top: 1px solid var(--border);
+}
+.cal-decision-row:first-child { border-top: 0; }
+.cal-decision-rank {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ghost);
+  padding-top: 3px;
+}
+.cal-decision-main {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.cal-decision-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.cal-decision-row-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+}
+.cal-decision-detail {
+  color: var(--mute);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.cal-decision-impact {
+  font-family: var(--mono);
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 7px;
+  background: var(--panel-2);
+}
+.cal-section-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.cal-section-summary-tile {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 11px 13px;
+}
+.cal-section-summary-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ghost);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  font-weight: 650;
+}
+.cal-section-summary-value {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.cal-section-summary-detail {
+  color: var(--mute);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 4px;
+}
 
 /* Show-the-math disclosure on KPI cards. Hides the default summary marker
    so the eye reads our "?" affordance; otherwise styling stays inline. */
@@ -531,6 +723,7 @@ section[id] { scroll-margin-top: 36px; }
 [data-viewport="mobile"] [data-screen-label] { min-width: 0; }
 [data-viewport="mobile"] .cal-stat-card { padding: 12px !important; }
 [data-viewport="mobile"] .cal-stat-card-value { font-size: 22px !important; }
+[data-viewport="mobile"] .cal-token-split { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] .cal-receipt-root { padding: 16px 14px 48px !important; }
 [data-viewport="mobile"] .cal-receipt-main { overflow-x: hidden; }
 [data-viewport="mobile"] .cal-terminal-layout { grid-template-columns: 1fr !important; }
@@ -584,6 +777,18 @@ section[id] { scroll-margin-top: 36px; }
     grid-template-columns: 1fr !important;
     gap: 8px !important;
   }
+  .cal-decision-head,
+  .cal-decision-row.cal-card-link {
+    grid-template-columns: 1fr !important;
+  }
+  .cal-decision-count,
+  .cal-decision-impact {
+    justify-self: start;
+    white-space: normal;
+  }
+  .cal-section-summary-grid {
+    grid-template-columns: 1fr !important;
+  }
   .cal-metric-chip {
     flex: 1 1 132px;
   }
@@ -632,6 +837,7 @@ section[id] { scroll-margin-top: 36px; }
     min-height: 136px;
   }
   .cal-stat-card-value { font-size: 22px !important; }
+  .cal-token-split { grid-template-columns: 1fr !important; }
   .cal-terminal-mast {
     grid-template-columns: 1fr !important;
     gap: 10px !important;
@@ -1675,7 +1881,7 @@ SECTION_NUMBERS: dict[str, str] = {
 }
 
 _SECTION_TITLES: dict[str, str] = {
-    "action-center": "Next actions",
+    "action-center": "Decision summary",
     "overview": "Overview",
     "cost": "Cost over time",
     "shape": "Session shape",
@@ -1704,6 +1910,9 @@ _SECTION_TITLES: dict[str, str] = {
 _SECTION_HINTS: dict[str, str] = {
     "overview": (
         "Your spend for the window. Open any card to see its exact formula and rate card."
+    ),
+    "action-center": (
+        "The few items most likely to change what you do next, linked to their evidence."
     ),
     "output": ("Spend mapped to what it produced. Unlinked spend is unmapped, not wasted."),
     "cost": ("Daily spend. Bars above the average line are the days worth investigating."),
@@ -1768,6 +1977,8 @@ def _should_render(section_id: str, d: Dashboard) -> bool:
     """Hide sections unless they add explanation, a real flag, or audit value."""
     if section_id == "overview":
         return True
+    if section_id == "action-center":
+        return bool(d.executive_brief and d.executive_brief.findings)
     if section_id == "output":
         return d.output_summary is not None
     if section_id == "cost":
@@ -1783,17 +1994,17 @@ def _should_render(section_id: str, d: Dashboard) -> bool:
     if section_id == "budgets":
         return bool(d.budgets)
     if section_id == "inefficiencies":
-        return bool(d.advisor_recommendations or d.inefficiencies or d.cache_leverage)
+        return bool(d.advisor_recommendations or d.inefficiencies)
     if section_id == "attribution":
         return bool(d.agents or d.skills or d.tier_provenance or d.long_context_histogram)
     if section_id == "rate-limits":
         return _rate_limit_is_actionable(d)
     if section_id == "insights":
-        # Insights now carry unique operational findings (turn latency,
-        # tool-error rate, code churn, spinning sessions) that no other section
-        # covers, so render whenever there are any — don't suppress them just
-        # because richer flag sections also exist.
-        return d.totals.events > 0 and bool(d.insights)
+        # Rich dashboards already surface these signals through anomalies,
+        # budgets, avoidable spend, sessions, and the decision summary. Keep
+        # insights for lean payloads where they are the only finding layer.
+        has_stronger_findings = bool(d.anomalies or d.advisor_recommendations or d.inefficiencies)
+        return d.totals.events > 0 and bool(d.insights) and not has_stronger_findings
     if section_id == "evidence":
         return bool(d.evidence)
     return False
@@ -2220,11 +2431,16 @@ def _skill_display_label(name: str, index: int, *, private: bool = False) -> str
 _ANCHOR_ALIASES = {
     "command-center": "action-center",
     "impact": "budgets",
-    "usage-windows": "usage-windows",
+    "usage-windows": "cost",
+    "usage-mix": "overview",
     "top-sessions": "sessions",
     "metric-glossary": "evidence",
     "advisor": "inefficiencies",
     "cost-over-time": "cost",
+    "shape": "sessions",
+    "heatmap": "sessions",
+    "forecast": "cost",
+    "outlook": "cost",
 }
 
 
@@ -2527,6 +2743,7 @@ def _stat_card(
     dense: bool = False,
     formula: str = "",
     formula_source: str = "",
+    body_html: str = "",
 ) -> str:
     pad = 12 if dense else 16
     delta_color = _tone_color(delta_tone)
@@ -2550,15 +2767,18 @@ def _stat_card(
             f'<span style="font-size:11px;color:{delta_color};font-weight:500">{_esc(delta)}</span>'
         )
     parts.append("</div>")
-    parts.append(
-        f'<div class="cal-stat-card-value" style="font-size:var(--num-xl);line-height:1.05;font-weight:600;color:{value_color};'
-        f'margin-bottom:4px;letter-spacing:0">{_esc(value)}</div>'
-    )
-    if sub:
-        margin = "10px" if sparkline else "0"
+    if body_html:
+        parts.append(body_html)
+    else:
         parts.append(
-            f'<div style="font-size:12px;color:var(--mute);margin-bottom:{margin}">{_esc(sub)}</div>'
+            f'<div class="cal-stat-card-value" style="font-size:var(--num-xl);line-height:1.05;font-weight:600;color:{value_color};'
+            f'margin-bottom:4px;letter-spacing:0">{_esc(value)}</div>'
         )
+        if sub:
+            margin = "10px" if sparkline else "0"
+            parts.append(
+                f'<div style="font-size:12px;color:var(--mute);margin-bottom:{margin}">{_esc(sub)}</div>'
+            )
     if sparkline:
         spark_w = 100 if dense else 140
         spark_h = 22 if dense else 26
@@ -2597,6 +2817,123 @@ def _stat_card(
         )
     parts.append("</div>")
     return "".join(parts)
+
+
+def _token_split_metric(*, label: str, value: str, detail: str) -> str:
+    return (
+        '<div class="cal-token-metric">'
+        f'<div class="cal-token-metric-label">{_esc(label)}</div>'
+        f'<div class="cal-token-metric-value">{_esc(value)}</div>'
+        f'<div class="cal-token-metric-detail">{_esc(detail)}</div>'
+        "</div>"
+    )
+
+
+def _log_signal_tile(*, label: str, value: str, detail: str, tone: str = "neutral") -> str:
+    color = _tone_color(tone, default="var(--border)")
+    return (
+        f'<div class="cal-log-signal" style="border-left:2px solid {color}">'
+        f'<div class="cal-log-signal-label">{_esc(label)}</div>'
+        f'<div class="cal-log-signal-value">{_esc(value)}</div>'
+        f'<div class="cal-log-signal-detail">{_esc(detail)}</div>'
+        "</div>"
+    )
+
+
+def _fmt_latency_ms(value: int | None) -> str:
+    if value is None:
+        return "—"
+    if value < 1000:
+        return f"{value}ms"
+    return f"{value / 1000:.1f}s"
+
+
+def _overview_log_signals(signals: LogSignals | None, qs: QualityScore | None) -> str:
+    if signals is None:
+        return ""
+
+    cost_tone = "neutral"
+    if signals.cost_source_label in {"Partial pricing", "No usage"}:
+        cost_tone = "warn" if signals.cost_source_label == "Partial pricing" else "neutral"
+    elif signals.cost_source_label == "Estimated":
+        cost_tone = "warn"
+
+    cache_write = signals.cache_creation_input_tokens + signals.cache_creation_input_1h_tokens
+    cache_detail = (
+        f"{fmt_tokens(cache_write)} write · "
+        f"{fmt_tokens(signals.cache_creation_input_1h_tokens)} 1h · "
+        f"{fmt_tokens(signals.reasoning_output_tokens)} reasoning"
+    )
+
+    if signals.tool_result_count:
+        error_rate = signals.tool_error_count / signals.tool_result_count
+        reliability_value = f"{fmt_int(signals.tool_error_count)} errors"
+        reliability_detail = (
+            f"{fmt_pct(error_rate)} tool-result error rate · "
+            f"+{fmt_int(signals.lines_added)} / −{fmt_int(signals.lines_removed)} lines"
+        )
+        reliability_tone = "warn" if signals.tool_error_count else "good"
+    else:
+        reliability_value = "No tool results"
+        reliability_detail = (
+            f"+{fmt_int(signals.lines_added)} / −{fmt_int(signals.lines_removed)} lines captured"
+        )
+        reliability_tone = "neutral"
+
+    latency_value = (
+        f"{_fmt_latency_ms(signals.median_latency_ms)} median"
+        if signals.latency_sample_count
+        else "No latency"
+    )
+    latency_detail = (
+        f"p95 {_fmt_latency_ms(signals.p95_latency_ms)} across "
+        f"{fmt_int(signals.latency_sample_count)} turns"
+        if signals.latency_sample_count
+        else "No turn-latency samples in parsed logs"
+    )
+
+    health_tone = qs.tone if qs else "neutral"
+    issue_total = signals.parser_issue_count + signals.warning_count
+    health_value = "Clean" if issue_total == 0 else f"{fmt_int(issue_total)} issues"
+    health_detail = (
+        f"{fmt_int(signals.parser_issue_count)} parser · {fmt_int(signals.warning_count)} warnings"
+    )
+    if qs:
+        health_detail += f" · evidence {qs.score}/100"
+
+    tiles = [
+        _log_signal_tile(
+            label="Cost source",
+            value=signals.cost_source_label,
+            detail=signals.cost_source_detail,
+            tone=cost_tone,
+        ),
+        _log_signal_tile(
+            label="Cache mix",
+            value=f"{fmt_tokens(signals.cache_read_input_tokens)} read",
+            detail=cache_detail,
+            tone="good" if signals.cache_read_input_tokens else "neutral",
+        ),
+        _log_signal_tile(
+            label="Reliability",
+            value=reliability_value,
+            detail=reliability_detail,
+            tone=reliability_tone,
+        ),
+        _log_signal_tile(
+            label="Latency",
+            value=latency_value,
+            detail=latency_detail,
+            tone="neutral",
+        ),
+        _log_signal_tile(
+            label="Log health",
+            value=health_value,
+            detail=health_detail,
+            tone=health_tone,
+        ),
+    ]
+    return '<div class="cal-log-signals">' + "".join(tiles) + "</div>"
 
 
 def _banner_html(b: Banner) -> str:
@@ -3122,6 +3459,109 @@ def _compact_row(
     )
 
 
+def _section_summary_tile(
+    *,
+    label: str,
+    value: str,
+    detail: str,
+    tone: str = "neutral",
+    href: str | None = None,
+    value_is_html: bool = False,
+    detail_is_html: bool = False,
+) -> str:
+    color = _tone_color(tone, "var(--ink)")
+    value_html = value if value_is_html else _esc(value)
+    detail_html = detail if detail_is_html else _esc(detail)
+    link_open = (
+        f'<a class="cal-card-link" href="#{_esc(_anchor_id(href))}" '
+        'style="text-decoration:none;color:inherit">'
+        if href
+        else ""
+    )
+    link_close = "</a>" if href else ""
+    return (
+        f"{link_open}"
+        '<div class="cal-section-summary-tile">'
+        f'<div class="cal-section-summary-label">{_esc(label)}</div>'
+        f'<div class="cal-section-summary-value" style="color:{color}">{value_html}</div>'
+        f'<div class="cal-section-summary-detail">{detail_html}</div>'
+        f"</div>{link_close}"
+    )
+
+
+def _section_summary_grid(items: Sequence[str]) -> str:
+    if not items:
+        return ""
+    return '<div class="cal-section-summary-grid">' + "".join(items) + "</div>"
+
+
+def _finding_tone_label(tone: str) -> str:
+    if tone == "critical":
+        return "Critical"
+    if tone == "warn":
+        return "Review"
+    if tone == "good":
+        return "Opportunity"
+    return "Note"
+
+
+def _section_action_center(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
+    eb = d.executive_brief
+    if eb is None or not eb.findings:
+        return ""
+
+    tone_accent = _tone_color(eb.tone, "var(--accent)")
+    findings = list(eb.findings)[:5]
+    header = (
+        '<div class="cal-decision-head" '
+        f'style="border-left-color:{tone_accent}">'
+        '<div style="min-width:0">'
+        f'<div class="cal-decision-title">{_private_text(eb.verdict, pm)}</div>'
+        f'<div class="cal-decision-subtitle">{_private_text(eb.subtitle, pm)}</div>'
+        "</div>"
+        f'<div class="cal-decision-count">{len(findings)} item'
+        f"{'s' if len(findings) != 1 else ''}</div>"
+        "</div>"
+    )
+
+    rows: list[str] = []
+    for index, finding in enumerate(findings, start=1):
+        anchor = _anchor_id(finding.anchor)
+        tone = finding.tone or "neutral"
+        impact_html = (
+            f'<span class="cal-decision-impact">{_private_text(finding.impact, pm)}</span>'
+            if finding.impact
+            else ""
+        )
+        rows.append(
+            f'<a class="cal-decision-row cal-card-link" href="#{_esc(anchor)}">'
+            f'<span class="cal-decision-rank">{index}</span>'
+            '<span class="cal-decision-main">'
+            f'<span class="cal-decision-row-head">'
+            f"{_severity_token(tone, _finding_tone_label(tone))}"
+            f'<span class="cal-decision-row-title">{_private_text(finding.title, pm)}</span>'
+            "</span>"
+            f'<span class="cal-decision-detail">{_private_text(finding.detail, pm)}</span>'
+            "</span>"
+            f"{impact_html}"
+            "</a>"
+        )
+
+    body = (
+        '<div class="cal-decision-summary">'
+        f"{header}"
+        '<div class="cal-decision-list">' + "".join(rows) + "</div>"
+        "</div>"
+    )
+    warn_count = sum(1 for finding in findings if finding.tone in {"critical", "warn"})
+    meta = (
+        f"{warn_count} warnings · {len(findings)} linked findings"
+        if warn_count
+        else (f"{len(findings)} linked findings")
+    )
+    return _section_wrap("action-center", rhythm=rhythm, body=body, meta=meta)
+
+
 def _small_table(
     headers: Sequence[str],
     rows: Sequence[Sequence[str]],
@@ -3221,45 +3661,7 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
             'color:var(--ink-2);font-weight:600">Detected waste</div>'
             f"{''.join(finding_rows)}</div>"
         )
-    cache_rows = []
-    for row in d.cache_leverage[:6]:
-        # Two-line label: the compressed session label on top (verbose
-        # timestamps like "3:02 am, Thursday 21 May 2026" collapse to
-        # "Thu 21 May · 03:02"), then the project the session ran in
-        # underneath, muted. The reader doesn't have to cross-reference
-        # the main sessions table to know which repo each cache row is from.
-        session_display = _private_text(_compress_session_label(row.session_label), pm)
-        project_display = _private_project(row.project, pm) if row.project else ""
-        project_line = (
-            '<div class="cal-cache-project" style="color:var(--mute);font-size:11px;'
-            "font-family:var(--font);margin-top:2px;white-space:nowrap;"
-            f'overflow:hidden;text-overflow:ellipsis">in {project_display}</div>'
-            if project_display
-            else ""
-        )
-        label_html = (
-            '<div class="cal-cache-session-cell" style="min-width:0">'
-            '<div class="cal-cache-session" '
-            'style="white-space:nowrap;font-variant-numeric:tabular-nums lining-nums">'
-            f"{session_display}"
-            "</div>"
-            f"{project_line}"
-            "</div>"
-        )
-        cache_rows.append(
-            [
-                label_html,
-                fmt_money(row.savings_usd),
-                fmt_pct(row.hit_rate),
-                fmt_tokens(row.cached_input_tokens),
-            ]
-        )
-    cache = (
-        _small_table(["Session", "Cache discount", "Hit rate", "Cached tokens"], cache_rows)
-        if cache_rows
-        else ""
-    )
-    panels = "".join(panel for panel in (recommendations, findings, cache) if panel)
+    panels = "".join(panel for panel in (recommendations, findings) if panel)
     if not panels:
         return ""
     body = (
@@ -3270,7 +3672,7 @@ def _section_inefficiencies(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> st
     if total_savings > 0:
         meta = f"{fmt_money(total_savings)} estimated avoidable spend"
     else:
-        meta = f"{len(finding_rows)} findings · {len(cache_rows)} cache rows"
+        meta = f"{len(finding_rows)} findings"
     return _section_wrap("inefficiencies", rhythm=rhythm, body=body, meta=meta)
 
 
@@ -3477,21 +3879,29 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
     # see "across what?".
     sample_n = f"across {fmt_int(t.events)} events · {fmt_int(t.sessions)} sessions"
     cost_formula = (
-        "cost = Σ (input × rate_in)\n"
-        "         + (output × rate_out)\n"
-        "         + (cached_input × rate_cached_in)\n"
-        "per (model, tier), using Decimal arithmetic.\n"
+        "cost = Σ event_cost.\n"
+        "event_cost = vendor-reported USD when present; otherwise calculated as:\n"
+        "  ((uncached_input × rate_in)\n"
+        "   + (cache_read × rate_cached_in)\n"
+        "   + (cache_creation × rate_cache_creation)\n"
+        "   + (cache_creation_1h × rate_cache_creation_1h)) × input_mult\n"
+        "  + ((output × rate_out) + (billable_reasoning × rate_reasoning_out)) × output_mult.\n"
+        "Then apply the service-tier multiplier and divide per-token rates by 1,000,000.\n"
+        "All calculated USD uses Decimal arithmetic per event/model/tier.\n"
         f"{sample_n}."
     )
     cache_formula = (
-        "cache_savings = Σ cached_input × (rate_in − rate_cached_in)\n"
-        "per (model, tier). Cached-input rate is vendor-published;\n"
-        "counterfactual is the standard input rate for the same model.\n"
+        "cache_savings = Σ max(0, cost_without_cache − actual_cost).\n"
+        "cost_without_cache reprices the same input/output/reasoning with cache fields zeroed.\n"
+        "actual_cost uses cache-read and cache-creation rates for the same event/model/tier.\n"
+        "cache_hit_rate = cached_input / input_tokens.\n"
         f"{sample_n}."
     )
     tokens_formula = (
-        "total_tokens = uncached_input + cached_input + output + reasoning.\n"
-        "Cached + output reported separately because they price differently.\n"
+        "input_tokens = uncached_input + cached_input.\n"
+        "output_tokens = reported output tokens.\n"
+        "total_tokens = vendor-reported total_tokens.\n"
+        "Reasoning tokens are handled separately for pricing only when the log shape proves they are not already included in output.\n"
         f"{sample_n}."
     )
     sessions_formula = (
@@ -3513,6 +3923,7 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
         spark_color: str,
         rail: str,
         formula: str = "",
+        body_html: str = "",
     ) -> str:
         return _stat_card(
             label=label,
@@ -3526,9 +3937,28 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
             dense=dense,
             formula="" if is_empty else formula,
             formula_source="" if is_empty else pricing_source,
+            body_html="" if is_empty else body_html,
         )
 
     empty_sub = "No events for this window" if is_empty else ""
+    token_input_total = t.cached_input_tokens + t.uncached_input_tokens
+    token_body = (
+        '<div class="cal-token-split" aria-label="Token usage split">'
+        + _token_split_metric(
+            label="Input",
+            value=fmt_tokens(token_input_total),
+            detail=(
+                f"{fmt_tokens(t.cached_input_tokens)} cached · "
+                f"{fmt_tokens(t.uncached_input_tokens)} uncached"
+            ),
+        )
+        + _token_split_metric(
+            label="Output",
+            value=fmt_tokens(t.output_tokens),
+            detail="reported output",
+        )
+        + "</div>"
+    )
     cards = "".join(
         [
             _card(
@@ -3556,14 +3986,14 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
             _card(
                 label="Tokens",
                 value="—" if is_empty else fmt_tokens(t.total_tokens),
-                sub=empty_sub
-                or f"{fmt_tokens(t.cached_input_tokens)} cached · {fmt_tokens(t.output_tokens)} output",
+                sub=empty_sub,
                 delta=t.delta_tokens_pct,
                 delta_tone="default",
                 spark=t.daily_token_sparkline,
                 spark_color="var(--accent)",
                 rail="var(--card-rail-tokens)",
                 formula=tokens_formula,
+                body_html=token_body,
             ),
             _card(
                 label="Sessions",
@@ -3583,6 +4013,7 @@ def _section_overview(d: Dashboard, *, dense: bool, rhythm: str) -> str:
         'style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:stretch">'
         + cards
         + "</div>"
+        + _overview_log_signals(d.log_signals, d.quality_score)
     )
     return _section_wrap("overview", rhythm=rhythm, body=body)
 
@@ -3711,7 +4142,40 @@ def render_models(rows: Sequence[ModelRow], *, total_cost: float | None = None) 
 def _section_models(d: Dashboard, *, rhythm: str) -> str:
     if not d.by_model:
         return ""
-    body = render_models(d.by_model, total_cost=d.totals.cost_usd)
+    rows = sorted(d.by_model, key=lambda r: (-r.cost_usd, -r.tokens))
+    total_cost = float(d.totals.cost_usd or 0.0)
+    total_tokens = sum(max(0, row.tokens) for row in rows)
+    top = rows[0]
+    top_share = (top.cost_usd / total_cost) if total_cost else 0.0
+    weighted_cache = (
+        sum(row.cache_hit_rate * max(0, row.tokens) for row in rows) / total_tokens
+        if total_tokens
+        else 0.0
+    )
+    tier_count = len({row.tier for row in rows if row.tier})
+    summary = _section_summary_grid(
+        [
+            _section_summary_tile(
+                label="Top model",
+                value=top.model,
+                detail=f"{fmt_money(top.cost_usd)} · {fmt_pct(top_share, 0)} of window",
+                tone="warn" if top_share >= 0.45 else "neutral",
+            ),
+            _section_summary_tile(
+                label="Model spread",
+                value=f"{len(rows)} rows",
+                detail=f"{tier_count} tiers · sorted by cost",
+                tone="neutral",
+            ),
+            _section_summary_tile(
+                label="Weighted cache",
+                value=fmt_pct(weighted_cache, 1),
+                detail=f"weighted over {fmt_tokens(total_tokens)} model tokens",
+                tone="good" if weighted_cache >= 0.5 else "neutral",
+            ),
+        ]
+    )
+    body = summary + render_models(d.by_model, total_cost=d.totals.cost_usd)
     meta = f"{len(d.by_model)} model/tier rows · sorted by cost"
     return _section_wrap("models", rhythm=rhythm, body=body, meta=meta)
 
@@ -3830,7 +4294,36 @@ def render_projects(
 def _section_projects(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
     if not d.by_project:
         return ""
-    body = render_projects(
+    rows = sorted(d.by_project, key=lambda r: (-r.cost_usd, -r.events))
+    total_cost = float(d.totals.cost_usd or 0.0)
+    top = rows[0]
+    top_share = (top.cost_usd / total_cost) if total_cost else 0.0
+    rising = sum(1 for row in rows if row.trend_tone == "warn")
+    active_days = max((row.active_days for row in rows), default=0)
+    summary = _section_summary_grid(
+        [
+            _section_summary_tile(
+                label="Top project",
+                value=_private_project(top.name, pm),
+                value_is_html=True,
+                detail=f"{fmt_money(top.cost_usd)} · {fmt_pct(top_share, 0)} of window",
+                tone="warn" if top_share >= 0.45 else "neutral",
+            ),
+            _section_summary_tile(
+                label="Project spread",
+                value=f"{len(rows)} projects",
+                detail=f"{fmt_int(sum(row.sessions for row in rows))} sessions · {active_days} active days max",
+                tone="neutral",
+            ),
+            _section_summary_tile(
+                label="Trend flags",
+                value=f"{rising} rising",
+                detail="projects with warning-level trend labels",
+                tone="warn" if rising else "good",
+            ),
+        ]
+    )
+    body = summary + render_projects(
         d.by_project, show_paths=d.show_paths, total_cost=d.totals.cost_usd, pm=pm
     )
     meta = f"{len(d.by_project)} cost-ranked projects"
@@ -4166,6 +4659,38 @@ def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
         return ""
     mx = max((r.cost_usd for r in rows), default=1.0) or 1.0
     total_cost = float(d.totals.cost_usd or 0.0)
+    top = rows[0]
+    top_share = (top.cost_usd / total_cost) if total_cost > 0 else 0.0
+    total_tools = sum(row.tool_calls for row in rows)
+    total_session_tokens = sum(row.total_tokens for row in rows)
+    expensive_count = sum(1 for row in rows if total_cost > 0 and row.cost_usd / total_cost >= 0.05)
+    top_detail = (
+        f"{_private_session(top.label, pm)} · {_private_project(top.project, pm)} · "
+        f"{_private_text(top.reason, pm)}"
+    )
+    summary = _section_summary_grid(
+        [
+            _section_summary_tile(
+                label="Highest cost",
+                value=fmt_money(top.cost_usd),
+                detail=f"{fmt_pct(top_share, 0)} of window · {top_detail}",
+                detail_is_html=True,
+                tone="warn" if top_share >= 0.10 else "neutral",
+            ),
+            _section_summary_tile(
+                label="Session coverage",
+                value=f"{len(rows)} sessions",
+                detail=f"{fmt_tokens(total_session_tokens)} · {fmt_int(total_tools)} tool calls",
+                tone="neutral",
+            ),
+            _section_summary_tile(
+                label="Concentration",
+                value=f"{expensive_count} above 5%",
+                detail="sessions that materially move the selected window",
+                tone="warn" if expensive_count > 1 else "neutral",
+            ),
+        ]
+    )
     head = (
         '<thead><tr style="background:var(--panel-2)">'
         f"{_th('Session')}{_th('Started')}{_th('Project')}"
@@ -4209,7 +4734,7 @@ def _section_sessions(d: Dashboard, *, rhythm: str, pm: _PrivacyMap) -> str:
             + "</tr>"
         )
     body = (
-        '<div tabindex="0" style="background:var(--panel);border:1px solid var(--border);'
+        summary + '<div tabindex="0" style="background:var(--panel);border:1px solid var(--border);'
         'border-radius:var(--r-md);overflow-x:auto">'
         '<table class="cal-table" aria-label="Top sessions by cost" '
         'style="width:100%;border-collapse:collapse;'
@@ -4273,15 +4798,16 @@ def _section_evidence(d: Dashboard, *, dense: bool, rhythm: str) -> str:
 # Variant shells
 # ============================================================================
 
-# Curated to what earns its place: lead with what the spend produced and where
-# it went (descriptive, always true), surface real flags only when present
+# Curated to what earns its place: lead with the spend overview and decision
+# summary, then what the spend produced and where it went, surface real flags only when present
 # (gated), tuck supporting detail in a collapsed appendix, close on trust.
-# Sections removed from the dashboard (billboard, action-center, overview,
-# usage-windows, usage-mix, forecast/outlook, session-shape, heatmap, advisor)
+# Sections removed from the dashboard (billboard, usage-windows, usage-mix,
+# forecast/outlook, session-shape, heatmap, advisor)
 # were redundant with these, speculative, or vanity. SECTION_NUMBERS keeps every
 # legacy anchor so old links still resolve.
 _SECTION_ORDER: list[str] = [
     "overview",
+    "action-center",
     "output",
     "cost",
     "models",
@@ -4302,8 +4828,8 @@ _SECTION_ORDER: list[str] = [
 # Section IDs and numbers (§00..§19) remain stable so anchor links keep
 # working. Tiers control visual grouping and progressive disclosure only:
 #
-#   decisions  — what to act on (always visible, rendered first)
-#   trajectory — what's happening (always visible)
+#   trajectory — overview, decision summary, and coverage (always visible)
+#   decisions  — what to act on (gated, rendered after coverage)
 #   appendix   — supporting evidence (collapsed in a single <details>)
 #   trust      — evidence footer (always visible, terse)
 # ----------------------------------------------------------------------------
@@ -4311,6 +4837,7 @@ _SECTION_ORDER: list[str] = [
 _SECTION_TIER: dict[str, str] = {
     # What happened — always visible, the descriptive core.
     "overview": "trajectory",
+    "action-center": "trajectory",
     "output": "trajectory",
     "cost": "trajectory",
     "models": "trajectory",
@@ -4693,6 +5220,8 @@ def _render_section(
 ) -> str:
     if section_id == "overview":
         return _section_overview(d, dense=dense, rhythm=rhythm)
+    if section_id == "action-center":
+        return _section_action_center(d, rhythm=rhythm, pm=pm)
     if section_id == "output":
         return _section_output(d, rhythm=rhythm)
     if section_id == "cost":
@@ -4833,11 +5362,9 @@ def _render_receipt(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
     # The dashboard leads with the honest verdict strip (period, cost, trend).
     hero_inner = _hero_verdict_strip(d, rhythm)
     hero_html = f'<div style="margin-top:18px">{hero_inner}</div>' if hero_inner else ""
-    verdict_html = _verdict_block(d, rhythm)
-    # The above-the-fold banner/verdict carry the primary summary, so they must
-    # sit inside a landmark (otherwise screen-reader landmark navigation skips
-    # the most important content).
-    summary_inner = banner_html + hero_html + verdict_html
+    # The above-the-fold banner/hero carry the primary summary; detailed
+    # findings now live in the Decision summary section to avoid duplication.
+    summary_inner = banner_html + hero_html
     summary_band = (
         f'<section class="cal-summary-band" aria-label="Summary">{summary_inner}</section>'
         if summary_inner
@@ -5038,7 +5565,6 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
     )
     hero_inner = _hero_verdict_strip(d, rhythm)
     hero_html = f'<div style="margin-bottom:22px">{hero_inner}</div>' if hero_inner else ""
-    verdict_html = _verdict_block(d, rhythm, margin="margin-bottom:22px")
     tiered = _sections_by_tier(d)
     decisions_html = "".join(
         _render_section(sid, d, dense=dense, rhythm=rhythm, pm=pm) for sid in tiered["decisions"]
@@ -5076,7 +5602,6 @@ def _render_terminal(d: Dashboard, *, dense: bool, pm: _PrivacyMap) -> str:
         '<main id="cal-main" class="cal-terminal-main" tabindex="-1">'
         f"{banner_html}"
         f"{hero_html}"
-        f"{verdict_html}"
         f"{_render_mobile_nav(d)}"
         f'<div style="display:grid;gap:28px">{sections}</div>'
         f"{_caliper_footer(d)}"
@@ -5411,7 +5936,7 @@ _INTERACTIVE_SCRIPT = """
       var jumpMap = {
         'a': 'anomalies', 'i': 'inefficiencies', 'm': 'models',
         's': 'sessions', 'o': 'overview', 'p': 'projects',
-        'c': 'cost', 'f': 'forecast', 'e': 'evidence',
+        'c': 'cost', 'f': 'cost', 'e': 'evidence',
       };
       var target = jumpMap[e.key];
       if (target) {

@@ -261,6 +261,69 @@ table { font-variant-numeric: tabular-nums lining-nums; }
   flex-direction: column;
 }
 .cal-stat-card-value { overflow-wrap: anywhere; }
+.cal-token-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 2px 0 10px;
+}
+.cal-token-metric { min-width: 0; }
+.cal-token-metric-label {
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--mute);
+  margin-bottom: 4px;
+}
+.cal-token-metric-value {
+  font-size: var(--num-lg);
+  line-height: 1.05;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+.cal-token-metric-detail {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--mute);
+}
+.cal-log-signals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.cal-log-signal {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+}
+.cal-log-signal-label {
+  font-size: 10px;
+  color: var(--ghost);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.cal-log-signal-value {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cal-log-signal-detail {
+  color: var(--mute);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 3px;
+}
 .cal-card-sparkline {
   min-width: 0;
   margin-top: auto;
@@ -305,6 +368,134 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 .cal-hero-verdict:hover { background: var(--panel-hover); }
 .cal-hero-cost { font-variant-numeric: tabular-nums lining-nums; }
 .cal-hero-action-command::selection { background: var(--accent-tint-2); }
+
+.cal-decision-summary {
+  display: grid;
+  gap: 10px;
+}
+.cal-decision-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  padding: 14px 16px;
+  min-width: 0;
+}
+.cal-decision-title {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.cal-decision-subtitle {
+  color: var(--mute);
+  font-size: 12px;
+  margin-top: 3px;
+  line-height: 1.45;
+}
+.cal-decision-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--mute);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.cal-decision-list {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.cal-decision-row.cal-card-link {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 12px 14px;
+  color: inherit;
+  text-decoration: none;
+  border-top: 1px solid var(--border);
+}
+.cal-decision-row:first-child { border-top: 0; }
+.cal-decision-rank {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ghost);
+  padding-top: 3px;
+}
+.cal-decision-main {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.cal-decision-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.cal-decision-row-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+}
+.cal-decision-detail {
+  color: var(--mute);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.cal-decision-impact {
+  font-family: var(--mono);
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 7px;
+  background: var(--panel-2);
+}
+.cal-section-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.cal-section-summary-tile {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 11px 13px;
+}
+.cal-section-summary-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ghost);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  font-weight: 650;
+}
+.cal-section-summary-value {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.cal-section-summary-detail {
+  color: var(--mute);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 4px;
+}
 
 /* Show-the-math disclosure on KPI cards. Hides the default summary marker
    so the eye reads our "?" affordance; otherwise styling stays inline. */
@@ -455,6 +646,7 @@ section[id] { scroll-margin-top: 36px; }
 [data-viewport="mobile"] [data-screen-label] { min-width: 0; }
 [data-viewport="mobile"] .cal-stat-card { padding: 12px !important; }
 [data-viewport="mobile"] .cal-stat-card-value { font-size: 22px !important; }
+[data-viewport="mobile"] .cal-token-split { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] .cal-receipt-root { padding: 16px 14px 48px !important; }
 [data-viewport="mobile"] .cal-receipt-main { overflow-x: hidden; }
 [data-viewport="mobile"] .cal-terminal-layout { grid-template-columns: 1fr !important; }
@@ -508,6 +700,18 @@ section[id] { scroll-margin-top: 36px; }
     grid-template-columns: 1fr !important;
     gap: 8px !important;
   }
+  .cal-decision-head,
+  .cal-decision-row.cal-card-link {
+    grid-template-columns: 1fr !important;
+  }
+  .cal-decision-count,
+  .cal-decision-impact {
+    justify-self: start;
+    white-space: normal;
+  }
+  .cal-section-summary-grid {
+    grid-template-columns: 1fr !important;
+  }
   .cal-metric-chip {
     flex: 1 1 132px;
   }
@@ -556,6 +760,7 @@ section[id] { scroll-margin-top: 36px; }
     min-height: 136px;
   }
   .cal-stat-card-value { font-size: 22px !important; }
+  .cal-token-split { grid-template-columns: 1fr !important; }
   .cal-terminal-mast {
     grid-template-columns: 1fr !important;
     gap: 10px !important;

@@ -73,6 +73,7 @@ from caliper.dashboards.data_models import (
     ImpactCard,
     InefficiencyRow,
     Insight,
+    LogSignals,
     LongContextHistogram,
     ModelRow,
     OutputSummary,
@@ -354,6 +355,7 @@ def build_handoff_dashboard(
         comparisons=comparisons,
     )
     tier_provenance = _build_tier_provenance(result)
+    log_signals = _build_log_signals(result, total)
     cache_leverage = _build_cache_leverage(
         result,
         options,
@@ -409,6 +411,7 @@ def build_handoff_dashboard(
         cost_note=subscription_cost_caveat(result.plan_types) or "",
         cache_leverage=cache_leverage,
         long_context_histogram=long_context_histogram,
+        log_signals=log_signals,
         cohort_deltas=cohort_deltas,
         budgets=budgets,
     )
@@ -666,6 +669,92 @@ def _build_totals(
         daily_token_sparkline=[float(p.tokens) for p in daily_points],
         daily_session_sparkline=[float(n) for n in daily_session_count],
     )
+
+
+def _build_log_signals(result: LoadResult, total: Aggregate) -> LogSignals:
+    totals = total.totals
+    costs = total.costs
+    events = totals.events
+
+    if events == 0:
+        cost_label = "No usage"
+        cost_detail = "No cost-bearing events in this window"
+    elif costs.vendor_reported_events == events:
+        cost_label = "Vendor-reported"
+        cost_detail = f"{events:,} of {events:,} events carried vendor USD"
+    elif costs.unpriced_events:
+        cost_label = "Partial pricing"
+        cost_detail = (
+            f"{costs.unpriced_events:,} unpriced · "
+            f"{costs.estimated_events:,} estimated · "
+            f"{costs.vendor_reported_events:,} vendor-reported"
+        )
+    elif costs.vendor_reported_events:
+        cost_label = "Mixed source"
+        calculated = max(0, events - costs.vendor_reported_events)
+        cost_detail = (
+            f"{costs.vendor_reported_events:,} vendor-reported · {calculated:,} calculated"
+        )
+    elif costs.estimated_events:
+        cost_label = "Estimated"
+        cost_detail = f"{costs.estimated_events:,} events used estimated rates"
+    else:
+        cost_label = "Calculated"
+        cost_detail = "All event costs calculated from model/tier token rates"
+
+    latencies: list[int] = []
+    tool_results = 0
+    tool_errors = 0
+    lines_added = 0
+    lines_removed = 0
+    for event in result.events:
+        facts = event.turn_facts
+        if facts is None:
+            continue
+        if facts.latency_ms is not None:
+            latencies.append(facts.latency_ms)
+        tool_results += facts.tool_result_count
+        tool_errors += facts.tool_error_count
+        lines_added += facts.lines_added
+        lines_removed += facts.lines_removed
+
+    latencies.sort()
+    parser_issue_count = sum(issue.count for issue in result.parser_issues)
+    return LogSignals(
+        cost_source_label=cost_label,
+        cost_source_detail=cost_detail,
+        cache_read_input_tokens=totals.cache_read_input_tokens,
+        cache_creation_input_tokens=totals.cache_creation_input_tokens,
+        cache_creation_input_1h_tokens=totals.cache_creation_input_1h_tokens,
+        reasoning_output_tokens=totals.reasoning_output_tokens,
+        latency_sample_count=len(latencies),
+        median_latency_ms=_median_int(latencies),
+        p95_latency_ms=_percentile_int(latencies, 0.95),
+        tool_result_count=tool_results,
+        tool_error_count=tool_errors,
+        lines_added=lines_added,
+        lines_removed=lines_removed,
+        parser_issue_count=parser_issue_count,
+        warning_count=len(result.warnings),
+    )
+
+
+def _median_int(values: list[int]) -> int | None:
+    if not values:
+        return None
+    mid = len(values) // 2
+    if len(values) % 2:
+        return values[mid]
+    return round((values[mid - 1] + values[mid]) / 2)
+
+
+def _percentile_int(values: list[int], fraction: float) -> int | None:
+    if not values:
+        return None
+    if len(values) == 1:
+        return values[0]
+    idx = round((len(values) - 1) * fraction)
+    return values[max(0, min(len(values) - 1, idx))]
 
 
 def _daily_cache_sparkline(

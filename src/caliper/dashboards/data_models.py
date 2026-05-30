@@ -353,6 +353,27 @@ class RateLimitPressure:
 
 
 @dataclass(frozen=True)
+class LogSignals:
+    """High-value facts extracted from local logs for the overview strip."""
+
+    cost_source_label: str = ""
+    cost_source_detail: str = ""
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_creation_input_1h_tokens: int = 0
+    reasoning_output_tokens: int = 0
+    latency_sample_count: int = 0
+    median_latency_ms: int | None = None
+    p95_latency_ms: int | None = None
+    tool_result_count: int = 0
+    tool_error_count: int = 0
+    lines_added: int = 0
+    lines_removed: int = 0
+    parser_issue_count: int = 0
+    warning_count: int = 0
+
+
+@dataclass(frozen=True)
 class QualitySignal:
     label: str
     status: str
@@ -625,6 +646,7 @@ class Dashboard:
     # Cache reuse by session + long-context histogram (Avoidable spend + Attribution).
     cache_leverage: list[CacheLeverageRow] = field(default_factory=list)
     long_context_histogram: LongContextHistogram | None = None
+    log_signals: LogSignals | None = None
 
     # Cohort delta table (Attribution).
     cohort_deltas: list[CohortDeltaRow] = field(default_factory=list)

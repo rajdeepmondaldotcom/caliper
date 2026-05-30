@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from pathlib import Path
 
 from caliper.config import build_options
 from caliper.dashboards.adapter import (
     _SHAPE_NAME_MAP,
     _build_banner,
     _build_evidence,
+    _build_log_signals,
     _build_model_rows,
     _build_project_rows,
     _build_rate_limit_pressure,
@@ -25,7 +27,11 @@ from caliper.models import (
     CostTotals,
     LoadResult,
     RateLimitSample,
+    ThreadMeta,
     TokenTotals,
+    TurnFacts,
+    Usage,
+    UsageEvent,
 )
 from caliper.parser import load_usage
 
@@ -135,6 +141,62 @@ def test_shape_name_map_is_total_for_categories() -> None:
     assert _SHAPE_NAME_MAP[CATEGORY_DIAGNOSTIC] == "diagnostic"
     assert _SHAPE_NAME_MAP[CATEGORY_MIXED] == "mixed"
     assert _SHAPE_NAME_MAP[CATEGORY_NONE] == "no-tools"
+
+
+def test_build_log_signals_summarizes_cache_reliability_latency_and_health() -> None:
+    event = UsageEvent(
+        timestamp=dt.datetime(2026, 5, 12, 10, 0, tzinfo=dt.UTC),
+        path=Path("/tmp/session.jsonl"),
+        session_id="s1",
+        usage=Usage(input_tokens=1_000, output_tokens=100, total_tokens=1_100),
+        model="gpt-5.5",
+        service_tier="standard",
+        tier_source="logged",
+        thread=ThreadMeta(cwd="/tmp/project"),
+        turn_facts=TurnFacts(
+            latency_ms=4_000,
+            tool_result_count=10,
+            tool_error_count=2,
+            lines_added=30,
+            lines_removed=8,
+        ),
+    )
+    total = Aggregate(key="total", label="Total")
+    total.totals = TokenTotals(
+        events=1,
+        input_tokens=1_500,
+        cache_read_input_tokens=300,
+        cache_creation_input_tokens=150,
+        cache_creation_input_1h_tokens=50,
+        cached_input_tokens=500,
+        output_tokens=100,
+        reasoning_output_tokens=25,
+        total_tokens=1_600,
+    )
+    total.costs = CostTotals(cost_usd=0.05, vendor_reported_events=1)
+    result = LoadResult(
+        events=[event],
+        duplicates=0,
+        tier_sources={},
+        plan_types=set(),
+        rate_limit_samples=[],
+        warnings=["rate card stale"],
+    )
+
+    signals = _build_log_signals(result, total)
+
+    assert signals.cost_source_label == "Vendor-reported"
+    assert signals.cache_read_input_tokens == 300
+    assert signals.cache_creation_input_tokens == 150
+    assert signals.cache_creation_input_1h_tokens == 50
+    assert signals.reasoning_output_tokens == 25
+    assert signals.median_latency_ms == 4_000
+    assert signals.p95_latency_ms == 4_000
+    assert signals.tool_result_count == 10
+    assert signals.tool_error_count == 2
+    assert signals.lines_added == 30
+    assert signals.lines_removed == 8
+    assert signals.warning_count == 1
 
 
 # ----- _build_session_shape -----

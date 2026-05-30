@@ -2,6 +2,31 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.84 - 2026-05-31
+
+Dashboard accuracy and signal cleanup.
+
+- **Overview token accounting is explicit.** The token KPI now splits input
+  and output tokens, with cached and uncached input called out separately, and
+  the show-the-math copy states the exact vendor-total semantics instead of
+  implying a reconstructed total.
+- **Decision summary replaces repeated findings.** The dashboard now has a
+  first-class, linked Decision summary built from the executive brief, while
+  generic Insights are suppressed when stronger anomaly, budget, avoidable
+  spend, or session sections already explain the same signal.
+- **Coverage sections lead with useful summaries.** Models, Projects, and
+  Session drilldown now open with compact, ranked context before the dense
+  tables, preserving full coverage without forcing every row into the first
+  read.
+- **Dead and duplicate dashboard affordances were pruned.** The cache-discount
+  session table was removed, legacy anchors now route to active sections, and
+  renderer tests lock no duplicate IDs, no broken internal links, and no dead
+  pruned-section links.
+- **Log-derived quality signals moved into Overview.** Cost source, cache mix,
+  tool-result errors, latency, churn, and evidence score now sit next to the
+  headline KPIs so the reader can judge how trustworthy and actionable the
+  numbers are before drilling in.
+
 ## 0.0.83 - 2026-05-29
 
 Surface the findings: the Insights section was hidden, now it leads "Worth a look."

@@ -9,6 +9,8 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import json
+from collections import Counter
+from html.parser import HTMLParser
 
 import pytest
 
@@ -39,6 +41,23 @@ SECRET = "REDACTED_SECRET_THAT_MUST_NEVER_LEAK"
 # so inline-data-URI elements like the favicon (`<link rel="icon" href="data:…">`)
 # are safely allowed.
 FORBIDDEN = ("://", " src=", "fetch(", "XMLHttpRequest", "import(")
+
+
+class _DashboardLinkParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: list[str] = []
+        self.hrefs: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del tag
+        attr_map = dict(attrs)
+        element_id = attr_map.get("id")
+        href = attr_map.get("href")
+        if element_id:
+            self.ids.append(element_id)
+        if href:
+            self.hrefs.append(href)
 
 
 def _assert_private_html(html: str) -> None:
@@ -152,7 +171,7 @@ def test_dashboard_renders_section_markers(monkeypatch, tmp_path) -> None:
     render order. Section anchor IDs are still stable, so links keep
     working; only the display string changed."""
     html = _render(monkeypatch, tmp_path)
-    # The first visible section (action-center) carries the "1." label.
+    # The first visible section carries the "1." label.
     assert ">1.<" in html
     # Every rendered section still emits a data-screen-label, but the
     # numeric prefix is now the *display* number (1..N) — not the legacy
@@ -597,9 +616,10 @@ def test_evidence_section_summarizes_the_grade_tally() -> None:
 def test_dashboard_renders_curated_sections_in_order() -> None:
     html = render_dashboard(sample_dashboard(show_paths=True))
 
-    # The curated set: descriptive core, then flags, then collapsed detail, trust.
+    # The curated set: overview, decision summary, coverage, flags, collapsed detail, trust.
     for section_id in (
         "overview",
+        "action-center",
         "output",
         "cost",
         "models",
@@ -613,13 +633,16 @@ def test_dashboard_renders_curated_sections_in_order() -> None:
         assert f'id="{section_id}"' in html
 
     assert "What this produced" in html
+    assert "Decision summary" in html
+    assert 'class="cal-decision-summary"' in html
+    assert 'href="#cost"' in html  # legacy usage-windows finding lands on active cost evidence.
     assert "Avoidable spend" in html
     assert "Recommended changes" in html
     assert "Long-context boundary" in html
+    assert 'class="cal-section-summary-grid"' in html
 
     # Pruned sections no longer render anywhere.
     for gone in (
-        "action-center",
         "usage-windows",
         "usage-mix",
         "forecast",
@@ -634,6 +657,7 @@ def test_dashboard_renders_curated_sections_in_order() -> None:
     # appendix → trust footer.
     section_order = [
         'id="overview"',
+        'id="action-center"',
         'id="output"',
         'id="cost"',
         'id="models"',
@@ -653,6 +677,43 @@ def test_dashboard_renders_curated_sections_in_order() -> None:
     appendix_start = html.index('class="cal-appendix"')
     assert html.index('id="sessions"') < appendix_start
     assert appendix_start < html.index('id="attribution"')
+
+
+def test_dashboard_has_unique_ids_and_live_internal_links() -> None:
+    """Guardrail for the signal-first dashboard: every visible jump target
+    must exist exactly once, and legacy/pruned sections must not leak dead
+    anchors back into the report."""
+    html = render_dashboard(sample_dashboard(show_paths=True), interactive=True)
+    parser = _DashboardLinkParser()
+    parser.feed(html)
+
+    duplicate_ids = {
+        element_id: count for element_id, count in Counter(parser.ids).items() if count > 1
+    }
+    assert duplicate_ids == {}
+
+    ids = set(parser.ids)
+    broken = sorted(
+        {
+            href
+            for href in parser.hrefs
+            if href.startswith("#") and len(href) > 1 and href[1:] not in ids
+        }
+    )
+    assert broken == []
+
+    # These are still legacy SECTION_NUMBERS entries, but the curated
+    # dashboard should route findings to active sections instead.
+    for dead_anchor in (
+        "#usage-windows",
+        "#usage-mix",
+        "#forecast",
+        "#outlook",
+        "#advisor",
+        "#heatmap",
+        "#shape",
+    ):
+        assert dead_anchor not in html
 
 
 def test_dashboard_recommendations_show_ranked_model_alternatives() -> None:
@@ -863,7 +924,7 @@ def test_receipt_rhythm_renders_sticky_toc_grouped_by_tier() -> None:
     assert ">Worth a look<" in html_text
     assert ">More detail<" in html_text
     # Each rendered section has a corresponding TOC link with data-toc-target.
-    for sid in ("overview", "output", "cost", "anomalies", "inefficiencies"):
+    for sid in ("overview", "action-center", "output", "cost", "anomalies", "inefficiencies"):
         assert f'data-toc-target="{sid}"' in html_text
     # The TOC must not duplicate the terminal-rhythm index.
     assert 'class="cal-rail-link"' not in html_text
@@ -930,6 +991,7 @@ def test_dashboard_renders_appendix_block_with_collapsed_diagnostic_sections() -
     # Supporting detail lives inside the collapsed appendix.
     assert 'id="attribution"' in inside
     # The descriptive core and the flags render BEFORE the appendix opens.
+    assert html_text.index('id="action-center"') < appendix_start
     assert html_text.index('id="sessions"') < appendix_start
     assert html_text.index('id="inefficiencies"') < appendix_start
     assert html_text.index('id="anomalies"') < appendix_start
@@ -959,9 +1021,35 @@ def test_overview_kpi_cards_include_show_the_math_details() -> None:
     assert 'class="cal-card-formula"' in html_text
     assert "show the math" in html_text
     # Formulas surface the actual math.
-    assert "cost = Σ" in html_text
-    assert "cache_savings = Σ" in html_text
-    assert "total_tokens = uncached_input" in html_text
+    assert "cost = Σ event_cost" in html_text
+    assert "vendor-reported USD when present" in html_text
+    assert "cache_creation_1h × rate_cache_creation_1h" in html_text
+    assert "service-tier multiplier" in html_text
+    assert "cache_savings = Σ max(0, cost_without_cache − actual_cost)" in html_text
+    assert "cost_without_cache reprices the same input/output/reasoning" in html_text
+    assert "cache_hit_rate = cached_input / input_tokens" in html_text
+    assert "input_tokens = uncached_input + cached_input" in html_text
+    assert "output_tokens = reported output tokens" in html_text
+    assert "total_tokens = vendor-reported total_tokens" in html_text
+    assert "total_tokens = uncached_input + cached_input + output + reasoning" not in html_text
+    assert "cache_savings = Σ cached_input × (rate_in − rate_cached_in)" not in html_text
+    # Token card renders input/output separately with cached and uncached input split.
+    assert 'class="cal-token-split"' in html_text
+    assert ">Input</div>" in html_text
+    assert ">Output</div>" in html_text
+    assert ">3.9M</div>" in html_text
+    assert "2.8M cached · 1.1M uncached" in html_text
+    assert ">258.0K</div>" in html_text
+    assert "reported output" in html_text
+    # Log-derived overview strip surfaces source quality and operational evidence.
+    assert 'class="cal-log-signals"' in html_text
+    assert "Cost source" in html_text
+    assert "Mixed source" in html_text
+    assert "2.4M read" in html_text
+    assert "380.0K write" in html_text
+    assert "18 errors" in html_text
+    assert "4.2s median" in html_text
+    assert "evidence 82/100" in html_text
     # Lineage — "across N events · M sessions" — proves the sample size.
     assert "across 480 events" in html_text
     # Source line cites the rate card.
@@ -1004,6 +1092,15 @@ def test_insights_carry_sample_size_lineage() -> None:
     assert "based on 480 events" in html_text
     # Sessions appear too, formatted with fmt_int.
     assert "32 sessions" in html_text
+
+
+def test_rich_dashboard_suppresses_duplicate_insights() -> None:
+    """When stronger finding sections exist, the generic insight list would
+    repeat the same story. Keep it for lean payloads only."""
+    html_text = render_dashboard(sample_dashboard())
+
+    assert 'id="insights"' not in html_text
+    assert 'class="cal-decision-summary"' in html_text
 
 
 def test_insights_without_metrics_omit_the_lineage_chip() -> None:
