@@ -9,7 +9,6 @@ from caliper.config import build_options
 from caliper.evidence import evidence_dimensions
 from caliper.models import (
     VENDOR_CLAUDE_CODE,
-    VENDOR_CURSOR,
     VENDOR_OPENAI_CODEX,
     LoadResult,
     ThreadMeta,
@@ -83,24 +82,24 @@ def test_non_codex_vendor_prices_cost_usd(tmp_path: Path) -> None:
     assert pricing_dimension.grade == "exact"
 
 
-def test_same_openai_model_costs_same_across_tools() -> None:
+def test_same_openai_model_costs_same_across_sources() -> None:
     card = RateCard.load(None, "model")
     codex_event = _event(vendor=VENDOR_OPENAI_CODEX, model="gpt-5.5")
-    cursor_event = _event(vendor=VENDOR_CURSOR, model="gpt-5.5")
+    other_event = _event(vendor=VENDOR_CLAUDE_CODE, model="gpt-5.5")
 
     codex_cost, _, _ = event_cost(card, codex_event)
-    cursor_cost, _, _ = event_cost(card, cursor_event)
+    other_cost, _, _ = event_cost(card, other_event)
 
     assert codex_cost.cost_usd > 0
-    assert cursor_cost.cost_usd == codex_cost.cost_usd
-    assert cursor_cost.calculated_cost_usd == codex_cost.calculated_cost_usd
-    assert cursor_cost.unpriced_events == 0
+    assert other_cost.cost_usd == codex_cost.cost_usd
+    assert other_cost.calculated_cost_usd == codex_cost.calculated_cost_usd
+    assert other_cost.unpriced_events == 0
 
 
-def test_cursor_unknown_model_is_partial_due_missing_usd_rate(
+def test_unknown_model_is_partial_due_missing_usd_rate(
     tmp_path: Path,
 ) -> None:
-    result = _result(_event(vendor=VENDOR_CURSOR, model="cursor-auto"))
+    result = _result(_event(vendor=VENDOR_CLAUDE_CODE, model="unknown-local-model"))
 
     total = aggregate_total(result, _options(tmp_path), rate_card=RateCard.load(None, "model"))
 

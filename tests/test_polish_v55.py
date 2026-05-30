@@ -3,8 +3,8 @@
 Covers the verified fixes from the persona QA sweep:
 
 * CLI: ``-f compat-json`` fails cleanly where unsupported (no silent table
-  fallback) but still works on the session-style commands; the repeated Cursor
-  token-coverage warning is condensed on the analytical table; a bad ``--since``
+  fallback) but still works on the session-style commands; repeated parser
+  coverage warnings are condensed on the analytical table; a bad ``--since``
   value suggests parseable examples; ``-h`` is a help alias.
 * Dashboard: a mobile jump-to-section nav, glossary affordances on jargon, a
   show-the-math chevron, and the verdict strip demoted under a present billboard.
@@ -96,23 +96,23 @@ def test_grouped_still_supports_compat_json(tmp_path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# B2 — Cursor coverage warning condensed on the table, kept in the envelope
+# B2 — coverage warning condensed on the table, kept in the envelope
 # --------------------------------------------------------------------------- #
 
 
-def _cursor_event() -> UsageEvent:
+def _coverage_event() -> UsageEvent:
     return UsageEvent(
         timestamp=dt.datetime(2026, 5, 13, 11, 30, tzinfo=dt.UTC),
-        path=Path("/tmp/cursor.jsonl"),
+        path=Path("/tmp/claude.jsonl"),
         session_id="s1",
         usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15),
-        model="gpt-5.5",
+        model="claude-sonnet-4.6",
         service_tier="standard",
         tier_source="logged",
         thread=ThreadMeta(cwd="/tmp/p", title="t"),
         model_source="logged",
         plan_type="pro",
-        vendor="cursor",
+        vendor="claude-code",
     )
 
 
@@ -129,16 +129,16 @@ def _options(tmp_path):
     )
 
 
-def test_cursor_coverage_warning_condensed_on_table(tmp_path) -> None:
+def test_coverage_warning_condensed_on_table(tmp_path) -> None:
     issue = ParserIssue(
-        vendor="cursor",
+        vendor="claude-code",
         kind="unsupported:no_token_usage",
-        message="Cursor files have no per-event token counts",
+        message="Claude Code files have no per-event token counts",
         count=42,
     )
     verbose = parser_issue_warning(issue)
     result = LoadResult(
-        events=[_cursor_event()],
+        events=[_coverage_event()],
         duplicates=0,
         tier_sources={"logged": 1},
         plan_types={"pro"},

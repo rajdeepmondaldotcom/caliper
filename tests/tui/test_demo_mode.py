@@ -11,15 +11,7 @@ def test_demo_mode_is_scoped_to_synthetic_codex_files(tmp_path, monkeypatch) -> 
     claude_file = tmp_path / "claude" / "projects" / "p" / "session.jsonl"
     claude_file.parent.mkdir(parents=True)
     claude_file.write_text("{}\n")
-    cursor_file = tmp_path / "cursor" / "chats" / "session.jsonl"
-    cursor_file.parent.mkdir(parents=True)
-    cursor_file.write_text("{}\n")
-    aider_file = tmp_path / "aider" / "repo" / ".aider.chat.history.md"
-    aider_file.parent.mkdir(parents=True)
-    aider_file.write_text("Tokens: 1k sent, 1 received. Cost: $0.01 message, $0.01 session.\n")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
 
     template = build_options(
         days=90,

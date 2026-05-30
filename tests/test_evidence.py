@@ -75,16 +75,16 @@ def test_evidence_dimensions_surface_partial_and_unsupported_reasons() -> None:
         warnings=[],
         parser_issues=[
             ParserIssue(
-                vendor="cursor",
+                vendor="claude-code",
                 kind="unsupported:no_token_usage",
-                message="Cursor files have no per-event token counts",
+                message="Claude Code files have no per-event token counts",
                 count=2,
                 examples=("/tmp/a.jsonl",),
             )
         ],
         vendor_stats={
-            "cursor": VendorParseStats(
-                vendor="cursor",
+            "claude-code": VendorParseStats(
+                vendor="claude-code",
                 discovered_files=2,
                 files_with_events=0,
                 unsupported_files=2,
@@ -192,8 +192,8 @@ def test_tracking_dataclass_defaults_are_stable(tmp_path) -> None:
         thread=thread,
     )
     sample = RateLimitSample(timestamp=now, path=event.path, session_id=event.session_id)
-    issue = ParserIssue(vendor="cursor", kind="unsupported", message="unsupported")
-    stats = VendorParseStats(vendor="cursor")
+    issue = ParserIssue(vendor="claude-code", kind="unsupported", message="unsupported")
+    stats = VendorParseStats(vendor="claude-code")
     result = LoadResult(
         events=[event],
         duplicates=0,

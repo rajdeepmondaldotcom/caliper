@@ -2,9 +2,9 @@
 
 `caliper` is an offline-first Python CLI/library that turns local AI coding
 session data into usage intelligence. It reads OpenAI Codex, Claude Code,
-Cursor, and Aider local trails today. Its deepest source integration remains
-Codex: local JSONL session logs, optional Codex SQLite metadata, user config,
-embedded pricing assumptions, and rate-limit samples. It does not scrape
+local trails today. Its deepest source integration remains Codex: local JSONL
+session logs, optional Codex SQLite metadata, user config, embedded pricing
+assumptions, and rate-limit samples. It does not scrape
 billing pages, require account login, or upload local usage.
 
 ## Core Invariants
@@ -20,13 +20,13 @@ billing pages, require account login, or upload local usage.
 
 Caliper is built around a vendor-neutral record. Every `UsageEvent` and
 `RateLimitSample` carries a `vendor` field. Shipped parsers are
-`openai-codex`, `claude-code`, `cursor`, and `aider`. Planned parsers such as
-`copilot` populate the same record shape, so reports, pricing, budgets,
-forecasts, and exports work cross-vendor without restructuring.
+`openai-codex` and `claude-code`. Planned parsers populate the same record
+shape, so reports, pricing, budgets, forecasts, and exports work cross-vendor
+without restructuring.
 
 Known vendor constants live in `caliper.models`:
-`VENDOR_OPENAI_CODEX`, `VENDOR_CLAUDE_CODE`, `VENDOR_CURSOR`,
-`VENDOR_AIDER`, `VENDOR_COPILOT`, `VENDOR_UNKNOWN`.
+`VENDOR_OPENAI_CODEX`, `VENDOR_CLAUDE_CODE`, `VENDOR_COPILOT`,
+`VENDOR_UNKNOWN`.
 
 ## Domain Terms
 

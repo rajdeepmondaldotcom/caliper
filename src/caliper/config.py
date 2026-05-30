@@ -655,6 +655,6 @@ def _vendors(loaded: dict, values: list[str] | tuple[str, ...] | None) -> tuple[
 
     unknown = sorted(set(selected) - {"all"} - set(VENDORS))
     if unknown:
-        choices = ", ".join(["all", *sorted(VENDORS)])
+        choices = ", ".join(["all", "codex", *sorted(VENDORS)])
         raise ValueError(f"--vendor must be one of: {choices}")
     return selected

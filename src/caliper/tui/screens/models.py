@@ -11,7 +11,6 @@ from caliper.tui.state import AppSnapshot
 _VENDOR_GLYPH = {
     "anthropic": "A",
     "openai": "O",
-    "anysphere": "C",
     "google": "G",
     "mistral": "M",
     "meta": "L",

@@ -14,8 +14,6 @@ PYTHON_BIN="${PYTHON:-}"
 export CALIPER_CACHE_DIR="$ROOT/cache"
 export XDG_DATA_HOME="$ROOT/data"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-empty"
-export CALIPER_CURSOR_HOME="$ROOT/cursor-empty"
-export CALIPER_AIDER_ROOT="$ROOT/aider-empty"
 
 if [[ -n "${CALIPER_SMOKE_VERSION:-}" ]]; then
   VERSION_SPEC="==${CALIPER_SMOKE_VERSION}"

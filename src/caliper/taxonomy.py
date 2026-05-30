@@ -7,7 +7,6 @@ from functools import lru_cache
 # the tool vendor that wrote the log.
 VENDOR_ANTHROPIC = "anthropic"
 VENDOR_OPENAI = "openai"
-VENDOR_ANYSPHERE = "anysphere"
 VENDOR_GOOGLE = "google"
 VENDOR_MISTRAL = "mistral"
 VENDOR_META = "meta"
@@ -16,7 +15,6 @@ VENDOR_UNKNOWN = "unknown"
 KNOWN_MODEL_VENDORS: tuple[str, ...] = (
     VENDOR_ANTHROPIC,
     VENDOR_OPENAI,
-    VENDOR_ANYSPHERE,
     VENDOR_GOOGLE,
     VENDOR_MISTRAL,
     VENDOR_META,
@@ -34,10 +32,6 @@ _MODEL_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
     ("o5-", VENDOR_OPENAI),
     ("openai/", VENDOR_OPENAI),
     ("text-", VENDOR_OPENAI),
-    ("composer-", VENDOR_ANYSPHERE),
-    ("cursor-", VENDOR_ANYSPHERE),
-    ("cursor/", VENDOR_ANYSPHERE),
-    ("anysphere/", VENDOR_ANYSPHERE),
     ("gemini-", VENDOR_GOOGLE),
     ("google/", VENDOR_GOOGLE),
     ("palm-", VENDOR_GOOGLE),
@@ -73,7 +67,6 @@ def model_vendor_glyph(vendor: str) -> str:
     return {
         VENDOR_ANTHROPIC: "A",
         VENDOR_OPENAI: "O",
-        VENDOR_ANYSPHERE: "C",
         VENDOR_GOOGLE: "G",
         VENDOR_MISTRAL: "M",
         VENDOR_META: "L",

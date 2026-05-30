@@ -636,8 +636,6 @@ def test_rates_catalog_defaults_to_scan_friendly_table_limit(monkeypatch) -> Non
 
 
 def test_empty_overview_names_all_enabled_vendor_sources(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     result = runner.invoke(
@@ -654,7 +652,7 @@ def test_empty_overview_names_all_enabled_vendor_sources(monkeypatch, tmp_path) 
     )
 
     assert result.exit_code == 0, result.output
-    for label in ("OpenAI Codex", "Claude Code", "Cursor", "Aider"):
+    for label in ("OpenAI Codex", "Claude Code"):
         assert label in result.output
     assert "no files found" in result.output
 

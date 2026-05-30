@@ -53,8 +53,6 @@ def test_null_progress_singleton_is_protocol_compatible():
 def test_load_usage_default_progress_does_not_crash(tmp_path, monkeypatch):
     from caliper.config import build_options
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(
@@ -70,8 +68,6 @@ def test_load_usage_default_progress_does_not_crash(tmp_path, monkeypatch):
 def test_load_usage_records_starting_and_finished(tmp_path, monkeypatch):
     from caliper.config import build_options
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(
@@ -108,8 +104,6 @@ def test_load_usage_emits_file_done_for_each_session(tmp_path, monkeypatch):
         ],
     )
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(

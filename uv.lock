@@ -27,11 +27,10 @@ wheels = [
 
 [[package]]
 name = "caliper-ai"
-version = "0.0.84"
+version = "0.0.85"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
-    { name = "platformdirs" },
     { name = "rich" },
     { name = "textual" },
     { name = "typer" },
@@ -59,7 +58,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
-    { name = "platformdirs", specifier = ">=4.3" },
     { name = "prometheus-client", marker = "extra == 'prom'", specifier = ">=0.20" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "textual", specifier = ">=8.2,<9" },

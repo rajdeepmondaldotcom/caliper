@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "caliper-ai"
-version = "0.0.84"
-description = "See what your AI coding cost and produced. Caliper reads local logs from Codex, Claude Code, Cursor, and Aider, prices the usage at API rates, and attributes it by project, PR, model, and session. Offline, no account, no upload."
+version = "0.0.85"
+description = "See what your AI coding cost and produced. Caliper reads local logs from Codex and Claude Code, prices the usage at API rates, and attributes it by project, PR, model, and session. Offline, no account, no upload."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -17,8 +17,6 @@ keywords = [
   "ai-coding",
   "codex",
   "claude-code",
-  "cursor",
-  "aider",
   "usage",
   "tokens",
   "cli",
@@ -52,7 +50,6 @@ dependencies = [
   # leaning on Typer's transitive pull — Typer 0.26 dropped its hard click
   # dependency, which broke `import click` on fresh 0.0.59 installs.
   "click>=8.1",
-  "platformdirs>=4.3",
   "rich>=14.2.0",
   "textual>=8.2,<9",
   "typer>=0.12",

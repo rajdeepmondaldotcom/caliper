@@ -19,8 +19,6 @@ from tests.conftest import token_event, write_session
 
 @pytest.fixture
 def small_load_result(tmp_path, monkeypatch):
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     codex_root = tmp_path / "codex" / "sessions" / "2026" / "05"
@@ -134,8 +132,6 @@ def test_render_command_html_theme_density_pass_through(small_load_result) -> No
 
 
 def test_render_command_html_for_empty_result_still_renders(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(

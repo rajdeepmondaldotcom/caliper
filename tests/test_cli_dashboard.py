@@ -132,15 +132,7 @@ def test_dashboard_no_share_safe_keeps_local_labels(tmp_path) -> None:
     assert "api-server" in html
 
 
-def test_evidence_json_redacts_parser_issue_paths(monkeypatch, tmp_path) -> None:
-    root = tmp_path / "cursor"
-    project = root / "projects" / "project-alpha" / "session.jsonl"
-    project.parent.mkdir(parents=True)
-    project.write_text(
-        json.dumps({"role": "assistant", "message": {"content": ["no token counts here"]}}) + "\n"
-    )
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(root))
-
+def test_evidence_rejects_removed_vendor(tmp_path) -> None:
     result = runner.invoke(
         app,
         [
@@ -165,11 +157,8 @@ def test_evidence_json_redacts_parser_issue_paths(monkeypatch, tmp_path) -> None
         ],
     )
 
-    assert result.exit_code == 0, result.output
-    assert str(project) not in result.output
-    payload = json.loads(result.output)
-    issue = payload["evidence"]["parser_issues"][0]
-    assert issue["examples"] == ["<redacted-path>"]
+    assert result.exit_code == 2, result.output
+    assert "--vendor must be one of: all, codex, claude-code, openai-codex" in result.output
 
 
 def test_dashboard_default_opens_browser_for_interactive_terminal(monkeypatch, tmp_path) -> None:

@@ -72,7 +72,7 @@ def test_sample_dashboard_banner_variants_render() -> None:
             banner=Banner(
                 kind="warn",
                 label="PARTIAL",
-                text="Showing 1 of 4 vendors. Run <code>caliper doctor</code>.",
+                text="Showing 1 of 2 vendors. Run <code>caliper doctor</code>.",
             )
         )
     )

@@ -33,7 +33,7 @@ def test_contributing_dependency_and_coverage_contract_matches_package() -> None
     contributing = CONTRIBUTING.read_text()
 
     assert "coverage floor is 88%" in contributing
-    for dep in ("rich", "typer", "platformdirs", "textual", "watchdog"):
+    for dep in ("rich", "typer", "textual", "watchdog"):
         assert dep in contributing
 
 

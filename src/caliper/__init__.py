@@ -1,7 +1,7 @@
 """Caliper.
 
-See what your AI coding cost and produced. Reads local Codex, Claude Code,
-Cursor, and Aider logs, fully offline. Prints what each PR cost.
+See what your AI coding cost and produced. Reads local Codex and Claude Code
+logs, fully offline. Prints what each PR cost.
 """
 
 from __future__ import annotations

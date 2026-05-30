@@ -731,15 +731,4 @@ def _watch_roots(options: RuntimeOptions) -> list[Path]:
         roots.add(Path.home() / ".claude" / "projects")
         xdg = os.environ.get("XDG_CONFIG_HOME")
         roots.add((Path(xdg).expanduser() if xdg else Path.home() / ".config") / "claude")
-    cursor_override = os.environ.get("CALIPER_CURSOR_HOME", "").strip()
-    if cursor_override:
-        roots.add(Path(cursor_override).expanduser())
-    else:
-        with contextlib.suppress(Exception):
-            from platformdirs import user_data_dir
-
-            roots.add(Path(user_data_dir("Cursor")).expanduser())
-        roots.add(Path.home() / ".cursor")
-    aider_root = Path(os.environ.get("CALIPER_AIDER_ROOT", ".")).expanduser()
-    roots.add(aider_root)
     return sorted(root for root in roots if root.exists())

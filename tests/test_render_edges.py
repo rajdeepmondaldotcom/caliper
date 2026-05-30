@@ -346,10 +346,10 @@ def test_parser_issue_warning_no_longer_dumps_paths():
     from caliper.models import ParserIssue
 
     issue = ParserIssue(
-        vendor="cursor",
-        message="Cursor files have no per-event token counts",
+        vendor="claude-code",
+        message="Claude Code files have no per-event token counts",
         severity="warn",
-        kind="cursor-missing-tokens",
+        kind="claude-missing-tokens",
         count=1477,
         examples=("/very/long/path/1", "/very/long/path/2"),
     )

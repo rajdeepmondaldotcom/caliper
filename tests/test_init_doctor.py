@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -125,117 +124,27 @@ def test_doctor_show_paths_restores_diagnostic_paths(tmp_path) -> None:
     assert str(state_db) in result.output
 
 
-def test_doctor_json_summarizes_repeated_parser_warnings(monkeypatch, tmp_path) -> None:
-    session_root = tmp_path / "sessions"
-    session_root.mkdir()
-    state_db = tmp_path / "state.sqlite"
-    state_db.write_text("")
-    root = tmp_path / "cursor"
-    for index in range(5):
-        path = root / "projects" / "project-alpha" / f"empty-{index}.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text('{"timestamp":"2026-05-12T00:00:00Z"}\n')
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(root))
+def test_doctor_rejects_removed_vendors(tmp_path) -> None:
+    for vendor in ("cursor", "aider"):
+        result = runner.invoke(
+            app,
+            [
+                "doctor",
+                "--format",
+                "json",
+                "--session-root",
+                str(tmp_path / "sessions"),
+                "--state-db",
+                str(tmp_path / "state.sqlite"),
+                "--codex-config",
+                str(tmp_path / "missing.toml"),
+                "--vendor",
+                vendor,
+            ],
+        )
 
-    result = runner.invoke(
-        app,
-        [
-            "doctor",
-            "--format",
-            "json",
-            "--session-root",
-            str(session_root),
-            "--state-db",
-            str(state_db),
-            "--codex-config",
-            str(tmp_path / "missing.toml"),
-            "--vendor",
-            "cursor",
-        ],
-    )
-
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
-    # Cursor token-coverage gets its own dedicated row. The legacy
-    # duplicate "Parser warning" entry with the same Cursor detail was
-    # removed in 0.0.20 — see CHANGELOG.
-    parser_warnings = [check for check in payload["checks"] if check["label"] == "Parser warning"]
-    assert parser_warnings == []
-    cursor_coverage = next(
-        check for check in payload["checks"] if check["label"] == "Cursor token coverage"
-    )
-    assert cursor_coverage["status"] == "warn"
-    assert "5 Cursor files have no per-event token counts" in cursor_coverage["detail"]
-    assert str(tmp_path) not in result.output
-    assert payload["warning_summary"][0]["kind"] == "cursor-token-coverage"
-    assert payload["warning_summary"][0]["count"] == 5
-    assert payload["warning_summary"][0]["examples"] == [
-        "<redacted-path>/cursor/projects/project-alpha/empty-0.jsonl",
-        "<redacted-path>/cursor/projects/project-alpha/empty-1.jsonl",
-        "<redacted-path>/cursor/projects/project-alpha/empty-2.jsonl",
-    ]
-
-    visible = runner.invoke(
-        app,
-        [
-            "doctor",
-            "--format",
-            "json",
-            "--show-paths",
-            "--session-root",
-            str(session_root),
-            "--state-db",
-            str(state_db),
-            "--codex-config",
-            str(tmp_path / "missing.toml"),
-            "--vendor",
-            "cursor",
-        ],
-    )
-    assert visible.exit_code == 1, visible.output
-    visible_payload = json.loads(visible.output)
-    assert visible_payload["warning_summary"][0]["examples"] == [
-        str(root / "projects" / "project-alpha" / "empty-0.jsonl"),
-        str(root / "projects" / "project-alpha" / "empty-1.jsonl"),
-        str(root / "projects" / "project-alpha" / "empty-2.jsonl"),
-    ]
-
-
-def test_doctor_redacts_encoded_cursor_project_paths(monkeypatch, tmp_path) -> None:
-    session_root = tmp_path / "sessions"
-    session_root.mkdir()
-    state_db = tmp_path / "state.sqlite"
-    state_db.write_text("")
-    root = tmp_path / "cursor"
-    encoded_project = f"Users-{Path.home().name}-Documents-GitHub-private-repo"
-    path = root / "projects" / encoded_project / "empty.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('{"timestamp":"2026-05-12T00:00:00Z"}\n')
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(root))
-
-    result = runner.invoke(
-        app,
-        [
-            "doctor",
-            "--format",
-            "json",
-            "--session-root",
-            str(session_root),
-            "--state-db",
-            str(state_db),
-            "--codex-config",
-            str(tmp_path / "missing.toml"),
-            "--vendor",
-            "cursor",
-        ],
-    )
-
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
-    examples = payload["warning_summary"][0]["examples"]
-    assert examples == ["<redacted-path>/cursor/projects/<redacted-path>/empty.jsonl"]
-    assert Path.home().name not in result.output
-    assert "private-repo" not in result.output
+        assert result.exit_code == 2, result.output
+        assert "--vendor must be one of: all, codex, claude-code, openai-codex" in result.output
 
 
 def test_doctor_rejects_bad_format(tmp_path) -> None:

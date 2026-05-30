@@ -174,5 +174,3 @@ def test_release_smoke_scripts_isolate_external_vendor_roots() -> None:
     for name in ("release-smoke.sh", "live-release-smoke.sh"):
         text = (root / "scripts" / name).read_text()
         assert "CLAUDE_CONFIG_DIR" in text
-        assert "CALIPER_CURSOR_HOME" in text
-        assert "CALIPER_AIDER_ROOT" in text

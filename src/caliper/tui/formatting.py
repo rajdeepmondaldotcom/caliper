@@ -10,9 +10,6 @@ from caliper.models import decimal_value
 VENDOR_LABELS: dict[str, str] = {
     "anthropic": "Anthropic",
     "openai": "OpenAI",
-    "anysphere": "Anysphere",
-    "cursor": "Cursor",
-    "aider": "Aider",
     "unknown": "unknown",
 }
 

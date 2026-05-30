@@ -12,8 +12,6 @@ import pytest
 @pytest.fixture(autouse=True)
 def isolate_external_vendor_roots(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-empty"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor-empty"))
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider-empty"))
 
 
 def write_session(root: Path, name: str, events: list[dict]) -> Path:

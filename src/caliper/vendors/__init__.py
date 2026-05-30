@@ -102,7 +102,7 @@ def enabled_vendors(options: RuntimeOptions) -> list[VendorParser]:
     selected = _selected_vendor_ids(options.vendors)
     unknown = sorted(selected - {"all"} - set(VENDORS))
     if unknown:
-        choices = ", ".join(["all", *sorted(VENDORS)])
+        choices = ", ".join(["all", "codex", *sorted(VENDORS)])
         raise ValueError(f"--vendor must be one of: {choices}")
     ids = sorted(VENDORS) if "all" in selected else sorted(selected)
     return [VENDORS[vendor_id] for vendor_id in ids]
@@ -128,8 +128,8 @@ def vendor_file_count_by_id(options: RuntimeOptions) -> dict[str, int]:
     """Per-vendor file count, keyed by ``vendor.id``.
 
     Powers the ``caliper doctor`` per-tool detection table so the user can
-    see, at a glance, which of Claude Code / OpenAI Codex / Cursor / Aider
-    actually surfaced logs in this run. Tolerates ``OSError`` from missing
+    see, at a glance, which of Claude Code / OpenAI Codex actually surfaced
+    logs in this run. Tolerates ``OSError`` from missing
     home directories the same way :func:`vendor_file_count` does.
     """
     counts: dict[str, int] = {}
@@ -199,7 +199,8 @@ def vendor_summaries(options: RuntimeOptions) -> list[VendorSummary]:
 
 
 def _selected_vendor_ids(values: tuple[str, ...]) -> set[str]:
-    selected = {value.strip() for value in values if value.strip()}
+    aliases = {"codex": "openai-codex"}
+    selected = {aliases.get(value.strip(), value.strip()) for value in values if value.strip()}
     return selected or {"all"}
 
 
@@ -252,12 +253,8 @@ def _format_discovery_bytes(size: int) -> str:
     return f"{value:.1f} GB"
 
 
-from caliper.vendors import aider as _aider  # noqa: E402
 from caliper.vendors import claude_code as _claude_code  # noqa: E402
 from caliper.vendors import codex as _codex  # noqa: E402
-from caliper.vendors import cursor as _cursor  # noqa: E402
 
-register_vendor(_aider.PARSER)
 register_vendor(_claude_code.PARSER)
 register_vendor(_codex.PARSER)
-register_vendor(_cursor.PARSER)

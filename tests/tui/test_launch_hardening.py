@@ -11,8 +11,6 @@ def _demo_app(tmp_path, monkeypatch, *, demo=True, first_run=False, no_color=Fal
     from caliper.config import TuiConfig, build_options
     from caliper.tui.app import CaliperApp
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     if no_color:
@@ -66,8 +64,6 @@ def test_demo_home_renders_body_and_no_wrapped_default_footer(tmp_path, monkeypa
     from caliper.config import TuiConfig, build_options
     from caliper.tui.app import CaliperApp
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(
@@ -110,8 +106,6 @@ def test_demo_projects_and_models_keep_primary_labels_visible(tmp_path, monkeypa
     from caliper.config import TuiConfig, build_options
     from caliper.tui.app import CaliperApp
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(
@@ -159,8 +153,6 @@ def test_demo_mode_skips_first_run_welcome(tmp_path, monkeypatch):
     from caliper.config import TuiConfig, build_options
     from caliper.tui.app import CaliperApp
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
@@ -229,8 +221,6 @@ def test_shortcut_navigation_reaches_secondary_screens(tmp_path, monkeypatch):
     from caliper.config import TuiConfig, build_options
     from caliper.tui.app import CaliperApp
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(
@@ -294,8 +284,6 @@ def test_doctor_redacts_local_paths_by_default(tmp_path, monkeypatch):
     from caliper.config import TuiConfig, build_options
     from caliper.tui.app import CaliperApp
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(

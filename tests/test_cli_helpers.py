@@ -15,7 +15,6 @@ from caliper import cli, health, prom_snapshot, rate_audit
 from caliper.config import build_options
 from caliper.health import check_rates_file, check_state_db_readable
 from caliper.models import (
-    VENDOR_CURSOR,
     LoadResult,
     RateLimitSample,
     ThreadMeta,
@@ -302,10 +301,6 @@ def test_pricing_catalog_doctor_warns_for_stale_offline_catalog(monkeypatch) -> 
 
     assert check.status == "warn"
     assert "1200" in check.detail.replace(",", "")
-
-    cursor_gap = _event(usage=Usage(), vendor=VENDOR_CURSOR)
-    assert health.check_cursor_token_sentinel([cursor_gap]).status == "warn"
-    assert health.check_cursor_token_sentinel([_event()]).status == "ok"
 
 
 def test_build_health_report_surfaces_inferred_tiers_and_parser_warnings(tmp_path) -> None:

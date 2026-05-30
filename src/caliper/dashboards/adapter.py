@@ -141,10 +141,9 @@ _SEVERITY_MAP = {
     "critical": "critical",
 }
 
-# The vendors Caliper knows how to parse today: Codex, Claude Code, Cursor,
-# Aider. Surfaced as the "X of N vendors" count in the page header and the
-# banner copy. Bump together when adding a new vendor.
-KNOWN_VENDOR_COUNT = 4
+# The vendors Caliper knows how to parse today. Surfaced as the "X of N
+# vendors" count in the page header and the banner copy.
+KNOWN_VENDOR_COUNT = 2
 ROLLING_USAGE_DAYS = (7, 30, 90)
 
 
@@ -331,7 +330,6 @@ def build_handoff_dashboard(
         by_project=by_project,
         by_model=by_model,
         top_sessions=top_sessions,
-        rate_limit_pressure=rate_limit_pressure,
         quality_score=quality_score,
     )
     decision_queue = _build_decision_queue(
@@ -343,7 +341,6 @@ def build_handoff_dashboard(
         top_sessions=top_sessions,
         by_project=by_project,
         by_model=by_model,
-        rate_limit_pressure=rate_limit_pressure,
         quality_score=quality_score,
         comparisons=comparisons,
     )
@@ -2160,8 +2157,6 @@ def _build_rate_limit_pressure(result: LoadResult) -> RateLimitPressure:
 _RATE_LIMIT_SOURCE_LABELS: dict[str, str] = {
     "openai-codex": "Codex",
     "claude-code": "Claude Code",
-    "cursor": "Cursor",
-    "aider": "Aider",
 }
 
 
@@ -2460,7 +2455,6 @@ def _build_comparisons(
     by_project: list[ProjectRow],
     by_model: list[ModelRow],
     top_sessions: list[SessionRow],
-    rate_limit_pressure: RateLimitPressure,
     quality_score: QualityScore,
 ) -> list[ComparisonSignal]:
     windows = {window.days: window for window in usage_windows}
@@ -2592,32 +2586,6 @@ def _build_comparisons(
             )
         )
 
-    peak_limit = max(
-        [
-            value
-            for value in (
-                rate_limit_pressure.peak_primary_pct,
-                rate_limit_pressure.peak_secondary_pct,
-            )
-            if value is not None
-        ],
-        default=None,
-    )
-    out.append(
-        ComparisonSignal(
-            label="Rate-limit signal",
-            value=_format_pct_round(peak_limit) if peak_limit is not None else "Unknown",
-            detail=(
-                f"{rate_limit_pressure.sample_count:,} samples"
-                if rate_limit_pressure.sample_count
-                else "No rate-limit samples recorded"
-            ),
-            delta_pct=None,
-            tone=rate_limit_pressure.tone if peak_limit is not None else "neutral",
-            anchor="rate-limits",
-            lens="audit",
-        )
-    )
     out.append(
         ComparisonSignal(
             label="Evidence quality",
@@ -2642,7 +2610,6 @@ def _build_decision_queue(
     top_sessions: list[SessionRow],
     by_project: list[ProjectRow],
     by_model: list[ModelRow],
-    rate_limit_pressure: RateLimitPressure,
     quality_score: QualityScore,
     comparisons: list[ComparisonSignal],
 ) -> list[DecisionQueueItem]:
@@ -2802,17 +2769,6 @@ def _build_decision_queue(
             tone="warn" if share >= 0.10 else "neutral",
             anchor="top-sessions",
             lens="engineer",
-        )
-
-    if rate_limit_pressure.tone in {"critical", "warn"}:
-        add(
-            "Check rate-limit pressure",
-            "Recorded limit samples show elevated usage pressure.",
-            "Review latest primary and secondary pressure before planning another heavy session.",
-            f"{rate_limit_pressure.sample_count:,} samples",
-            tone=rate_limit_pressure.tone,
-            anchor="rate-limits",
-            lens="audit",
         )
 
     if quality_score.score < 75:

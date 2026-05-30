@@ -13,8 +13,8 @@ fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| `0.0.84` | yes |
-| `< 0.0.84` | no |
+| `0.0.85` | yes |
+| `< 0.0.85` | no |
 
 The `1.0` release will introduce a longer support window and a published
 deprecation policy. Until then, please upgrade promptly.
@@ -59,9 +59,8 @@ Out of scope:
 - The accuracy of an external vendor's published pricing data (Caliper
   surfaces our embedded rate card and its `checked` date — staleness is
   not a security issue).
-- Theoretical issues with Python, `rich`, `typer`, `platformdirs`,
-  `textual`, or `watchdog` that do not have a working reproduction against
-  Caliper.
+- Theoretical issues with Python, `rich`, `typer`, `textual`, or `watchdog`
+  that do not have a working reproduction against Caliper.
 
 ## What "in scope" looks like in practice
 

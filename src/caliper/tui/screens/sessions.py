@@ -15,8 +15,6 @@ _VENDOR_LABELS: dict[str, str] = {
     "all": "All",
     "openai-codex": "Codex",
     "claude-code": "Claude",
-    "cursor": "Cursor",
-    "aider": "Aider",
 }
 
 

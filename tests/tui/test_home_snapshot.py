@@ -19,8 +19,6 @@ def test_home_boots_with_demo_fixture(tmp_path, monkeypatch):
     from caliper.tui.app import CaliperApp
     from caliper.tui.demo import materialize_demo
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(

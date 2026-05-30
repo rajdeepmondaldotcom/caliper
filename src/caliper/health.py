@@ -11,7 +11,7 @@ from pathlib import Path
 
 from caliper.evidence import warnings_from_parser_issues
 from caliper.humanize import format_int
-from caliper.models import VENDOR_CURSOR, LoadResult, ParserIssue, RuntimeOptions, UsageEvent
+from caliper.models import LoadResult, ParserIssue, RuntimeOptions, UsageEvent
 from caliper.parse_cache import ParseCache, default_cache_path
 from caliper.pricing import (
     PRICING_SOURCES,
@@ -103,7 +103,6 @@ def build_health_report(
                 )
         checks.extend(parser_warning_checks(result.warnings, result.parser_issues))
         checks.append(check_cache_creation_rates(result.events, options))
-        checks.append(check_cursor_token_coverage(result.events, result.parser_issues))
     return checks
 
 
@@ -300,61 +299,15 @@ def _api_rates_for_event(rate_card: RateCard, event: UsageEvent):
     return card.api_rates if card else None
 
 
-def check_cursor_token_coverage(
-    events: list[UsageEvent],
-    parser_issues: list[ParserIssue] | None = None,
-) -> HealthCheck:
-    unsupported = sum(
-        issue.count
-        for issue in parser_issues or []
-        if issue.vendor == VENDOR_CURSOR and issue.kind == "unsupported:no_token_usage"
-    )
-    missing = sum(1 for event in events if event.vendor == VENDOR_CURSOR and event.usage.is_zero())
-    # Older Cursor data legitimately lacks per-event token counts; that's a
-    # structural gap, not an actionable failure. When other sources contribute
-    # usable events, don't flip `doctor` (and CI's exit code) to WARN over it —
-    # keep it informational. Warn only when Cursor is effectively the sole source.
-    other_usable = any(
-        event.vendor != VENDOR_CURSOR and not event.usage.is_zero() for event in events
-    )
-    gap_status = "ok" if other_usable else "warn"
-    if unsupported:
-        noun = "file" if unsupported == 1 else "files"
-        detail = f"{unsupported:,} Cursor {noun} have no per-event token counts."
-        if missing:
-            detail = f"{detail} {missing:,} parsed Cursor events also have zero token counts."
-        return doctor_check("Cursor token coverage", gap_status, detail)
-    if missing:
-        return doctor_check(
-            "Cursor token coverage",
-            gap_status,
-            f"{missing:,} Cursor events have no per-event token counts.",
-        )
-    return doctor_check("Cursor token coverage", "ok", "no Cursor token gaps found")
-
-
-def check_cursor_token_sentinel(events: list[UsageEvent]) -> HealthCheck:
-    return check_cursor_token_coverage(events)
-
-
-CURSOR_TOKEN_WARNING_PREFIX = "Cursor session has no per-event token counts: "  # nosec B105
-
-
 def parser_warning_checks(
     warnings: list[str], parser_issues: list[ParserIssue] | None = None
 ) -> list[HealthCheck]:
-    """Emit "Parser warning" rows for the doctor table.
-
-    The cursor token-coverage signal is intentionally skipped here because
-    the dedicated ``check_cursor_token_coverage`` check already surfaces it
-    as its own row. Including both produced an identical WARN line under
-    two headers in earlier releases.
-    """
+    """Emit "Parser warning" rows for the doctor table."""
     checks: list[HealthCheck] = []
     issues = parser_issues or []
     consumed = set(warnings_from_parser_issues(issues))
     for warning in warnings:
-        if warning.startswith(CURSOR_TOKEN_WARNING_PREFIX) or warning in consumed:
+        if warning in consumed:
             continue
         checks.append(doctor_check("Parser warning", "warn", warning))
     return checks
@@ -363,23 +316,5 @@ def parser_warning_checks(
 def parser_warning_summary(
     warnings: list[str], parser_issues: list[ParserIssue] | None = None
 ) -> list[WarningSummary]:
-    cursor_examples: list[str] = []
-    for warning in warnings:
-        if warning.startswith(CURSOR_TOKEN_WARNING_PREFIX):
-            cursor_examples.append(warning.removeprefix(CURSOR_TOKEN_WARNING_PREFIX))
-    for issue in parser_issues or []:
-        if issue.vendor == VENDOR_CURSOR and issue.kind == "unsupported:no_token_usage":
-            cursor_examples.extend(issue.examples)
-            if issue.count > len(issue.examples):
-                cursor_examples.extend([""] * (issue.count - len(issue.examples)))
-    summaries: list[WarningSummary] = []
-    if cursor_examples:
-        examples = [example for example in cursor_examples if example]
-        summaries.append(
-            WarningSummary(
-                kind="cursor-token-coverage",
-                count=len(cursor_examples),
-                examples=examples[:3],
-            )
-        )
-    return summaries
+    del warnings, parser_issues
+    return []

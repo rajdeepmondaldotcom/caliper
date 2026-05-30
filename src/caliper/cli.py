@@ -161,7 +161,7 @@ _HELP_OPTION_NAMES = {"help_option_names": ["-h", "--help"]}
 app = typer.Typer(
     help=(
         "Caliper: the cost layer for AI-assisted development.\n\n"
-        "Reads local OpenAI Codex CLI, Claude Code, Cursor, and Aider logs. "
+        "Reads local OpenAI Codex CLI and Claude Code logs. "
         "Joins them into one event shape. Prints what each PR, commit, and "
         "project cost. Offline by default. No login. No upload.\n\n"
         "Start with: caliper dashboard. If no usage appears, run caliper doctor."
@@ -504,9 +504,7 @@ VendorOpt = Annotated[
         "--only",
         "--vendor",
         "--include-vendor",
-        help=(
-            "Filter by tool vendor (openai-codex/codex, claude-code, cursor, aider). Repeatable."
-        ),
+        help="Filter by tool vendor (openai-codex/codex, claude-code). Repeatable.",
     ),
 ]
 ParseWorkersOpt = Annotated[
@@ -530,7 +528,7 @@ OnlyVendorOpt = Annotated[
     list[str] | None,
     typer.Option(
         "--only-vendor",
-        help="Filter by model vendor (anthropic, openai, anysphere). Repeatable.",
+        help="Filter by model vendor (anthropic, openai). Repeatable.",
     ),
 ]
 ClassicOpt = Annotated[
@@ -1267,8 +1265,6 @@ def _overview_windows(
 _VENDOR_DISPLAY_LABELS: dict[str, str] = {
     "openai-codex": "OpenAI Codex",
     "claude-code": "Claude Code",
-    "cursor": "Cursor",
-    "aider": "Aider",
 }
 
 
@@ -2907,14 +2903,12 @@ def doctor(
         }
         for check in checks
     ]
-    # Per-tool detection rows — Claude Code / OpenAI Codex / Cursor / Aider.
+    # Per-tool detection rows — Claude Code / OpenAI Codex.
     # Built independently of the health checks so the user can see at a
     # glance which sources were searched-for vs. found.
     _TOOL_LABELS = (
         ("claude-code", "Claude Code"),
         ("openai-codex", "OpenAI Codex"),
-        ("cursor", "Cursor"),
-        ("aider", "Aider"),
     )
     tool_records: list[dict[str, Any]] = []
     for vid, label in _TOOL_LABELS:
@@ -2982,7 +2976,7 @@ def doctor(
     console.print("[bold]Caliper - Doctor[/bold]")
 
     # Per-tool detection panel — what the user most often wants to see when
-    # diagnosing "why isn't Codex / Cursor / Aider showing up?"
+    # diagnosing "why isn't Codex or Claude Code showing up?"
     tools_table = Table(title="Sources detected", show_lines=False, title_justify="left")
     tools_table.add_column("Tool")
     tools_table.add_column("Status")

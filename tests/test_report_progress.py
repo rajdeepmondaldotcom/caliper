@@ -90,8 +90,6 @@ def test_recording_progress_structural_typing_matches_load_usage(tmp_path, monke
     from caliper.config import build_options
     from caliper.parser import load_usage
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     options = build_options(
@@ -194,8 +192,6 @@ def test_cli_report_progress_preserves_parse_callbacks_for_load_usage(tmp_path, 
     from caliper.config import build_options
     from caliper.parser import load_usage
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
 
     console = Console(file=io.StringIO(), color_system=None)
@@ -400,8 +396,6 @@ def test_cli_progress_flag_keeps_json_stdout_clean(tmp_path, monkeypatch):
 
     from caliper.cli import app
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     codex_home = tmp_path / "codex"
     codex_home.mkdir()
@@ -442,8 +436,6 @@ def test_cli_quiet_flag_silences_progress(tmp_path, monkeypatch):
 
     from caliper.cli import app
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     codex_home = tmp_path / "codex"
     codex_home.mkdir()
@@ -489,8 +481,6 @@ def test_root_progress_flag_covers_reports_without_local_progress_option(tmp_pat
 
     from caliper.cli import app
 
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     codex_home = tmp_path / "codex"
     codex_home.mkdir()

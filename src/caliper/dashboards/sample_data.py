@@ -65,8 +65,8 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
             # ``caliper.models.VENDOR_*`` constants — the masthead now shows
             # every known source with detected/missing status, so consistency
             # with real-world IDs is what makes the demo trustworthy.
-            vendors_active=["claude-code", "openai-codex", "cursor", "aider"],
-            vendor_count_total=4,
+            vendors_active=["claude-code", "openai-codex"],
+            vendor_count_total=2,
         ),
         generated_at="2026-05-17T12:34:56-07:00",
         totals=Totals(
@@ -357,14 +357,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                     "executive",
                 ),
                 BriefFinding(
-                    "Check rate-limit pressure",
-                    "Recorded limit samples show elevated pressure.",
-                    "82% peak",
-                    "warn",
-                    "rate-limits",
-                    "audit",
-                ),
-                BriefFinding(
                     "Review anomaly finding",
                     "Project-day spike crossed the dashboard detector threshold.",
                     "5.1σ",
@@ -469,13 +461,13 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
         ),
         # Per-source rate-limit panels reflect what real parsing actually
         # produces. As of 0.0.76 ONLY the Codex parser populates
-        # `rate_limit_samples` (the Claude Code, Cursor, and Aider parsers
-        # currently return an empty list). Do NOT add a synthetic Claude Code
-        # entry here just to make the demo look prettier — the Claude Code
-        # parser doesn't extract rate-limit headers yet, and a fake demo
-        # entry would mislead users into expecting a panel they won't see on
-        # their own logs. When `vendors/claude_code.py` learns to surface
-        # rate-limit data, the Claude Code panel will appear automatically.
+        # `rate_limit_samples` (the Claude Code parser currently returns an
+        # empty list). Do NOT add a synthetic Claude Code entry here just to
+        # make the demo look prettier — the Claude Code parser doesn't extract
+        # rate-limit headers yet, and a fake demo entry would mislead users
+        # into expecting a panel they won't see on their own logs. When
+        # `vendors/claude_code.py` learns to surface rate-limit data, the
+        # Claude Code panel will appear automatically.
         rate_limit_pressures=[
             RateLimitPressure(
                 sample_count=24,
@@ -538,32 +530,6 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 36,
                 4,
                 [0, 0, 8, 12, 0, 0, 14, 22, 18, 16, 20, 12, 28, 34],
-            ),
-            AgentRow(
-                "cursor · agent mode",
-                "direct",
-                "partial",
-                "inferred from cursor agent flag",
-                "cursor",
-                146.20,
-                480_000,
-                78,
-                52,
-                7,
-                [0, 12, 18, 8, 0, 0, 10, 22, 14, 16, 12, 6, 18, 10],
-            ),
-            AgentRow(
-                "aider · refactor",
-                "direct",
-                "estimated",
-                "inferred from aider commit prefix",
-                "aider",
-                64.80,
-                240_000,
-                31,
-                20,
-                3,
-                [0, 0, 12, 0, 8, 0, 0, 14, 0, 18, 0, 0, 0, 12],
             ),
             AgentRow(
                 "background · review",
@@ -681,7 +647,7 @@ def empty_dashboard() -> Dashboard:
             range="2026-05-10 → 2026-05-17",
             timezone="America/Los_Angeles",
             vendors_active=[],
-            vendor_count_total=4,
+            vendor_count_total=2,
         ),
         generated_at="2026-05-17T12:34:56-07:00",
         totals=Totals(
@@ -724,7 +690,7 @@ if __name__ == "__main__":
                     kind="warn",
                     label="PARTIAL",
                     text=(
-                        "Showing 1 of 4 vendors. Codex, Cursor, and Aider did not "
+                        "Showing 1 of 2 vendors. Codex did not "
                         "write parseable logs in this window. Run "
                         "<code>caliper doctor</code> to verify your local setup."
                     ),

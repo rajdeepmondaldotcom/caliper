@@ -37,8 +37,6 @@ UNKNOWN_PROJECT = "Unknown Project"
 
 VENDOR_OPENAI_CODEX = "openai-codex"
 VENDOR_CLAUDE_CODE = "claude-code"
-VENDOR_CURSOR = "cursor"
-VENDOR_AIDER = "aider"
 VENDOR_COPILOT = "copilot"
 VENDOR_UNKNOWN = "unknown"
 
@@ -46,8 +44,6 @@ KNOWN_VENDORS = frozenset(
     {
         VENDOR_OPENAI_CODEX,
         VENDOR_CLAUDE_CODE,
-        VENDOR_CURSOR,
-        VENDOR_AIDER,
         VENDOR_COPILOT,
         VENDOR_UNKNOWN,
     }

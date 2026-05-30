@@ -3,9 +3,8 @@
 # Caliper
 
 Caliper shows what your AI coding cost and what it produced. It reads the logs
-already on your disk from Codex CLI, Claude Code, Cursor, and Aider, prices the
-usage at API rates, and breaks it down by project, PR, model, and session. It
-runs offline.
+already on your disk from Codex CLI and Claude Code, prices the usage at API
+rates, and breaks it down by project, PR, model, and session. It runs offline.
 
 **No account. No upload. No telemetry.**
 
@@ -146,14 +145,6 @@ the same size in the same project and model (cache loss, model drift, tool
 thrash), with the extra dollars quantified. Each row ends in the command that
 opens its source — paste it and you are looking at the cause, not just the spike.
 
-![Plan limits used: per-source Codex and Claude Code panels with Current session and Peak this window meters, each with a human-readable reset time](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/ratelimits.png)
-
-Plan limits used shows how close each source ran to its plan limits. Caliper
-parses rate-limit headers from **Codex** today; **Claude Code, Cursor, and
-Aider** panels appear automatically once their parsers learn to surface
-rate-limit info. Each panel reads with human reset times — "Resets in 3 hr
-42 min", "Resets Thu 21 May · 09:30" — instead of raw Unix epochs.
-
 ![Attribution panels for agents, skills, tier sources, and the long-context boundary](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/attribution.png)
 
 ## How it's different
@@ -163,7 +154,7 @@ rate-limit info. Each panel reads with human reset times — "Resets in 3 hr
 | Where data lives | Local disk | Their servers |
 | Sits on the request path | No | Yes — proxy or SDK |
 | Login required | No | Yes |
-| Reads existing AI-tool logs | Yes — Codex, Claude Code, Cursor, Aider | No — needs you to route through them |
+| Reads existing AI-tool logs | Yes — Codex, Claude Code | No — needs you to route through them |
 | Per-PR / per-project cost | Yes — local git attribution | If you instrument it |
 | Works with WiFi off | Yes | No |
 
@@ -198,7 +189,6 @@ Caliper · PR #42
   Vendor        Model                 Events   Tokens (in/out)    Cached   $
   openai-codex  gpt-5.4 standard          74   210,000 /  31,000    61%   $2.10
   claude-code   claude-sonnet-4.6         31    88,000 /  12,000    48%   $1.12
-  cursor        composer                  23    72,118 /  19,000    22%   $1.60
 ```
 
 Missing git attribution is surfaced as **partial evidence** instead of being
@@ -312,8 +302,6 @@ caliper budgets check
 |---|---|
 | OpenAI Codex CLI | Local session logs, state DB, model + token fields. |
 | Claude Code | Project JSONL logs, tool-use, cache token fields. |
-| Cursor | Local token-bearing records where available. |
-| Aider | Local chat history + usage records. |
 
 Files that are transcript-only or missing token counts are surfaced by
 `caliper doctor` so coverage stays explicit.
@@ -371,10 +359,6 @@ honest, local half of that: cost per commit, how much spend linked to a commit
 at all, and the ratio of editing to diagnosing. It does not judge whether the
 code was good, and it never claims a commit equals value. Those are signals to
 read, not a score to trust blindly.
-
-**Does it work with Cursor today?** Yes, when Cursor's local data includes
-token-bearing records. Some Cursor files are transcript-only. `caliper doctor`
-reports which.
 
 **How accurate are the costs?** As accurate as your local logs and rate card
 allow. Run `caliper evidence` to see which dimensions are exact, estimated,

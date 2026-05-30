@@ -4,9 +4,7 @@ import datetime as dt
 
 from caliper.config import build_options
 from caliper.models import (
-    VENDOR_AIDER,
     VENDOR_CLAUDE_CODE,
-    VENDOR_CURSOR,
     VENDOR_OPENAI_CODEX,
     LoadResult,
 )
@@ -21,13 +19,17 @@ def test_codex_vendor_is_registered() -> None:
     assert VENDORS[VENDOR_OPENAI_CODEX].schema_version == "1"
 
 
+def test_codex_alias_selects_openai_codex(tmp_path) -> None:
+    options = build_options(session_root=tmp_path / "missing", vendors=["codex"])
+
+    assert [vendor.id for vendor in enabled_vendors(options)] == [VENDOR_OPENAI_CODEX]
+
+
 def test_enabled_vendors_respects_all_default(tmp_path) -> None:
     options = build_options(session_root=tmp_path / "missing")
 
     assert [vendor.id for vendor in enabled_vendors(options)] == [
-        VENDOR_AIDER,
         VENDOR_CLAUDE_CODE,
-        VENDOR_CURSOR,
         VENDOR_OPENAI_CODEX,
     ]
 

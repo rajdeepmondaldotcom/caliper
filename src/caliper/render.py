@@ -392,9 +392,9 @@ def _redact_path_string(value: str, options: RuntimeOptions) -> str:
 def _redact_encoded_absolute_path_segments(value: str) -> str:
     """Redact path fragments encoded into vendor directory names.
 
-    Cursor and Claude Code can encode project paths as a single path segment,
-    for example ``Users-name-Documents-repo``. Absolute-path replacement does
-    not catch those because there is no slash left to match.
+    Some tools can encode project paths as a single path segment, for example
+    ``Users-name-Documents-repo``. Absolute-path replacement does not catch
+    those because there is no slash left to match.
     """
 
     encoded_absolute_roots = r"(?:[A-Za-z][-_])?[-_]?(?:Users|home|private[-_]var|tmp)[-_]"
@@ -647,11 +647,10 @@ def _print_report_header(
     if vendor_breakdown:
         console.print(f"Vendors: {vendor_breakdown}")
     if result.warnings:
-        # Coverage caveats (e.g. "Cursor files have no per-event token counts")
-        # repeat on every analytical command and quickly become noise. Collapse
-        # them to one short pointer here; the full detail still lives in the JSON
-        # envelope, `caliper doctor`, and `caliper evidence`, which read
-        # ``result.parser_issues`` directly rather than this header.
+        # Coverage caveats repeat on every analytical command and quickly become
+        # noise. Collapse them to one short pointer here; the full detail still
+        # lives in the JSON envelope, `caliper doctor`, and `caliper evidence`,
+        # which read ``result.parser_issues`` directly rather than this header.
         coverage_warnings = {
             parser_issue_warning(issue)
             for issue in result.parser_issues
@@ -694,8 +693,6 @@ def _print_data_source(console: Console, result: LoadResult, options: RuntimeOpt
         return
     labels = {
         "claude-code": "Claude Code local logs",
-        "cursor": "Cursor local data",
-        "aider": "Aider chat histories",
     }
     console.print(f"Data source: {labels.get(vendor, vendor)}")
 
@@ -835,7 +832,6 @@ def compact_models_oneline(row: Aggregate, limit: int = 3) -> str:
 _VENDOR_LABELS: dict[str, str] = {
     "anthropic": "Anthropic",
     "openai": "OpenAI",
-    "anysphere": "Anysphere",
     "google": "Google",
     "mistral": "Mistral",
     "meta": "Meta",

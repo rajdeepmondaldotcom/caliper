@@ -27,8 +27,6 @@ from caliper.html_export import lens_for_command
 def setup_environment(monkeypatch, tmp_path):
     monkeypatch.setattr("caliper.config.USER_CONFIG", tmp_path / "missing-user-config.toml")
     monkeypatch.setattr("caliper.config.LOCAL_CONFIG", tmp_path / "missing-local-config.toml")
-    monkeypatch.setenv("CALIPER_AIDER_ROOT", str(tmp_path / "aider"))
-    monkeypatch.setenv("CALIPER_CURSOR_HOME", str(tmp_path / "cursor"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     codex_home = tmp_path / "codex"
     codex_home.mkdir()

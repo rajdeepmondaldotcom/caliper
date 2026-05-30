@@ -2,7 +2,7 @@
 
 All notable changes to Caliper. Newest on top.
 
-## 0.0.84 - 2026-05-31
+## 0.0.85 - 2026-05-31
 
 Dashboard accuracy and signal cleanup.
 
@@ -26,6 +26,12 @@ Dashboard accuracy and signal cleanup.
   tool-result errors, latency, churn, and evidence score now sit next to the
   headline KPIs so the reader can judge how trustworthy and actionable the
   numbers are before drilling in.
+- **Plan-limit panel removed from dashboards.** Rate-limit samples still exist
+  in CLI/statusline data, but the dashboard no longer renders the bulky
+  "Plan limits used" appendix section or links findings to it.
+- **Supported sources narrowed.** Caliper now supports OpenAI Codex CLI and
+  Claude Code only. The old optional source integrations were removed from the
+  parser registry, docs, demo data, and vendor validation.
 
 ## 0.0.83 - 2026-05-29
 
@@ -40,7 +46,7 @@ Surface the findings: the Insights section was hidden, now it leads "Worth a loo
 - **Fix:** Insights moved to the visible "Worth a look" tier (after the
   descriptive core, before the collapsed appendix) and now render whenever there
   are any, since they carry operational signal no other section covers. The
-  collapsed appendix is now just the audit detail (attribution, rate limits).
+  collapsed appendix is now just the audit detail (attribution).
 - Documented a Codex log analysis + parity roadmap (exact turn latency from
   `task_complete.duration_ms`, tool mix, churn, abort waste) in
   `design-brief/ACCURACY-AUDIT.md` — each its own future parser increment.
@@ -170,10 +176,9 @@ Plan limits: honest about what's actually parsed.
   vendor (no source attribution → no panel) and records with no
   rate-limit signal at all. Stable tiebreaker on equal-timestamp records
   so the "latest" reading is deterministic.
-- **README copy aligned with reality.** Claude Code / Cursor / Aider
-  panels are explicitly described as "appear automatically once their
-  parsers learn to surface rate-limit info", not pretending they ship
-  today.
+- **README copy aligned with reality.** Claude Code panels are explicitly
+  described as "appear automatically once their parser learns to surface
+  rate-limit info", not pretending they ship today.
 - **New accuracy tests:** per-source records route to their own panels
   (no cross-vendor contamination of peak / latest), empty-vendor and
   no-signal records are dropped, and the Codex → Claude Code → others
@@ -389,8 +394,8 @@ An honesty pass on the cost framing, plus the first cut of the leverage view.
   dollar figures mean" section spells out the metered-versus-flat distinction
   so the headline number is never mistaken for a bill.
 - **Known gap:** flat-plan detection currently covers Codex/ChatGPT plan types
-  only. Claude and Cursor subscription usage is still priced at API-equivalent
-  rates but not yet auto-labeled as flat-rate. Tracked as a follow-up.
+  only. Claude subscription usage is still priced at API-equivalent rates but
+  not yet auto-labeled as flat-rate. Tracked as a follow-up.
 
 
 
@@ -471,8 +476,6 @@ evidence output, and TUI.
   default, matching the machine-readable privacy contract.
 - **Pricing evidence accounts for inferred service tiers.** Totals with inferred
   tiers now grade pricing as estimated instead of exact.
-- **Malformed Cursor `state.vscdb` rows are isolated.** Bad numeric token rows
-  are skipped with a structured parser issue instead of aborting the whole file.
 - **A crashing vendor parser no longer aborts the entire load.** The failed
   source is reported as a parser issue and other vendors continue.
 
@@ -559,9 +562,6 @@ now read correctly.
 
 - **The parse cache uses WAL + a busy timeout**, so `dashboard` and `live` can
   share it without "database is locked" deadlocks.
-- **`doctor` no longer fails CI on a structural Cursor gap.** Missing Cursor
-  per-event token counts read as "ok" when other sources contribute usable
-  events; it stays a warning only when Cursor is the sole source.
 - **Evidence "exact" is now self-consistent.** Vendor coverage explains empty /
   transcript-only files instead of reading as "exact" next to a low
   files-with-events ratio.
@@ -647,9 +647,9 @@ confirmed and left alone.
 - **`-f compat-json` no longer silently prints a table** on commands that don't
   support it (e.g. `overview`). It now fails cleanly, naming the session-style
   commands that do — so scripts asking for JSON never get a table.
-- **The Cursor "no per-event token counts" warning no longer repeats** on every
-  analytical command; the table shows one short pointer to `caliper doctor`,
-  while the full detail stays in the JSON envelope, `doctor`, and `evidence`.
+- **Parser coverage warnings no longer repeat** on every analytical command;
+  the table shows one short pointer to `caliper doctor`, while the full detail
+  stays in the JSON envelope, `doctor`, and `evidence`.
 - **Clearer bad-date error.** An unparseable `--since` now suggests working
   forms (an ISO date, or windows like `last 7 days`).
 - **Mobile tap targets** for the verdict chips, evidence badge, and disclosures
@@ -889,9 +889,9 @@ Test count: 900 → 1031.
   window's total spend when no actionable fix exists. Empty windows still
   render no billboard.
 - **Sources strip in the masthead.** Every known tool (Claude Code, OpenAI
-  Codex, Cursor, Aider) renders as a chip with `✓ detected` or `· not found`
-  status, so missing sources are visible at a glance instead of silently
-  dropped. Hovering shows the per-tool tooltip.
+  Codex) renders as a chip with `✓ detected` or `· not found` status, so
+  missing sources are visible at a glance instead of silently dropped. Hovering
+  shows the per-tool tooltip.
 - **Sticky right-rail TOC with scroll-spy.** Receipt rhythm at ≥1100px gains
   a tier-grouped navigation rail (Decisions → Trajectory → Appendix → Trust)
   with `IntersectionObserver`-driven `aria-current="location"` highlighting.
@@ -903,9 +903,9 @@ Test count: 900 → 1031.
 - **Skip-to-main-content link** as the first focusable element, plus ARIA
   landmarks (`banner`, `navigation`, `main`) for assistive tech.
 - **`caliper doctor` per-tool detection.** Output opens with a `Sources
-  detected` table listing each of Claude Code, OpenAI Codex, Cursor, and
-  Aider with detected/not-found status and discovered file count. JSON
-  output includes a parallel `tools` array.
+  detected` table listing Claude Code and OpenAI Codex with detected/not-found
+  status and discovered file count. JSON output includes a parallel `tools`
+  array.
 - **Ranked model alternatives in advisor recommendations.** Each arbitrage
   rule now surfaces a tuple of `ModelAlternative` entries (vendor + projected
   cost + savings + event count), ranked by same-vendor first, then savings
@@ -969,10 +969,10 @@ Test count: 900 → 1031.
 
 ### Added
 
-- **Parallel usage-log parsing.** Codex, Claude Code, Cursor, and Aider readers now
-  parse cold files in sized process-pool batches. `--parse-workers auto` uses the
-  available CPU count; `CALIPER_PARSE_WORKERS` and `parse_workers` in config provide
-  non-CLI controls.
+- **Parallel usage-log parsing.** Codex and Claude Code readers now parse cold
+  files in sized process-pool batches. `--parse-workers auto` uses the
+  available CPU count; `CALIPER_PARSE_WORKERS` and `parse_workers` in config
+  provide non-CLI controls.
 - **Progress with ETA.** Dashboard/report progress now shows the scan footprint,
   parser worker count, parse-cache state, elapsed time, and ETA. Parallel reads
   advance visibly as worker batches complete.
@@ -1012,9 +1012,9 @@ Test count: 900 → 1031.
 
 ### Added
 
-- **Multi-stage dashboard progress.** `caliper dashboard` now sets expectations before
-  the wait: it counts local Codex/Claude/Cursor/Aider files, shows estimated data size,
-  then reports parse, aggregate, render, and write stages.
+- **Multi-stage dashboard progress.** `caliper dashboard` now sets expectations
+  before the wait: it counts local Codex/Claude files, shows estimated data
+  size, then reports parse, aggregate, render, and write stages.
 - **Human-readable session labels.** Dashboard sessions and anomaly rows now lead with
   local time/date labels instead of raw session IDs, while preserving traceability.
 - **Current-model what-if labels.** Claude and GPT scenario copy now uses current family
@@ -1647,7 +1647,7 @@ Final polish fix after the brutal 0.0.26 live release QA pass.
   JSON, Markdown, and CSV output. Pass `--show-paths` to intentionally reveal
   local paths for debugging.
 - Default path redaction now also catches local paths encoded into vendor
-  directory names such as Cursor project folders.
+  directory names.
 - TUI screens now use a Caliper-owned stable header widget instead of Textual's
   built-in `Header`, avoiding delayed title-update crashes during fast keyboard
   navigation.
@@ -1666,9 +1666,8 @@ Final live-release privacy fix after the brutal 0.0.25 QA pass.
 - `caliper rates catalog --format json` now redacts the local pricing-cache
   path and cache-miss warning path by default. Pass `--show-paths` to reveal the
   cache path.
-- Release smoke scripts now isolate Codex, Claude Code, Cursor, Aider, parse
-  cache, and XDG data roots so they do not accidentally read maintainer-local
-  usage data.
+- Release smoke scripts now isolate Codex, Claude Code, parse cache, and XDG
+  data roots so they do not accidentally read maintainer-local usage data.
 
 ## 0.0.25 - 2026-05-15
 
@@ -1819,10 +1818,9 @@ Live-QA fallout cleanup after a brutal first-time-user pass on 0.0.19.
   in `_time_window` was reached directly and rejected anything with
   letters in it. Routing through `intervals.parse_interval` keeps the
   ISO path intact.
-- `caliper doctor` no longer prints the Cursor token-coverage warning
-  twice. The dedicated `Cursor token coverage` row is the canonical
-  signal; the duplicate `Parser warning` row that wrapped the same
-  detail was an artifact of the parser-warning summarizer.
+- `caliper doctor` no longer prints parser coverage warnings twice. The
+  duplicate `Parser warning` row that wrapped the same detail was an artifact
+  of the parser-warning summarizer.
 
 ## 0.0.19 - 2026-05-14
 
@@ -1835,9 +1833,8 @@ Final release QA hardening after live 0.0.18 testing.
   default table view.
 - The default `caliper` command stays on the classic overview path.
   The Textual workspace remains explicit via `caliper tui`.
-- `caliper tui --demo` is now fully isolated to synthetic Codex
-  fixture data and no longer scans real Claude Code, Cursor, or Aider
-  paths.
+- `caliper tui --demo` is now fully isolated to synthetic Codex fixture data
+  and no longer scans real Claude Code paths.
 - Per-vendor split reports now scope tier sources, plan types,
   rate-limit samples, parser issues, and vendor stats to the active
   vendor instead of leaking global metadata into each table.
@@ -2043,9 +2040,9 @@ workspace overhaul. Establish the attribution policy.
 - `caliper.tui.screens._base.CaliperScreen`. A three-band layout base
   (top, middle, footer) every real Textual screen subclasses. Source-
   level invariant test pins the contract.
-- Real `SessionsScreen` replaces the stub. Vendor `Tabs` row (All,
-  Codex, Claude, Cursor, Aider), sortable `DataTable`, top-50 cap
-  per the UX standard, decision-pill footer.
+- Real `SessionsScreen` replaces the stub. Vendor `Tabs` row (All, Codex,
+  Claude), sortable `DataTable`, top-50 cap per the UX standard,
+  decision-pill footer.
 - `tests/test_grouped_per_vendor_parity.py` pins the v0.0.7
   per-vendor split across daily, weekly, monthly, project, session,
   models, blocks. Regression-blocked.
@@ -2072,9 +2069,8 @@ Per-vendor tables on every grouped report. No combined table.
 - `caliper daily`, `caliper weekly`, `caliper monthly`, `caliper
   session`, `caliper project`, `caliper models`, `caliper blocks`,
   and every other grouped report now emit one Rich table per tool
-  vendor on the classic table path when more than one vendor is
-  present. Each vendor has its own header, row set, and footer.
-  Cursor and Aider get their own tables when they have events.
+  vendor on the classic table path when more than one vendor is present. Each
+  vendor has its own header, row set, and footer.
 - The 'All vendors' combined totals table that 0.0.6 appended to the
   overview output is removed. Holistic vendor truth means no
   combining. Users who want a single rolled-up number can run
@@ -2101,10 +2097,9 @@ Honest loading + per-vendor tables on the overview command.
 - `caliper.cli_progress.cli_parse_progress` context manager. Wraps
   any `load_usage` call. Used by the overview command and every
   grouped report command.
-- `caliper` (overview) now prints one Rich table per tool vendor
-  when multiple vendors are present, followed by a unified totals
-  table: Claude Code separate, OpenAI Codex separate, Cursor
-  separate, Aider separate, then All vendors. Triggers only on the
+- `caliper` (overview) now prints one Rich table per tool vendor when multiple
+  vendors are present, followed by a unified totals table: Claude Code
+  separate, OpenAI Codex separate, then All vendors. Triggers only on the
   classic table path. JSON / CSV / markdown wire shapes unchanged.
 
 ## 0.0.5 - 2026-05-14
@@ -2120,8 +2115,8 @@ decoration. The historical planning notes were retired after launch.
   the persona tests so banned hype / fog / em-dashes never sneak into
   shipped copy. Importable from the top-level package.
 - `caliper.pricing.model_vendor(model)` returns the canonical vendor
-  label (`anthropic`, `openai`, `anysphere`, `google`, `mistral`,
-  `meta`, `unknown`) for any model id. Every model in `MODEL_CARDS`
+  label (`anthropic`, `openai`, `google`, `mistral`, `meta`, `unknown`) for any
+  model id. Every model in `MODEL_CARDS`
   resolves to a non-unknown vendor. Glyph helper
   `model_vendor_glyph(vendor)` returns a single character for dense
   screens.
@@ -2160,10 +2155,9 @@ column terminal.
   model names ranked by spend, joined with `·`, and suffixed with
   `+N` when more models exist. Vendor prefixes (`claude-`, `openai-`)
   are stripped so the cell fits without wrapping.
-- Parser-issue warnings (e.g. Cursor files with no per-event token
-  counts) no longer dump three full filesystem paths into every
-  report. The summary form now reads "N files (run `caliper doctor`
-  for examples)"; the verbose form remains available from
+- Parser-issue warnings no longer dump three full filesystem paths into every
+  report. The summary form now reads "N files (run `caliper doctor` for
+  examples)"; the verbose form remains available from
   `caliper.evidence.parser_issue_warning_verbose` for the doctor
   command.
 
@@ -2225,8 +2219,8 @@ Initial public release.
 
 ### Added
 
-- Local-first `caliper` CLI for reading Codex, Claude Code, Cursor, and
-  Aider usage logs without login, upload, telemetry, or a daemon.
+- Local-first `caliper` CLI for reading Codex and Claude Code usage logs
+  without login, upload, telemetry, or a daemon.
 - Token, cache, credit, and API-dollar reporting by overview, day, week,
   month, session, billing block, project, model, vendor, PR, and commit.
 - Cache-aware rate cards, opt-in pricing catalog refresh, schema export,
