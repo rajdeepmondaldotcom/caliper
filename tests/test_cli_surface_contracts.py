@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from caliper import SCHEMA_VERSION, __version__
 from caliper.cli import app
+from caliper.timeutil import local_timezone
 
 from .conftest import make_state_db, token_event, turn_context, write_session
 
@@ -249,10 +250,20 @@ def test_output_file_paths_are_used_for_command_owned_outputs(tmp_path: Path) ->
 
 
 def test_export_receipt_cli_redacts_by_default_and_can_show_sensitive(tmp_path: Path) -> None:
-    base = _source_args(tmp_path, tier="standard")
+    session_root, state_db, until, missing_cfg, _config = _fixture(tmp_path, tier="standard")
+    event_at = dt.datetime.fromisoformat(until) - dt.timedelta(seconds=1)
+    receipt_month = event_at.astimezone(local_timezone()).strftime("%Y-%m")
+    base = [
+        "--session-root",
+        str(session_root),
+        "--state-db",
+        str(state_db),
+        "--codex-config",
+        str(missing_cfg),
+    ]
     redacted = runner.invoke(
         app,
-        ["export", "receipt", "--month", "2026-05", *base, "--format", "markdown"],
+        ["export", "receipt", "--month", receipt_month, *base, "--format", "markdown"],
     )
     assert redacted.exit_code == 0, redacted.output
     assert "Session 1" in redacted.output
@@ -264,7 +275,7 @@ def test_export_receipt_cli_redacts_by_default_and_can_show_sensitive(tmp_path: 
             "export",
             "receipt",
             "--month",
-            "2026-05",
+            receipt_month,
             *base,
             "--format",
             "html",

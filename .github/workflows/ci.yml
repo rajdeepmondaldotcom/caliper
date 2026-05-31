@@ -63,6 +63,30 @@ jobs:
           unzip -l "$wheel" | grep -E '\.tcss$' \
             || { echo "missing tcss in wheel"; exit 1; }
 
+  dashboard-layout:
+    name: dashboard responsive layout
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Install
+        run: uv sync --all-extras --dev --python 3.13
+      - name: Install Playwright Chromium
+        run: uv run --with playwright==1.52.0 playwright install --with-deps chromium
+      - name: Browser layout regression
+        run: |
+          CALIPER_BROWSER_LAYOUT=1 \
+            uv run --with playwright==1.52.0 \
+            pytest tests/test_dashboard_responsive_layout.py -q
+
   lint-invariants:
     name: invariants
     runs-on: ubuntu-latest

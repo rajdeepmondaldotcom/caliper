@@ -2,6 +2,21 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.88 - 2026-06-01
+
+Dashboard responsive hardening.
+
+- **Overview cards no longer depend on a fixed four-column desktop layout.**
+  The KPI row now uses an intrinsic auto-fit grid, so it wraps before it can
+  collide with the receipt index rail on narrower laptop screens.
+- **Long labels are contained across dashboard sections.** Evidence rows,
+  anomaly metadata, budget rows, avoidable-spend panels, and privacy toggle
+  spans now shrink and wrap their content instead of widening the page.
+- **Responsive layout is browser-tested in CI.** A new Chromium regression
+  renders receipt and terminal dashboards, static and interactive, comfortable
+  and compact, with large numbers and long unbroken labels across a wide
+  viewport sweep from phone widths to large desktop.
+
 ## 0.0.87 - 2026-05-31
 
 Presentation and a dashboard layout fix.

@@ -255,8 +255,14 @@ table { font-variant-numeric: tabular-nums lining-nums; }
   min-width: 0;
   padding: 32px 34px 72px;
 }
+.cal-terminal-main > *,
+.cal-terminal-main section[id] {
+  min-width: 0;
+  max-width: 100%;
+}
 .cal-summary-row {
   grid-auto-rows: 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   align-items: stretch;
 }
 .cal-stat-card {
@@ -593,8 +599,25 @@ table { font-variant-numeric: tabular-nums lining-nums; }
 .cal-insight-row {
   min-width: 0;
 }
+.cal-evidence-row {
+  grid-template-columns: minmax(0, 180px) auto minmax(0, 1fr) !important;
+  min-width: 0;
+}
+.cal-evidence-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cal-evidence-row > span:nth-child(2) {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
 .cal-anomaly-main {
   min-width: 0;
+}
+.cal-anomaly-main * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .cal-anomaly-side {
   min-width: max-content;
@@ -626,6 +649,20 @@ table { font-variant-numeric: tabular-nums lining-nums; }
   font-family: var(--mono);
   font-weight: 600;
 }
+.cal-budget-row {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) auto auto;
+  gap: 14px;
+  align-items: center;
+  font-size: 13px;
+}
+.cal-budget-bar-cell {
+  min-width: 0;
+}
+.cal-budget-amount {
+  min-width: 140px;
+  text-align: right;
+}
 
 /* Section spacing */
 section[id] { scroll-margin-top: 36px; }
@@ -637,7 +674,7 @@ section[id] { scroll-margin-top: 36px; }
 .cal-rail-link:hover { color: var(--accent) !important; background: var(--accent-tint); }
 
 /* Mobile responsive — when wrapping element has data-viewport=mobile */
-[data-viewport="mobile"] .cal-summary-row { grid-template-columns: 1fr 1fr !important; }
+[data-viewport="mobile"] .cal-summary-row { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] .cal-shape-grid,
 [data-viewport="mobile"] .cal-forecast-grid { grid-template-columns: 1fr !important; }
 [data-viewport="mobile"] .cal-table { font-size: 12px !important; }
@@ -821,6 +858,37 @@ section[id] { scroll-margin-top: 36px; }
     padding: 8px 12px !important;
   }
   .cal-card-formula > summary { min-height: 44px; }
+}
+
+@media (max-width: 480px) {
+  .cal-summary-row {
+    grid-template-columns: 1fr !important;
+  }
+  .cal-budget-row {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 7px 12px !important;
+  }
+  .cal-budget-period {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .cal-budget-pct {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+  .cal-budget-bar-cell {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .cal-budget-amount {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    min-width: 0 !important;
+    text-align: left !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* Mobile viewport: render at 390px wide in a phone-shaped frame */
@@ -1297,6 +1365,13 @@ p, h1, h2, h3 { text-wrap: pretty; }
    the redacted twin so the browser sees the real text. @media print
    and a root-level data-privacy=always attribute both flip the swap,
    producing redacted output without re-running the report. */
+.cal-real,
+.cal-redacted {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .cal-redacted { display: none; }
 [data-privacy="always"] .cal-real { display: none !important; }
 [data-privacy="always"] .cal-redacted { display: inline !important; }
@@ -1426,6 +1501,9 @@ p, h1, h2, h3 { text-wrap: pretty; }
 .cal-receipt-main {
   display: grid;
   gap: 40px;
+  min-width: 0;
+}
+.cal-receipt-main > section {
   min-width: 0;
 }
 .cal-receipt-toc {

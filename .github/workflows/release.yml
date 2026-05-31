@@ -62,6 +62,13 @@ jobs:
           uv run ruff format --check .
       - name: Tests
         run: PYTHONWARNINGS=error::ResourceWarning uv run pytest
+      - name: Install Playwright Chromium
+        run: uv run --with playwright==1.52.0 playwright install --with-deps chromium
+      - name: Browser layout regression
+        run: |
+          CALIPER_BROWSER_LAYOUT=1 \
+            uv run --with playwright==1.52.0 \
+            pytest tests/test_dashboard_responsive_layout.py -q
       - name: Coverage
         run: uv run pytest --cov=src/caliper --cov-report=term
       - name: Build distributions

@@ -452,6 +452,17 @@ def test_cost_chart_uses_session_shape_colored_bars() -> None:
 
 def test_dashboard_css_has_real_mobile_breakpoint() -> None:
     assert "@media (max-width: 720px)" in INLINE_STYLES
+    assert ".cal-receipt-main > section {\n  min-width: 0;\n}" in INLINE_STYLES
+    responsive_kpi_grid = "grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));"
+    assert responsive_kpi_grid in INLINE_STYLES
+    assert (
+        '[data-viewport="mobile"] .cal-summary-row { grid-template-columns: 1fr !important; }'
+        in INLINE_STYLES
+    )
+    assert "@media (max-width: 480px)" in INLINE_STYLES
+    assert "grid-template-columns:repeat(4,minmax(0,1fr))" not in render_dashboard(
+        sample_dashboard()
+    )
     assert ".cal-terminal-layout { grid-template-columns: 1fr !important; }" in INLINE_STYLES
     assert ".cal-stat-card-value { font-size: 22px !important; }" in INLINE_STYLES
     assert ".cal-receipt-main { overflow-x: hidden; }" in INLINE_STYLES
