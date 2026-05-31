@@ -206,6 +206,11 @@
 
 /* Base */
 html, body { background: var(--bg); margin: 0; padding: 0; }
+/* `clip` (unlike `hidden`) contains fixed/transformed descendants without
+   forming a scroll container, so a floating element can never add a stray
+   horizontal scrollbar, while the sticky section rail keeps working. */
+html { overflow-x: clip; }
+
 body {
   font-family: var(--font);
   font-size: 14px;
