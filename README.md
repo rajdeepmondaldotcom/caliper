@@ -21,9 +21,31 @@ uvx --isolated --from caliper-ai caliper dashboard --demo --open
 
 </div>
 
-![Caliper dashboard — verdict, KPIs, and next actions in Safe Share mode](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/hero.png)
+![Caliper dashboard — the verdict, the KPI cards, and the evidence behind every number, rendered from built-in sample data](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/hero.png)
 
-<p align="center"><sub>Screenshot in Safe Share mode (<code>--share-safe</code>): paths, projects, and session labels are redacted while costs, evidence, and next actions stay visible. By default the dashboard shows your real labels for local analysis; add <code>--share-safe</code> when you forward it.</sub></p>
+<p align="center"><sub>This is the built-in demo (<code>caliper dashboard --demo</code>) shown in Safe Share mode (<code>--share-safe</code>), which redacts project names, paths, and session labels while keeping every cost and evidence grade intact. On your own machine the dashboard shows your real labels by default — add <code>--share-safe</code> only when you forward the file.</sub></p>
+
+---
+
+## Quickstart
+
+Three commands, in order. Nothing is uploaded, and no account is created.
+
+```bash
+# 1. Install it (Python 3.11+)
+uv tool install caliper-ai
+
+# 2. Build a dashboard from the logs already on your disk
+caliper dashboard
+
+# 3. No logs yet? Open the full report on built-in sample data first
+caliper dashboard --demo
+```
+
+`caliper dashboard` writes one self-contained HTML file and opens it in your
+browser. If step 2 finds nothing, `caliper doctor` shows exactly which tools and
+logs it detected. Don't want to install anything yet? The one-liner above runs
+the demo straight from PyPI.
 
 ---
 
@@ -34,17 +56,21 @@ already on your machine:
 
 ![What this produced: commits touched, cost per commit, share of spend linked to a commit, and the edit-vs-diagnose ratio](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/output.png)
 
-- **Commits authored.** How many commits you actually shipped in this window, in
-  the repos your sessions touched — read from local `git log`, counting every
-  source. It does not claim every commit was AI-written.
-- **Cost per commit.** Total spend divided by commits authored. A unit cost,
-  not an invoice.
-- **Linked to a commit.** The share of spend a source tied to a specific commit.
-  The rest is exploration, planning, or work that never reached a commit. That
-  is not automatically waste, and Caliper says so.
-- **Edits vs. diagnose/run.** The share of tool calls that changed files versus
-  ran shells and tests. A lot of diagnosing and very little editing is the rough
-  shape of a session that spun instead of shipped.
+- **Commits touched / authored.** The card adapts to your data. With full local
+  `git log` access it reads **Commits authored** — commits authored this window
+  in the repos your sessions touched. When only the commit SHAs your tools
+  logged are available (as in the demo above) it reads **Commits touched** —
+  distinct commits checked out while the AI was working. Neither claims the AI
+  wrote them.
+- **Cost per commit.** Git-linked spend divided by commits touched, or total
+  spend divided by commits authored when git history is readable. A rough unit
+  cost, not a per-commit invoice.
+- **Linked to a commit.** The share of spend recorded against a known commit.
+  The rest is exploration, planning, or work that never reached a commit — not
+  automatically waste, and Caliper says so.
+- **Edits vs. diagnose/run.** The share of classified tool calls that changed
+  files versus ran shells and tests. A lot of diagnosing and very little editing
+  is the rough shape of a session that spun instead of shipped.
 
 These are signals, not a verdict. Each is labeled with its assumption. Caliper
 measures cost and effort, not whether the code is good.
@@ -62,18 +88,10 @@ with dated rate cards, and answers:
 - On a flat plan, what would the same usage cost at API rates?
 - Is each number exact, estimated, partial, or unsupported?
 
-## Running it
+## Reading the dashboard
 
-```bash
-caliper dashboard
-```
-
-No logs yet? Run `caliper dashboard --demo` to open the full report on built-in
-sample data before pointing Caliper at your own usage.
-
-It writes a self-contained HTML file and opens it in your browser. The verdict
-sits at the top: the period, the cost, and the trend. Nothing prescriptive
-competes with it.
+The verdict sits at the top of every report: the period, the cost, and the
+trend. Nothing prescriptive competes with it.
 
 ```text
 Caliper · Last 30 days · $1,243 · trend +8.2% · top fix: Move low-output
@@ -123,8 +141,9 @@ disclosures expand the formula and sample size on top of it.
 
 ## Dashboard tour
 
-These screenshots come from `caliper dashboard --safe-share`, so they show the
-real report layout without exposing local paths or session identities.
+These come from the built-in demo in Safe Share mode (`caliper dashboard --demo
+--share-safe`), so they show the real report layout with project names and paths
+redacted.
 
 | Cost over time | Models & tiers |
 |---|---|
