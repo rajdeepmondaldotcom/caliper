@@ -2,6 +2,20 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.86 - 2026-05-31
+
+Documentation and presentation refresh. No code or runtime behavior changes.
+
+- **README screenshots regenerated at the current version.** The dashboard
+  images were captured at v0.0.73 and still showed Cursor and Aider as detected
+  sources, which Caliper no longer parses. They now show the real Codex and
+  Claude Code source row, on clearly labelled demo data.
+- **README clarity pass.** Added a Quickstart, aligned the "What this produced"
+  copy with the dashboard's own metric labels (commits touched vs authored,
+  git-linked spend vs total spend), and standardized on the `--share-safe` flag.
+- **Repository presentation.** Added a social-preview image and removed four
+  stale, unreferenced screenshots.
+
 ## 0.0.85 - 2026-05-31
 
 Dashboard accuracy and signal cleanup.
