@@ -1,38 +1,54 @@
+# OS and editor noise
 .DS_Store
-.ruff_cache/
-.pytest_cache/
-.mypy_cache/
+.idea/
+.vscode/
 .cursor/
-.venv/
-# Internal docs subdirs + loose notes stay local. Only docs/screenshots/
-# is committed so the README hero image renders on GitHub.
-docs/launch/
-docs/messaging/
-docs/migrations/
-docs/qa/
-docs/release-and-ux-overhaul/
-docs/agents/
-docs/*.md
-docs-site/
-design-brief/
-editor/
-__pycache__/
-*.py[cod]
-*.egg-info/
-build/
-dist/
-htmlcov/
-.coverage
-.caliper.toml
-docs/agents/
+
+# Local environment and machine-specific config
 .env
 .env.*
 !.env.example
+.venv/
+.caliper.toml
 *.local.md
 
-# Designer handoff artifacts — local references, not part of the launch repo.
-caliper-dashboard-design-brief.zip
-out/
+# Python bytecode, caches, and tooling state
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.hypothesis/
+.tox/
+.nox/
+.ipynb_checkpoints/
 
-# Coverage artifact
+# Test and coverage output
+.coverage
+.coverage.*
 coverage.xml
+htmlcov/
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Generated/local project artifacts
+out/
+docs-site/
+design-brief/
+editor/
+caliper-dashboard-design-brief.zip
+
+# Local docs workspace.
+# Only committed screenshots are kept here for README/GitHub rendering.
+docs/**
+!docs/
+!docs/screenshots/
+!docs/screenshots/**

@@ -2,6 +2,23 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.87 - 2026-05-31
+
+Presentation and a dashboard layout fix.
+
+- **README hero is now a short recording.** The static hero screenshot is
+  replaced with a ~10s scroll-through of one real `caliper dashboard --days 14`
+  report in dark mode, captured in Safe Share mode so project names, paths, and
+  session labels are redacted while the cost figures and evidence grades stay
+  real. The unused `hero.png` was removed.
+- **Dashboard contains floating elements.** Added `overflow-x: clip` to the
+  root so a fixed or transformed element can never introduce a stray horizontal
+  scrollbar, while the sticky section rail keeps working. Applied to both the
+  inline styles and the mirrored stylesheet.
+- **Repository metadata tidied.** Generalized the attribution-policy guard
+  wording, refreshed `.mailmap` identities, modernized `.gitignore`, and removed
+  three landed planning documents.
+
 ## 0.0.86 - 2026-05-31
 
 Documentation and presentation refresh. No code or runtime behavior changes.
@@ -2060,8 +2077,8 @@ workspace overhaul. Establish the attribution policy.
 - `tests/test_grouped_per_vendor_parity.py` pins the v0.0.7
   per-vendor split across daily, weekly, monthly, project, session,
   models, blocks. Regression-blocked.
-- `tests/test_attribution_policy.py` blocks the Claude attribution
-  trailer from re-entering tracked source. Vendor product names and
+- `tests/test_attribution_policy.py` blocks assistant attribution
+  markers from re-entering tracked source. Vendor product names and
   model ids stay whitelisted.
 - `CONTRIBUTING.md` carries the matching policy block.
 - `docs/release-and-ux-overhaul/RUNBOOK-publish.md` documents the

@@ -21,9 +21,9 @@ uvx --isolated --from caliper-ai caliper dashboard --demo --open
 
 </div>
 
-![Caliper dashboard — the verdict, the KPI cards, and the evidence behind every number, rendered from built-in sample data](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/hero.png)
+![Caliper dashboard — a scroll through one real report: the verdict, the KPI cards, the charts, the sessions, and the evidence behind every number](https://raw.githubusercontent.com/rajdeepmondaldotcom/caliper/main/docs/screenshots/caliper-demo.gif)
 
-<p align="center"><sub>This is the built-in demo (<code>caliper dashboard --demo</code>) shown in Safe Share mode (<code>--share-safe</code>), which redacts project names, paths, and session labels while keeping every cost and evidence grade intact. On your own machine the dashboard shows your real labels by default — add <code>--share-safe</code> only when you forward the file.</sub></p>
+<p align="center"><sub>A real <code>caliper dashboard --days 14</code> report from the author's own machine, in Safe Share mode (<code>--share-safe</code>): project names, paths, and session labels are redacted, every cost and evidence grade is real. On your own machine the dashboard shows your real labels by default — add <code>--share-safe</code> only when you forward the file.</sub></p>
 
 ---
 
