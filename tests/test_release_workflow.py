@@ -83,6 +83,9 @@ def test_release_smokes_dashboard_from_wheel_and_pypi():
     assert "caliper dashboard --demo --output" in text
     assert "scripts/live-release-smoke.sh" in text
     assert "CALIPER_SMOKE_VERSION" in text
+    assert "Resolve published wheel URL" in text
+    assert "CALIPER_SMOKE_WHEEL_URL" in text
+    assert "steps.published-wheel.outputs.wheel_url" in text
 
 
 def test_local_publish_script_does_not_use_twine_credentials():

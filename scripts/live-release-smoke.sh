@@ -10,6 +10,7 @@ CONFIG="$ROOT/config.toml"
 PACKAGE="${CALIPER_SMOKE_PACKAGE:-caliper-ai}"
 VERSION_SPEC=""
 PYTHON_BIN="${PYTHON:-}"
+WHEEL_URL="${CALIPER_SMOKE_WHEEL_URL:-}"
 
 export CALIPER_CACHE_DIR="$ROOT/cache"
 export XDG_DATA_HOME="$ROOT/data"
@@ -47,7 +48,11 @@ PY
 
 "$PYTHON_BIN" -m venv "$VENV"
 "$VENV/bin/python" -m pip install --upgrade pip >/dev/null
-"$VENV/bin/python" -m pip install "${PACKAGE}${VERSION_SPEC}" >/dev/null
+if [[ -n "$WHEEL_URL" ]]; then
+  "$VENV/bin/python" -m pip install "$WHEEL_URL" >/dev/null
+else
+  "$VENV/bin/python" -m pip install "${PACKAGE}${VERSION_SPEC}" >/dev/null
+fi
 
 cat > "$CONFIG" <<'TOML'
 [budgets]

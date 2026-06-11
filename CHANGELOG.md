@@ -2,6 +2,20 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.90 - 2026-06-11
+
+Dashboard self-update and release verification hardening.
+
+- **Dashboard self-update uses PyPI's Simple index first.** Interactive
+  `caliper dashboard` runs now discover the latest `caliper-ai` version from
+  the Simple HTML package index before falling back to project JSON metadata,
+  so newly uploaded versions are visible even when PyPI's JSON metadata cache
+  lags.
+- **Post-release smoke verifies the exact published wheel.** The release
+  workflow still tries the normal `caliper-ai==version` resolver path first,
+  then falls back to the SHA-256-pinned PyPI wheel URL if PyPI's resolver index
+  is stale after the retry window.
+
 ## 0.0.89 - 2026-06-11
 
 Current model pricing and dashboard self-update.
