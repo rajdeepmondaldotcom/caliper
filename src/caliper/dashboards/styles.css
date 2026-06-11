@@ -36,6 +36,9 @@
   --border-strong: #3a4654;
   --grid: rgba(255,255,255,0.065);
   --bar-ghost: rgba(255,255,255,0.022);
+  --chart-track: rgba(148,163,184,0.08);
+  --chart-track-stroke: rgba(148,163,184,0.12);
+  --chart-bar-stroke: rgba(255,255,255,0.18);
   --hairline: rgba(255,255,255,0.09);
 
   --ink: #f2f5f8;
@@ -62,10 +65,11 @@
   --card-rail-tokens: var(--accent-tint-2);
   --card-rail-sessions: rgba(167,139,250,0.32);
 
-  --explore: #7cc4ff;
-  --execute: #a78bfa;
-  --diagnose: #f5c971;
-  --mixed: #858d9b;
+  --explore: #8fd0ff;
+  --execute: #b99cff;
+  --diagnose: #ffd978;
+  --mixed: #a8b0bf;
+  --no-tools: #7c8fa8;
 
   /* Type stack — premium system fallback chain.
      -apple-system → SF Pro (macOS), Segoe UI Variable → Windows 11,
@@ -107,6 +111,9 @@
   --border-strong: #cfd3da;
   --grid: rgba(0,0,0,0.045);
   --bar-ghost: rgba(0,0,0,0.025);
+  --chart-track: rgba(15,23,42,0.035);
+  --chart-track-stroke: rgba(15,23,42,0.08);
+  --chart-bar-stroke: rgba(15,23,42,0.14);
   --hairline: rgba(0,0,0,0.07);
 
   --ink: #0e1116;
@@ -136,6 +143,7 @@
   --execute: #7c3aed;
   --diagnose: #b45309;
   --mixed: #6b7280;
+  --no-tools: #94a3b8;
 }
 
 /* Print theme */
@@ -149,6 +157,9 @@
   --border-strong: #888888;
   --grid: rgba(0,0,0,0.10);
   --bar-ghost: rgba(0,0,0,0.04);
+  --chart-track: rgba(0,0,0,0.05);
+  --chart-track-stroke: rgba(0,0,0,0.14);
+  --chart-bar-stroke: rgba(0,0,0,0.20);
   --hairline: rgba(0,0,0,0.18);
 
   --ink: #000000;
@@ -178,6 +189,7 @@
   --execute: #6a4cb8;
   --diagnose: #8a5a00;
   --mixed: #4a4a4a;
+  --no-tools: #707070;
 }
 
 /* Accent variants — override colors without changing theme */
@@ -916,6 +928,9 @@ section[id] { scroll-margin-top: 36px; }
     --border-strong: #888888 !important;
     --grid: rgba(0,0,0,0.10) !important;
     --bar-ghost: rgba(0,0,0,0.04) !important;
+    --chart-track: rgba(0,0,0,0.05) !important;
+    --chart-track-stroke: rgba(0,0,0,0.14) !important;
+    --chart-bar-stroke: rgba(0,0,0,0.20) !important;
     --hairline: rgba(0,0,0,0.18) !important;
     --ink: #000000 !important;
     --ink-2: #1a1a1a !important;
@@ -932,6 +947,7 @@ section[id] { scroll-margin-top: 36px; }
     --execute: #6a4cb8 !important;
     --diagnose: #8a5a00 !important;
     --mixed: #4a4a4a !important;
+    --no-tools: #707070 !important;
   }
   .tweaks-host, .preview-chrome, [class*="twk-"] { display: none !important; }
   /* Print densification — every section stays visible so a board pack
@@ -1033,9 +1049,9 @@ p, h1, h2, h3 { text-wrap: pretty; }
   }
   /* Bar chart rects: brighten the filled bar and reveal the built-in
      SVG label without shifting anything around it. */
-  .cal-bar-rect { transition: fill-opacity 120ms ease-out; }
+  .cal-bar-rect { transition: filter 120ms ease-out; }
   .cal-bar-group:hover .cal-bar-rect,
-  .cal-bar-group:focus-visible .cal-bar-rect { fill-opacity: 0.82; }
+  .cal-bar-group:focus-visible .cal-bar-rect { filter: brightness(1.12); }
   .cal-bar-hover-label {
     opacity: 0;
     pointer-events: none;

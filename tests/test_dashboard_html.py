@@ -16,14 +16,16 @@ import pytest
 
 from caliper.config import build_options
 from caliper.dashboards import build_handoff_dashboard, render_dashboard
-from caliper.dashboards.data_models import ModelRow, ProjectRow, ToolCount
+from caliper.dashboards.data_models import DailyPoint, ModelRow, ProjectRow, ToolCount
 from caliper.dashboards.html import (
     INLINE_STYLES,
     SECTION_NUMBERS,
     _agent_display_label,
     _anomaly_command,
+    _bar_chart,
     _compress_session_label,
     _favicon_link,
+    _shape_strip,
     fmt_money,
     fmt_tokens,
     render_models,
@@ -163,6 +165,24 @@ def test_dashboard_a11y_landmarks_and_labels(monkeypatch, tmp_path) -> None:
     # SVG bar groups must use :focus-visible (keyboard) not bare :focus (mouse).
     assert "cal-bar-group:focus-visible" in html
     assert ".cal-bar-group:focus " not in html
+
+
+def test_cost_chart_uses_visible_no_tools_category() -> None:
+    daily = [
+        DailyPoint("2026-06-01", 1.0, 1, "mixed"),
+        DailyPoint("2026-06-02", 1453.0, 24, "no-tools"),
+    ]
+
+    chart = _bar_chart(daily)
+    strip = _shape_strip(daily)
+    html = render_dashboard(dataclasses.replace(sample_dashboard(), daily=daily), interactive=False)
+
+    assert 'fill="var(--no-tools)"' in chart
+    assert 'fill="var(--bar-ghost)"' not in chart
+    assert 'class="cal-bar-track"' in chart
+    assert 'height="2.0"' in chart
+    assert "border:1px solid var(--chart-bar-stroke)" in strip
+    assert "no tools" in html
 
 
 def test_dashboard_renders_section_markers(monkeypatch, tmp_path) -> None:

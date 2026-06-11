@@ -2,6 +2,17 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.93 - 2026-06-11
+
+Dashboard cost chart contrast.
+
+- **Cost-over-time bars now use higher-contrast workflow colors.** The dark
+  dashboard palette separates chart tracks from real bars, outlines legend
+  swatches and mini-strip cells, and gives tiny nonzero bars a visible floor.
+- **Tool-free days are now visible and labelled.** Days whose dominant shape is
+  `no-tools` no longer reuse the near-invisible ghost track color, so spend
+  peaks like June 5 render as a real bar and appear in the legend.
+
 ## 0.0.92 - 2026-06-11
 
 Dashboard self-update now avoids stale PyPI resolver indexes.

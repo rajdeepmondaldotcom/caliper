@@ -110,6 +110,9 @@ INLINE_STYLES = """
   --border-strong: #3a4654;
   --grid: rgba(255,255,255,0.065);
   --bar-ghost: rgba(255,255,255,0.022);
+  --chart-track: rgba(148,163,184,0.08);
+  --chart-track-stroke: rgba(148,163,184,0.12);
+  --chart-bar-stroke: rgba(255,255,255,0.18);
   --hairline: rgba(255,255,255,0.09);
 
   --ink: #f2f5f8;
@@ -136,10 +139,11 @@ INLINE_STYLES = """
   --card-rail-tokens: var(--accent-tint-2);
   --card-rail-sessions: rgba(167,139,250,0.32);
 
-  --explore: #7cc4ff;
-  --execute: #a78bfa;
-  --diagnose: #f5c971;
-  --mixed: #858d9b;
+  --explore: #8fd0ff;
+  --execute: #b99cff;
+  --diagnose: #ffd978;
+  --mixed: #a8b0bf;
+  --no-tools: #7c8fa8;
 
   /* Type stack — premium system fallback chain.
      -apple-system → SF Pro (macOS), Segoe UI Variable → Windows 11,
@@ -181,6 +185,9 @@ INLINE_STYLES = """
   --border-strong: #cfd3da;
   --grid: rgba(0,0,0,0.045);
   --bar-ghost: rgba(0,0,0,0.025);
+  --chart-track: rgba(15,23,42,0.035);
+  --chart-track-stroke: rgba(15,23,42,0.08);
+  --chart-bar-stroke: rgba(15,23,42,0.14);
   --hairline: rgba(0,0,0,0.07);
 
   --ink: #0e1116;
@@ -210,6 +217,7 @@ INLINE_STYLES = """
   --execute: #7c3aed;
   --diagnose: #b45309;
   --mixed: #6b7280;
+  --no-tools: #94a3b8;
 }
 
 /* Print theme */
@@ -223,6 +231,9 @@ INLINE_STYLES = """
   --border-strong: #888888;
   --grid: rgba(0,0,0,0.10);
   --bar-ghost: rgba(0,0,0,0.04);
+  --chart-track: rgba(0,0,0,0.05);
+  --chart-track-stroke: rgba(0,0,0,0.14);
+  --chart-bar-stroke: rgba(0,0,0,0.20);
   --hairline: rgba(0,0,0,0.18);
 
   --ink: #000000;
@@ -252,6 +263,7 @@ INLINE_STYLES = """
   --execute: #6a4cb8;
   --diagnose: #8a5a00;
   --mixed: #4a4a4a;
+  --no-tools: #707070;
 }
 
 /* Accent variants — override colors without changing theme */
@@ -990,6 +1002,9 @@ section[id] { scroll-margin-top: 36px; }
     --border-strong: #888888 !important;
     --grid: rgba(0,0,0,0.10) !important;
     --bar-ghost: rgba(0,0,0,0.04) !important;
+    --chart-track: rgba(0,0,0,0.05) !important;
+    --chart-track-stroke: rgba(0,0,0,0.14) !important;
+    --chart-bar-stroke: rgba(0,0,0,0.20) !important;
     --hairline: rgba(0,0,0,0.18) !important;
     --ink: #000000 !important;
     --ink-2: #1a1a1a !important;
@@ -1006,6 +1021,7 @@ section[id] { scroll-margin-top: 36px; }
     --execute: #6a4cb8 !important;
     --diagnose: #8a5a00 !important;
     --mixed: #4a4a4a !important;
+    --no-tools: #707070 !important;
   }
   .tweaks-host, .preview-chrome, [class*="twk-"] { display: none !important; }
   /* Print densification — every section stays visible so a board pack
@@ -1107,9 +1123,9 @@ p, h1, h2, h3 { text-wrap: pretty; }
   }
   /* Bar chart rects: brighten the filled bar and reveal the built-in
      SVG label without shifting anything around it. */
-  .cal-bar-rect { transition: fill-opacity 120ms ease-out; }
+  .cal-bar-rect { transition: filter 120ms ease-out; }
   .cal-bar-group:hover .cal-bar-rect,
-  .cal-bar-group:focus-visible .cal-bar-rect { fill-opacity: 0.82; }
+  .cal-bar-group:focus-visible .cal-bar-rect { filter: brightness(1.12); }
   .cal-bar-hover-label {
     opacity: 0;
     pointer-events: none;
@@ -2033,7 +2049,7 @@ _SHAPE_COLORS: dict[str, str] = {
     "diagnostic": "var(--diagnose)",
     "diagnose": "var(--diagnose)",
     "mixed": "var(--mixed)",
-    "no-tools": "var(--bar-ghost)",
+    "no-tools": "var(--no-tools)",
 }
 
 
@@ -2526,21 +2542,21 @@ def _budget_bar(spent: float, cap: float, warn: float) -> str:
     )
 
 
-def _shape_strip(daily: Sequence[Any], *, height: int = 10) -> str:
+def _shape_strip(daily: Sequence[Any], *, height: int = 12) -> str:
     """One block per day, colored by dominant session shape."""
     if not daily:
         return ""
     parts = [
         f'<div style="display:grid;grid-template-columns:repeat({len(daily)},1fr);'
-        f'gap:2px;margin-top:8px">'
+        f'gap:3px;margin-top:12px">'
     ]
     for d in daily:
         shape = (getattr(d, "shape", None) or "no-tools").lower()
         color = _SHAPE_COLORS.get(shape, "var(--mixed)")
-        opacity = "0.4" if shape == "no-tools" else "1"
         parts.append(
             f'<span title="{_esc(d.day)} · {_esc(shape)}" '
-            f'style="height:{height}px;background:{color};border-radius:1px;opacity:{opacity}"></span>'
+            f'style="height:{height}px;background:{color};'
+            'border:1px solid var(--chart-bar-stroke);border-radius:2px"></span>'
         )
     parts.append("</div>")
     return "".join(parts)
@@ -2619,7 +2635,9 @@ def _bar_chart(
         x = pad_l + i * bar_w + gap / 2
         bw = bar_w - gap
         bar_h = (value / nice_max) * inner_h
+        display_bar_h = max(2.0, bar_h) if value > 0 else 0.0
         y = pad_t + inner_h - bar_h
+        display_y = pad_t + inner_h - display_bar_h
         center_x = x + bw / 2
         shape_key = shape.lower().replace("_", "-")
         bar_color = _SHAPE_COLORS.get(shape_key, accent)
@@ -2649,14 +2667,16 @@ def _bar_chart(
         parts.append('<g class="cal-bar-group" aria-hidden="true">')
         parts.append(f"<title>{_esc(aria_label)}</title>")
         parts.append(
-            f'<rect x="{x:.1f}" y="{pad_t}" width="{bw:.1f}" height="{inner_h:.1f}" '
-            f'fill="var(--bar-ghost)" />'
+            f'<rect class="cal-bar-track" x="{x:.1f}" y="{pad_t}" '
+            f'width="{bw:.1f}" height="{inner_h:.1f}" fill="var(--chart-track)" '
+            'stroke="var(--chart-track-stroke)" stroke-width="0.5" />'
         )
-        if bar_h > 0.5:
+        if display_bar_h > 0:
             parts.append(
-                f'<rect class="cal-bar-rect" x="{x:.1f}" y="{y:.1f}" '
-                f'width="{bw:.1f}" height="{bar_h:.1f}" '
-                f'fill="{bar_color}" rx="1"><title>{_esc(label)}: '
+                f'<rect class="cal-bar-rect" x="{x:.1f}" y="{display_y:.1f}" '
+                f'width="{bw:.1f}" height="{display_bar_h:.1f}" '
+                f'fill="{bar_color}" stroke="var(--chart-bar-stroke)" stroke-width="0.7" '
+                f'rx="1"><title>{_esc(label)}: '
                 f"{_esc(fmt_money(value))} · {fmt_int(events)} events · "
                 f"{_esc(shape)} · {_esc(delta_label)}</title></rect>"
             )
@@ -3123,7 +3143,8 @@ def _category_legend(items: Iterable[tuple[str, str]]) -> str:
     for color, label in items:
         parts.append(
             '<span style="display:inline-flex;align-items:center;gap:6px">'
-            f'<span style="width:8px;height:8px;border-radius:2px;background:{color};display:inline-block"></span>'
+            f'<span style="width:8px;height:8px;border-radius:2px;background:{color};'
+            'border:1px solid var(--chart-bar-stroke);display:inline-block"></span>'
             f'<span style="color:var(--ink-2)">{_esc(label)}</span></span>'
         )
     parts.append("</div>")
@@ -4026,6 +4047,7 @@ def _section_cost(d: Dashboard, *, rhythm: str) -> str:
             ("var(--execute)", "execution"),
             ("var(--diagnose)", "diagnostic"),
             ("var(--mixed)", "mixed"),
+            ("var(--no-tools)", "no tools"),
         ]
     )
     summary = (
