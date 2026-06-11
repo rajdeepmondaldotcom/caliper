@@ -86,6 +86,8 @@ def test_release_smokes_dashboard_from_wheel_and_pypi():
     assert "Resolve published wheel URL" in text
     assert "CALIPER_SMOKE_WHEEL_URL" in text
     assert "steps.published-wheel.outputs.wheel_url" in text
+    assert "hashlib.blake2b" in text
+    assert "files.pythonhosted.org/packages" in text
 
 
 def test_local_publish_script_does_not_use_twine_credentials():

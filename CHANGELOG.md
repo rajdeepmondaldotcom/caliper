@@ -2,6 +2,16 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.91 - 2026-06-11
+
+Release verification fallback for PyPI read-side outages.
+
+- **Post-release verification can use the immutable PyPI file URL.** When PyPI
+  accepts the upload but its JSON metadata and Simple indexes are still stale
+  or returning `503`, the release workflow now derives the `files.pythonhosted.org`
+  wheel URL from the uploaded wheel bytes and SHA-pins that URL for the final
+  install and dashboard smoke.
+
 ## 0.0.90 - 2026-06-11
 
 Dashboard self-update and release verification hardening.
