@@ -2,6 +2,25 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.89 - 2026-06-11
+
+Current model pricing and dashboard self-update.
+
+- **OpenAI and Anthropic embedded rates were refreshed.** The rate card now
+  prices the latest GPT-5.5/GPT-5.4 Pro, mini, nano, Chat Latest, Claude Fable
+  5, Claude Mythos 5, Claude Opus 4.8/4.6/4.5, and Claude Sonnet 4.5 entries,
+  with checked source attribution on the model and pricing docs.
+- **Claude Fable 5 is attributed at its real price.** Recent Claude Code logs
+  that emit `claude-fable-5` now stay on the Fable card instead of collapsing
+  into an Opus sibling, preserving the 2x Opus 4.8 API-equivalent cost.
+- **Anthropic Opus fast mode uses explicit published rates.** Fast-mode cache
+  reads, cache writes, uncached input, and output are priced from Anthropic's
+  fast-mode table instead of a generic post-hoc multiplier.
+- **`caliper dashboard` self-updates before rendering.** Interactive dashboard
+  runs check PyPI for a newer `caliper-ai`, upgrade best-effort, and restart
+  into the upgraded package; set `CALIPER_DASHBOARD_AUTO_UPGRADE=0` or
+  `CALIPER_NO_AUTO_UPGRADE=1` to opt out.
+
 ## 0.0.88 - 2026-06-01
 
 Dashboard responsive hardening.

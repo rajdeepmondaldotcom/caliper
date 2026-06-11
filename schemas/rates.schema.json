@@ -60,10 +60,17 @@
           "output": 30.0,
           "reasoning_output": 30.0
         },
-        "gpt-5.1-codex-max": {
-          "input": 1.25,
-          "cached_input": 0.125,
-          "output": 10.0
+        "gpt-5.5-pro": {
+          "input": 30.0,
+          "cached_input": 30.0,
+          "output": 180.0
+        },
+        "claude-fable-5": {
+          "input": 10.0,
+          "cached_input": 1.0,
+          "output": 50.0,
+          "cache_creation_input": 12.5,
+          "cache_creation_input_1h": 20.0
         }
       }
     }

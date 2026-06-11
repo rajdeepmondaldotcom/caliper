@@ -68,11 +68,20 @@ ALL_CODES: tuple[str, ...] = (
 # New recommendations use active rate-card repricing via arbitrage
 # alternatives rather than this static cascade.
 SIBLING_MODELS: dict[str, str] = {
+    "claude-fable-5": "claude-opus-4.8",
+    "claude-mythos-5": "claude-opus-4.8",
+    "claude-opus-4.8": "claude-sonnet-4.6",
     "claude-opus-4.7": "claude-sonnet-4.6",
+    "claude-opus-4.6": "claude-sonnet-4.6",
+    "claude-opus-4.5": "claude-sonnet-4.5",
     "claude-sonnet-4.6": "claude-haiku-4.5",
+    "claude-sonnet-4.5": "claude-haiku-4.5",
     "claude-haiku-4.5": "gpt-5.4-mini",
+    "gpt-5.5-pro": "gpt-5.5",
     "gpt-5.5": "gpt-5.4",
+    "gpt-5.4-pro": "gpt-5.4",
     "gpt-5.4": "gpt-5.4-mini",
+    "gpt-5.4-mini": "gpt-5.4-nano",
     "gpt-5.3-codex": "gpt-5.4-mini",
     "gpt-5.2": "gpt-5.4-mini",
     "gpt-5.1-codex-max": "gpt-5.4-mini",

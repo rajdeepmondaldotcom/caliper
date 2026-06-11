@@ -2449,6 +2449,15 @@ def dashboard(
         typer.echo(f"Wrote dashboard defaults to {written}")
         return
 
+    from caliper.self_update import maybe_upgrade_dashboard
+
+    maybe_upgrade_dashboard(
+        __version__,
+        interactive=not quiet and not stdout_html and sys.stderr.isatty(),
+        quiet=quiet,
+        echo=lambda message: typer.echo(message, err=True),
+    )
+
     # First-run friendliness: if the user has neither a ``--config`` file
     # nor the standard ``~/.config/caliper/config.toml``, write the
     # defaults silently so subsequent runs pick them up. We surface a

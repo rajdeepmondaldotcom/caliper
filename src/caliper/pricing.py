@@ -32,8 +32,29 @@ ZERO = Decimal("0")
 FAST_TIER_COST_MULTIPLIERS = {
     "gpt-5.5": Decimal("2.5"),
     "gpt-5.4": Decimal("2"),
-    "gpt-5.4-mini": Decimal("2"),
-    "gpt-5.4-nano": Decimal("2"),
+}
+ANTHROPIC_FAST_TIER_RATES = {
+    "claude-opus-4.8": Rates(
+        10.0,
+        1.0,
+        50.0,
+        cache_creation_input=12.5,
+        cache_creation_input_1h=20.0,
+    ),
+    "claude-opus-4.7": Rates(
+        30.0,
+        3.0,
+        150.0,
+        cache_creation_input=37.5,
+        cache_creation_input_1h=60.0,
+    ),
+    "claude-opus-4.6": Rates(
+        30.0,
+        3.0,
+        150.0,
+        cache_creation_input=37.5,
+        cache_creation_input_1h=60.0,
+    ),
 }
 
 DEFAULT_API_RATES = Rates(input=5.0, cached_input=0.5, output=30.0)
@@ -58,13 +79,30 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
         long_context=LONG_CONTEXT_1050K,
     ),
     ModelCard(
+        name="gpt-5.5-pro",
+        api_rates=Rates(30.0, 30.0, 180.0),
+    ),
+    ModelCard(
         name="gpt-5.4",
         api_rates=Rates(2.5, 0.25, 15.0),
         long_context=LONG_CONTEXT_1050K,
     ),
     ModelCard(
+        name="gpt-5.4-pro",
+        api_rates=Rates(30.0, 30.0, 180.0),
+        long_context=LONG_CONTEXT_1050K,
+    ),
+    ModelCard(
         name="gpt-5.4-mini",
         api_rates=Rates(0.75, 0.075, 4.5),
+    ),
+    ModelCard(
+        name="gpt-5.4-nano",
+        api_rates=Rates(0.20, 0.020, 1.25),
+    ),
+    ModelCard(
+        name="chat-latest",
+        api_rates=Rates(5.0, 0.5, 30.0),
     ),
     ModelCard(
         name="gpt-5.3-codex",
@@ -77,6 +115,36 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
     ModelCard(
         name="gpt-5.1-codex-max",
         api_rates=Rates(1.25, 0.125, 10.0),
+    ),
+    ModelCard(
+        name="claude-fable-5",
+        api_rates=Rates(
+            10.0,
+            1.0,
+            50.0,
+            cache_creation_input=12.5,
+            cache_creation_input_1h=20.0,
+        ),
+    ),
+    ModelCard(
+        name="claude-mythos-5",
+        api_rates=Rates(
+            10.0,
+            1.0,
+            50.0,
+            cache_creation_input=12.5,
+            cache_creation_input_1h=20.0,
+        ),
+    ),
+    ModelCard(
+        name="claude-opus-4.8",
+        api_rates=Rates(
+            5.0,
+            0.50,
+            25.0,
+            cache_creation_input=6.25,
+            cache_creation_input_1h=10.0,
+        ),
     ),
     ModelCard(
         name="claude-haiku-4.5",
@@ -99,7 +167,37 @@ MODEL_CARDS: tuple[ModelCard, ...] = (
         ),
     ),
     ModelCard(
+        name="claude-sonnet-4.5",
+        api_rates=Rates(
+            3.0,
+            0.30,
+            15.0,
+            cache_creation_input=3.75,
+            cache_creation_input_1h=6.0,
+        ),
+    ),
+    ModelCard(
         name="claude-opus-4.7",
+        api_rates=Rates(
+            5.0,
+            0.50,
+            25.0,
+            cache_creation_input=6.25,
+            cache_creation_input_1h=10.0,
+        ),
+    ),
+    ModelCard(
+        name="claude-opus-4.6",
+        api_rates=Rates(
+            5.0,
+            0.50,
+            25.0,
+            cache_creation_input=6.25,
+            cache_creation_input_1h=10.0,
+        ),
+    ),
+    ModelCard(
+        name="claude-opus-4.5",
         api_rates=Rates(
             5.0,
             0.50,
@@ -136,72 +234,112 @@ PRICING_SOURCES = [
     PricingSource(
         name="OpenAI API pricing",
         url="https://openai.com/api/pricing/",
-        checked="2026-05-22",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="GPT-5.5 model pricing and long-context rule",
-        url="https://developers.openai.com/api/docs/models",
-        checked="2026-05-22",
+        url="https://developers.openai.com/api/docs/models/gpt-5.5",
+        checked="2026-06-11",
+    ),
+    PricingSource(
+        name="GPT-5.5 Pro model pricing",
+        url="https://developers.openai.com/api/docs/models/gpt-5.5-pro",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="GPT-5.4 model pricing and long-context rule",
-        url="https://developers.openai.com/api/docs/models",
-        checked="2026-05-22",
+        url="https://developers.openai.com/api/docs/models/gpt-5.4",
+        checked="2026-06-11",
+    ),
+    PricingSource(
+        name="GPT-5.4 Pro model pricing and long-context rule",
+        url="https://developers.openai.com/api/docs/models/gpt-5.4-pro",
+        checked="2026-06-11",
+    ),
+    PricingSource(
+        name="GPT-5.4 mini model pricing",
+        url="https://developers.openai.com/api/docs/models/gpt-5.4-mini",
+        checked="2026-06-11",
+    ),
+    PricingSource(
+        name="GPT-5.4 nano model pricing",
+        url="https://developers.openai.com/api/docs/models/gpt-5.4-nano",
+        checked="2026-06-11",
+    ),
+    PricingSource(
+        name="Chat Latest model pricing",
+        url="https://developers.openai.com/api/docs/models/chat-latest",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="Codex rate card",
         url="https://help.openai.com/en/articles/20001106-codex-rate-card",
-        checked="2026-05-13",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="Codex subscription access and limits",
         url="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan",
-        checked="2026-05-13",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="Codex pricing and usage-limit dashboard",
         url="https://developers.openai.com/codex/pricing",
-        checked="2026-05-13",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="Codex fast mode multipliers",
         url="https://developers.openai.com/codex/speed",
-        checked="2026-05-22",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="GPT-5.1-Codex-Max model pricing",
         url="https://developers.openai.com/api/docs/models/gpt-5.1-codex-max",
-        checked="2026-05-13",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="Anthropic API pricing",
         url="https://platform.claude.com/docs/en/about-claude/pricing",
-        checked="2026-05-22",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="Anthropic prompt caching (cache write 1.25x, cache read 0.1x)",
         url="https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching",
-        checked="2026-05-13",
+        checked="2026-06-11",
+    ),
+    PricingSource(
+        name="Claude Fable 5 and Mythos 5 model pricing",
+        url="https://platform.claude.com/docs/en/about-claude/models/overview",
+        checked="2026-06-11",
+    ),
+    PricingSource(
+        name="Claude Opus 4.8 model pricing",
+        url="https://platform.claude.com/docs/en/about-claude/models/overview",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="Claude Haiku 4.5 model pricing",
         url="https://platform.claude.com/docs/en/about-claude/models/overview",
-        checked="2026-05-22",
+        checked="2026-06-11",
     ),
     PricingSource(
-        name="Claude Sonnet 4.6 model pricing",
+        name="Claude Sonnet 4.6 and 4.5 model pricing",
         url="https://platform.claude.com/docs/en/about-claude/models/overview",
-        checked="2026-05-22",
+        checked="2026-06-11",
     ),
     PricingSource(
-        name="Claude Opus 4.7 model pricing",
+        name="Claude Opus 4.7, 4.6, and 4.5 model pricing",
         url="https://platform.claude.com/docs/en/about-claude/models/overview",
-        checked="2026-05-22",
+        checked="2026-06-11",
     ),
     PricingSource(
         name="Anthropic extended cache (1h cache write 2x)",
         url="https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#1-hour-cache-duration",
-        checked="2026-05-13",
+        checked="2026-06-11",
+    ),
+    PricingSource(
+        name="Anthropic fast mode pricing for Claude Opus 4.8, 4.7, and 4.6",
+        url="https://platform.claude.com/docs/en/about-claude/pricing#fast-mode-pricing",
+        checked="2026-06-11",
     ),
 ]
 
@@ -212,15 +350,25 @@ def normalize_model(model: str | None) -> str:
     if not raw:
         return ""
     aliases = {
+        "gpt-5.5-pro": ("gpt-5.5-pro", "gpt-5-5-pro"),
+        "gpt-5.5": ("gpt-5.5", "gpt-5-5"),
+        "gpt-5.4-pro": ("gpt-5.4-pro", "gpt-5-4-pro"),
+        "gpt-5.4-mini": ("gpt-5.4-mini", "gpt-5-4-mini"),
+        "gpt-5.4-nano": ("gpt-5.4-nano", "gpt-5-4-nano"),
+        "gpt-5.4": ("gpt-5.4", "gpt-5-4"),
+        "chat-latest": ("chat-latest",),
         "gpt-5.2-codex": ("gpt-5.2-codex", "gpt-5-2-codex"),
         "gpt-5.1-codex-max": ("gpt-5.1-codex-max", "gpt-5-1-codex-max"),
         "gpt-5.1-codex-mini": ("gpt-5.1-codex-mini", "gpt-5-1-codex-mini"),
         "gpt-5.1-codex": ("gpt-5.1-codex", "gpt-5-1-codex"),
         "gpt-5-codex": ("gpt-5-codex",),
-        "gpt-5.4-mini": ("gpt-5.4-mini", "gpt-5-4-mini"),
         "gpt-5.3-codex-spark": ("gpt-5.3-codex-spark", "gpt-5-3-codex-spark"),
         "gpt-5.3-codex": ("gpt-5.3-codex", "gpt-5-3-codex"),
+        "gpt-5.2": ("gpt-5.2", "gpt-5-2"),
+        "claude-fable-5": ("claude-fable-5",),
+        "claude-mythos-5": ("claude-mythos-5",),
         "claude-haiku-4.5": ("claude-haiku-4.5", "claude-haiku-4-5"),
+        "claude-opus-4.8": ("claude-opus-4.8", "claude-opus-4-8"),
         "claude-sonnet-4.6": ("claude-sonnet-4.6", "claude-sonnet-4-6"),
         "claude-sonnet-4.5": ("claude-sonnet-4.5", "claude-sonnet-4-5"),
         "claude-opus-4.7": ("claude-opus-4.7", "claude-opus-4-7"),
@@ -303,8 +451,6 @@ def service_tier_cost_multiplier(model: str | None, service_tier: str | None) ->
     normalized = normalize_model(model)
     if normalized in FAST_TIER_COST_MULTIPLIERS:
         return FAST_TIER_COST_MULTIPLIERS[normalized]
-    if normalized.startswith("gpt-5.4-"):
-        return FAST_TIER_COST_MULTIPLIERS["gpt-5.4"]
     return Decimal("1")
 
 
@@ -313,6 +459,11 @@ def _alias_key(value: str | None) -> str:
 
 
 _WHATIF_MODEL_ALIAS_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "fable": ("claude-fable-5",),
+    "claude-fable": ("claude-fable-5",),
+    "claude-fable-latest": ("claude-fable-5",),
+    "mythos": ("claude-mythos-5",),
+    "claude-mythos": ("claude-mythos-5",),
     "haiku": ("claude-haiku-4.5",),
     "claude-haiku": ("claude-haiku-4.5",),
     "claude-haiku-latest": ("claude-haiku-4.5",),
@@ -325,10 +476,10 @@ _WHATIF_MODEL_ALIAS_CANDIDATES: dict[str, tuple[str, ...]] = {
     "claude-3-sonnet": ("claude-sonnet-4.6",),
     "claude-3-5-sonnet": ("claude-sonnet-4.6",),
     "claude-3-7-sonnet": ("claude-sonnet-4.6",),
-    "opus": ("claude-opus-4.7",),
-    "claude-opus": ("claude-opus-4.7",),
-    "claude-opus-latest": ("claude-opus-4.7",),
-    "claude-3-opus": ("claude-opus-4.7",),
+    "opus": ("claude-opus-4.8",),
+    "claude-opus": ("claude-opus-4.8",),
+    "claude-opus-latest": ("claude-opus-4.8",),
+    "claude-3-opus": ("claude-opus-4.8",),
     "gpt-mini": ("gpt-5.4-mini",),
     "mini": ("gpt-5.4-mini",),
     "gpt-5-mini": ("gpt-5.4-mini",),
@@ -469,6 +620,7 @@ class RateCard:
         long_context, input_mult, output_mult = self._long_context_multipliers(usage, card, flat)
         billable_usage, ambiguous_reasoning = _billable_usage(usage)
         rates, rate_unpriced, local_override = self._resolve_usd_rates(normalized, card, flat)
+        rates = _service_tier_rates(normalized, normalized_tier, rates)
         cache_rate_estimated = _cache_rate_estimated(billable_usage, rates)
         calculated = _estimate(billable_usage, rates, input_mult, output_mult)
         calculated *= service_tier_cost_multiplier(normalized, normalized_tier)
@@ -622,6 +774,12 @@ def _estimate(
         * rates.effective_reasoning_output
         * output_mult
     ) / Decimal("1000000")
+
+
+def _service_tier_rates(model: str, service_tier: str, rates: Rates | None) -> Rates | None:
+    if rates is None or normalize_service_tier(service_tier) != "fast":
+        return rates
+    return ANTHROPIC_FAST_TIER_RATES.get(model, rates)
 
 
 def _cache_rate_estimated(usage: Usage, rates: Rates | None) -> bool:

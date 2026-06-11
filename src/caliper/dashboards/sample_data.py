@@ -138,10 +138,10 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
         ],
         by_model=[
             ModelRow("anthropic", "claude-sonnet-4-6", "standard", 812.40, 320, 2_400_000, 0.78),
-            ModelRow("anthropic", "claude-opus-4-7", "standard", 312.18, 80, 1_100_000, 0.62),
+            ModelRow("anthropic", "claude-opus-4-8", "standard", 312.18, 80, 1_100_000, 0.62),
             ModelRow("openai", "gpt-5.5", "standard", 184.20, 42, 540_000, 0.48),
-            ModelRow("anthropic", "claude-haiku-4-5", "fast", 118.60, 80, 620_000, 0.81),
-            ModelRow("openai", "gpt-5.4-mini", "fast", 36.40, 28, 220_000, 0.55),
+            ModelRow("anthropic", "claude-haiku-4-5", "standard", 118.60, 80, 620_000, 0.81),
+            ModelRow("openai", "gpt-5.4-mini", "standard", 36.40, 28, 220_000, 0.55),
         ],
         by_project=[
             ProjectRow(
@@ -421,7 +421,7 @@ def sample_dashboard(banner: Banner | None = None, show_paths: bool = False) -> 
                 820_000,
                 58,
                 83,
-                ["claude-opus-4-7", "claude-sonnet-4-6"],
+                ["claude-opus-4-8", "claude-sonnet-4-6"],
                 "long context",
             ),
             SessionRow(

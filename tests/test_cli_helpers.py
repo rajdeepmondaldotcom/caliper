@@ -196,6 +196,16 @@ def test_extract_and_dedupe_models() -> None:
             "api": {"input": 1.25, "cached_input": 0.125, "output": 10.0},
         }
     ]
+    pro_html = """
+    <h1>gpt-5.5-pro</h1>
+    <p>Pricing Text tokens Per 1M tokens Batch API price Input $30.00 Output $180.00</p>
+    """
+    assert extract_models_from_text(pro_html) == [
+        {
+            "name": "gpt-5.5-pro",
+            "api": {"input": 30.0, "cached_input": 30.0, "output": 180.0},
+        }
+    ]
     assert dedupe_models([{"name": "b"}, {"name": "a"}, {"name": "b", "x": 1}]) == [
         {"name": "a"},
         {"name": "b", "x": 1},

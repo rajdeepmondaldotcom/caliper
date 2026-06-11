@@ -74,7 +74,7 @@ def test_recommendations_group_repeated_events_and_estimate_savings() -> None:
 def test_recommendation_for_opus_ranks_active_alternatives() -> None:
     """Model recommendations are ranked by active rate-card repricing."""
     rows = recommend(
-        [_event(model="claude-opus-4.7", tier="standard")] * 2,
+        [_event(model="claude-opus-4.8", tier="standard")] * 2,
         RateCard.load(None, "model"),
     )
     model_rows = [row for row in rows if row.target_model]
@@ -110,7 +110,7 @@ def test_recommendation_can_cross_vendors_from_haiku() -> None:
 
 def test_recommendation_skips_when_no_cheaper_priced_model_exists() -> None:
     rows = recommend(
-        [_event(model="gpt-5.4-mini", tier="standard")] * 2,
+        [_event(model="gpt-5.4-nano", tier="standard")] * 2,
         RateCard.load(None, "model"),
     )
     assert all(row.target_model == "" for row in rows)

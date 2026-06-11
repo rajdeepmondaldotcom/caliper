@@ -14,15 +14,24 @@ from caliper.pricing import (
 
 def test_model_and_tier_normalization() -> None:
     assert normalize_model("gpt-5.5-2026-04-23") == "gpt-5.5"
+    assert normalize_model("gpt-5-5-pro-2026-04-23") == "gpt-5.5-pro"
     assert normalize_model("GPT-5.4-Mini") == "gpt-5.4-mini"
+    assert normalize_model("gpt-5-4-nano-2026-03-17") == "gpt-5.4-nano"
+    assert normalize_model("chat-latest") == "chat-latest"
     assert normalize_model("gpt-5-3-codex-preview") == "gpt-5.3-codex"
     assert normalize_model("gpt-5.3-codex-spark") == "gpt-5.3-codex-spark"
     assert normalize_model("gpt-5.5-pro") == "gpt-5.5-pro"
+    assert normalize_model("claude-opus-4-8") == "claude-opus-4.8"
+    assert normalize_model("claude-opus-4-5-20251101") == "claude-opus-4.5"
+    assert normalize_model("claude-fable-5") == "claude-fable-5"
+    assert normalize_model("claude-haiku-4-5-20251001") == "claude-haiku-4.5"
     assert normalize_service_tier("priority") == "fast"
     assert normalize_service_tier("xhigh") == "fast"
     assert normalize_service_tier("max") == "fast"
     assert normalize_service_tier("regular") == "standard"
     assert resolve_hypothetical_model_alias("claude-3-haiku") == "claude-haiku-4.5"
+    assert resolve_hypothetical_model_alias("claude-opus-latest") == "claude-opus-4.8"
+    assert resolve_hypothetical_model_alias("claude-fable-latest") == "claude-fable-5"
     assert (
         resolve_hypothetical_model_alias("gpt-5.5-nano", available_models={"gpt-5.4-mini"})
         == "gpt-5.4-mini"
@@ -39,8 +48,11 @@ def test_model_and_tier_normalization() -> None:
 def test_codex_fast_mode_multiplier_aliases() -> None:
     assert service_tier_cost_multiplier("gpt-5.5", "xhigh") == Decimal("2.5")
     assert service_tier_cost_multiplier("gpt-5.4", "fast") == Decimal("2")
-    assert service_tier_cost_multiplier("gpt-5.4-mini", "max") == Decimal("2")
+    assert service_tier_cost_multiplier("gpt-5.4-mini", "max") == Decimal("1")
+    assert service_tier_cost_multiplier("gpt-5.4-nano", "max") == Decimal("1")
+    assert service_tier_cost_multiplier("gpt-5.4-pro", "max") == Decimal("1")
     assert service_tier_cost_multiplier("gpt-5.4-preview-2026-05-22", "priority") == Decimal("2")
+    assert service_tier_cost_multiplier("claude-opus-4.8", "fast") == Decimal("1")
     assert service_tier_cost_multiplier("claude-sonnet-4.6", "fast") == Decimal("1")
 
 
@@ -122,6 +134,8 @@ def test_long_context_rule_lives_on_model_card() -> None:
     assert MODELS_BY_NAME["gpt-5.5"].long_context.output_mult == 1.5
     assert MODELS_BY_NAME["gpt-5.4"].long_context is not None
     assert MODELS_BY_NAME["gpt-5.4"].long_context.threshold == 272_000
+    assert MODELS_BY_NAME["gpt-5.4-pro"].long_context is not None
+    assert MODELS_BY_NAME["gpt-5.5-pro"].long_context is None
 
 
 def test_unknown_model_is_unpriced_without_marking_flat_mode_unknown() -> None:
@@ -165,7 +179,17 @@ def test_anthropic_cache_rate_ratios_match_published_card() -> None:
     """Cache read = 0.1x input; cache write 5min = 1.25x input; cache write 1h = 2x input."""
     from caliper.pricing import MODELS_BY_NAME
 
-    for name in ("claude-haiku-4.5", "claude-sonnet-4.6", "claude-opus-4.7"):
+    for name in (
+        "claude-fable-5",
+        "claude-mythos-5",
+        "claude-opus-4.8",
+        "claude-haiku-4.5",
+        "claude-sonnet-4.6",
+        "claude-sonnet-4.5",
+        "claude-opus-4.7",
+        "claude-opus-4.6",
+        "claude-opus-4.5",
+    ):
         card = MODELS_BY_NAME[name]
         rates = card.api_rates
         assert rates is not None, name
@@ -180,6 +204,8 @@ def test_anthropic_pricing_has_sourced_attribution() -> None:
 
     names = " ".join(source.name.lower() for source in PRICING_SOURCES)
     assert "anthropic" in names
+    assert "fable" in names
+    assert "mythos" in names
     assert "haiku" in names
     assert "sonnet" in names
     assert "opus" in names
@@ -195,8 +221,66 @@ def test_anthropic_pricing_round_trip_for_each_card() -> None:
         output_tokens=100,
         total_tokens=1100,
     )
-    for model in ("claude-haiku-4.5", "claude-sonnet-4.6", "claude-opus-4.7"):
+    for model in (
+        "claude-fable-5",
+        "claude-mythos-5",
+        "claude-opus-4.8",
+        "claude-haiku-4.5",
+        "claude-sonnet-4.6",
+        "claude-sonnet-4.5",
+        "claude-opus-4.7",
+        "claude-opus-4.6",
+        "claude-opus-4.5",
+    ):
         cost, _long, unknown = estimate_event_cost(usage, model, "standard", "model", None)
         assert unknown is False, model
         assert cost.cost_usd > Decimal("0"), model
         assert cost.unpriced_events == 0, model
+
+
+def test_anthropic_fast_mode_prices_published_opus_fast_rates() -> None:
+    usage = Usage(
+        input_tokens=1000,
+        cache_creation_input_tokens=200,
+        cache_read_input_tokens=500,
+        output_tokens=100,
+        total_tokens=1100,
+    )
+
+    standard_48, _, unknown_standard_48 = estimate_event_cost(
+        usage, "claude-opus-4.8", "standard", "model", None
+    )
+    fast_48, _, unknown_fast_48 = estimate_event_cost(
+        usage, "claude-opus-4.8", "fast", "model", None
+    )
+    fast_47, _, unknown_fast_47 = estimate_event_cost(
+        usage, "claude-opus-4.7", "fast", "model", None
+    )
+
+    assert standard_48.cost_usd == Decimal("0.0055")
+    assert fast_48.cost_usd == Decimal("0.011")
+    assert fast_47.cost_usd == Decimal("0.033")
+    assert unknown_standard_48 is False
+    assert unknown_fast_48 is False
+    assert unknown_fast_47 is False
+    assert fast_48.unpriced_events == 0
+    assert fast_47.unpriced_events == 0
+
+
+def test_openai_latest_model_rates_match_published_cards() -> None:
+    from caliper.pricing import MODELS_BY_NAME
+
+    expected = {
+        "gpt-5.5": (Decimal("5"), Decimal("0.5"), Decimal("30")),
+        "gpt-5.5-pro": (Decimal("30"), Decimal("30"), Decimal("180")),
+        "gpt-5.4": (Decimal("2.5"), Decimal("0.25"), Decimal("15")),
+        "gpt-5.4-pro": (Decimal("30"), Decimal("30"), Decimal("180")),
+        "gpt-5.4-mini": (Decimal("0.75"), Decimal("0.075"), Decimal("4.5")),
+        "gpt-5.4-nano": (Decimal("0.2"), Decimal("0.02"), Decimal("1.25")),
+        "chat-latest": (Decimal("5"), Decimal("0.5"), Decimal("30")),
+        "gpt-5.3-codex": (Decimal("1.75"), Decimal("0.175"), Decimal("14")),
+    }
+    for name, rates_tuple in expected.items():
+        rates = MODELS_BY_NAME[name].api_rates
+        assert rates is not None, name
+        assert (rates.input, rates.cached_input, rates.output) == rates_tuple

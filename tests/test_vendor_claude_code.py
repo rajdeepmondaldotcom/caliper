@@ -160,6 +160,68 @@ def test_claude_code_dedupes_message_request_pairs(monkeypatch, tmp_path) -> Non
     assert event.usage.cache_read_input_tokens == 200
 
 
+def test_claude_code_preserves_current_anthropic_model_attribution(monkeypatch, tmp_path) -> None:
+    projects = tmp_path / "claude" / "projects" / "-tmp-project-alpha"
+    projects.mkdir(parents=True)
+    rows = [
+        {
+            "type": "assistant",
+            "sessionId": "claude-session-1",
+            "timestamp": "2026-06-10T10:00:00.000Z",
+            "cwd": "/tmp/project-alpha",
+            "requestId": "req-fable",
+            "message": {
+                "id": "msg-fable",
+                "role": "assistant",
+                "model": "claude-fable-5",
+                "usage": {
+                    "input_tokens": 100,
+                    "cache_creation_input_tokens": 50,
+                    "cache_read_input_tokens": 200,
+                    "output_tokens": 25,
+                    "service_tier": "standard",
+                },
+            },
+        },
+        {
+            "type": "assistant",
+            "sessionId": "claude-session-1",
+            "timestamp": "2026-06-10T11:00:00.000Z",
+            "cwd": "/tmp/project-alpha",
+            "requestId": "req-haiku",
+            "message": {
+                "id": "msg-haiku",
+                "role": "assistant",
+                "model": "claude-haiku-4-5-20251001",
+                "usage": {"input_tokens": 100, "output_tokens": 25},
+            },
+        },
+    ]
+    (projects / "claude-session-1.jsonl").write_text(
+        "\n".join(json.dumps(item) for item in rows) + "\n"
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+
+    options = build_options(
+        since="2026-06-10",
+        until="2026-06-10",
+        timezone="UTC",
+        session_root=tmp_path / "missing-codex",
+        state_db=tmp_path / "missing-state.sqlite",
+        codex_config=tmp_path / "missing-config.toml",
+        vendors=[VENDOR_CLAUDE_CODE],
+        no_parse_cache=True,
+    )
+    result = load_usage(options)
+
+    assert [event.model for event in result.events] == ["claude-fable-5", "claude-haiku-4.5"]
+    assert [event.raw_model for event in result.events] == [
+        "claude-fable-5",
+        "claude-haiku-4-5-20251001",
+    ]
+    assert result.events[0].service_tier == "standard"
+
+
 def test_claude_code_dedupes_message_request_even_when_event_ids_differ(
     monkeypatch, tmp_path
 ) -> None:

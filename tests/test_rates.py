@@ -32,8 +32,23 @@ def test_rates_show_json_schema() -> None:
     gpt55 = next(model for model in payload["models"] if model["name"] == "gpt-5.5")
     assert gpt55["long_context"]["threshold"] == 272_000
     assert gpt55["api"]["reasoning_output"] == gpt55["api"]["output"]
+    gpt55_pro = next(model for model in payload["models"] if model["name"] == "gpt-5.5-pro")
+    assert gpt55_pro["long_context"] is None
+    assert gpt55_pro["api"]["input"] == 30.0
+    assert gpt55_pro["api"]["cached_input"] == 30.0
+    assert gpt55_pro["api"]["output"] == 180.0
     gpt54 = next(model for model in payload["models"] if model["name"] == "gpt-5.4")
     assert gpt54["long_context"]["threshold"] == 272_000
+    gpt54_pro = next(model for model in payload["models"] if model["name"] == "gpt-5.4-pro")
+    assert gpt54_pro["long_context"]["threshold"] == 272_000
+    gpt54_nano = next(model for model in payload["models"] if model["name"] == "gpt-5.4-nano")
+    assert gpt54_nano["api"]["input"] == 0.2
+    assert gpt54_nano["api"]["cached_input"] == 0.02
+    assert gpt54_nano["api"]["output"] == 1.25
+    chat_latest = next(model for model in payload["models"] if model["name"] == "chat-latest")
+    assert chat_latest["api"]["input"] == 5.0
+    assert chat_latest["api"]["cached_input"] == 0.5
+    assert chat_latest["api"]["output"] == 30.0
     max_card = next(model for model in payload["models"] if model["name"] == "gpt-5.1-codex-max")
     assert max_card["api"]["input"] == 1.25
     assert max_card["api"]["cached_input"] == 0.125
@@ -122,3 +137,7 @@ def test_long_context_threshold_uses_model_card_value() -> None:
     _, lc_over, _ = estimate_event_cost(just_over, "gpt-5.5", "standard", "model", None)
     assert lc_under is False
     assert lc_over is True
+    _, lc_pro, _ = estimate_event_cost(just_over, "gpt-5.4-pro", "standard", "model", None)
+    _, lc_55_pro, _ = estimate_event_cost(just_over, "gpt-5.5-pro", "standard", "model", None)
+    assert lc_pro is True
+    assert lc_55_pro is False

@@ -17,6 +17,10 @@ def test_taxonomy_records_include_claude_and_codex() -> None:
 
 def test_normalize_model_uses_vendor_taxonomy() -> None:
     assert normalize_model("claude-code", "claude-sonnet-4-6-20260501") == "claude-sonnet-4.6"
+    assert normalize_model("claude-code", "claude-sonnet-4-5-20250929") == "claude-sonnet-4.5"
+    assert normalize_model("claude-code", "claude-opus-4-5-20251101") == "claude-opus-4.5"
+    assert normalize_model("claude-code", "claude-fable-5") == "claude-fable-5"
+    assert normalize_model("claude-code", "claude-haiku-4-5-20251001") == "claude-haiku-4.5"
 
 
 def test_taxonomy_show_json() -> None:

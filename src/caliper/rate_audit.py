@@ -359,9 +359,10 @@ def _normal_text(text: str) -> str:
 
 
 def _window_for_model(text: str, model: str) -> str:
+    model_pattern = rf"(?<![a-z0-9.-]){re.escape(model)}(?![a-z0-9.-])"
     candidates = [
         text[max(0, match.start() - 1000) : match.start() + 3500]
-        for match in re.finditer(re.escape(model), text, flags=re.IGNORECASE)
+        for match in re.finditer(model_pattern, text, flags=re.IGNORECASE)
     ]
     for candidate in candidates:
         lowered = candidate.lower()
@@ -376,13 +377,28 @@ def _extract_api_rates(window: str) -> dict | None:
         window,
         flags=re.IGNORECASE,
     )
-    if not match:
-        return None
-    return {
-        "input": float(match.group(1)),
-        "cached_input": float(match.group(2)),
-        "output": float(match.group(3)),
-    }
+    if match:
+        return {
+            "input": float(match.group(1)),
+            "cached_input": float(match.group(2)),
+            "output": float(match.group(3)),
+        }
+    no_cache_match = re.search(
+        r"Per 1M tokens\s+"
+        r"(?:[^A-Za-z0-9$]+\s+)?"
+        r"(?:Batch API price\s+)?"
+        r"Input\s+\$([0-9.]+)\s+Output\s+\$([0-9.]+)",
+        window,
+        flags=re.IGNORECASE,
+    )
+    if no_cache_match:
+        input_rate = float(no_cache_match.group(1))
+        return {
+            "input": input_rate,
+            "cached_input": input_rate,
+            "output": float(no_cache_match.group(2)),
+        }
+    return None
 
 
 def _extract_long_context_rule(window: str) -> dict | None:

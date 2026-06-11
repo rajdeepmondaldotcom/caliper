@@ -85,7 +85,7 @@ def _busy_result() -> LoadResult:
     events: list[UsageEvent] = []
     for i in range(40):
         events.append(
-            _event(session=f"opus{i}", model="claude-opus-4.7", reasoning_output_tokens=5_000)
+            _event(session=f"opus{i}", model="claude-opus-4.8", reasoning_output_tokens=5_000)
         )
     for i in range(40):
         events.append(_event(session=f"cheap{i}", model="gpt-5.5", output_tokens=10))

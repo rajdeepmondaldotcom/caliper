@@ -451,6 +451,7 @@ def test_payload_name_datetime_and_validation_helpers() -> None:
         "claude-opus-4-1",
     )
     assert pc._canonical_model_name("claude-sonnet-4-6-20260201") == ("claude-sonnet-4.6-20260201")
+    assert pc._canonical_model_name("claude-opus-4-8") == "claude-opus-4.8"
     assert pc._normal_text("<b>a</b>&nbsp;b\u2014c") == "a b-c"
     assert pc._parse_datetime("") is None
     assert pc._parse_datetime("2026-05-13T00:00:00") is not None
