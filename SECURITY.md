@@ -13,8 +13,8 @@ fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| `0.0.91` | yes |
-| `< 0.0.91` | no |
+| `0.0.92` | yes |
+| `< 0.0.92` | no |
 
 The `1.0` release will introduce a longer support window and a published
 deprecation policy. Until then, please upgrade promptly.
@@ -71,8 +71,8 @@ Examples of vulnerability classes we want reported:
 - Bypass of the explicit network boundary. Caliper-owned HTTP I/O lives in
   `caliper/network.py`; its pricing-catalog and rate-audit callers are
   guarded by `--allow-network` at the CLI boundary. The exception is
-  interactive `caliper dashboard`, which performs a best-effort PyPI version
-  check and package upgrade before rendering unless
+  interactive `caliper dashboard`, which performs a best-effort GitHub/PyPI
+  latest-version check and package upgrade before rendering unless
   `CALIPER_DASHBOARD_AUTO_UPGRADE=0` or `CALIPER_NO_AUTO_UPGRADE=1` is set.
   PR commit resolution may delegate to GitHub CLI only when the user passes
   `--allow-network`. Any other code path that reaches the network on a

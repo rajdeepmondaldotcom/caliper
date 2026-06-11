@@ -48,6 +48,42 @@ def fetch_text(
     ).decode("utf-8", errors="replace")
 
 
+def resolve_url(
+    url: str,
+    *,
+    allowed_schemes: set[str],
+    source_kind: str,
+    user_agents: Iterable[str] = (CALIPER_USER_AGENT,),
+    accept: str = "text/html,*/*",
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    retry_statuses: set[int] | None = None,
+) -> str:
+    try:
+        validate_source_url(url, allowed_schemes=allowed_schemes, source_kind=source_kind)
+    except ValueError as exc:
+        raise OSError(str(exc)) from exc
+
+    retryable = retry_statuses or set()
+    last_error: OSError | None = None
+    for user_agent in tuple(user_agents):
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": user_agent, "Accept": accept},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
+                return response.geturl()
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in retryable:
+                raise
+        except OSError:
+            raise
+    if last_error is not None:
+        raise last_error
+    raise OSError(f"could not resolve {source_kind} URL: {url}")
+
+
 def fetch_bytes(
     url: str,
     *,

@@ -2,6 +2,15 @@
 
 All notable changes to Caliper. Newest on top.
 
+## 0.0.92 - 2026-06-11
+
+Dashboard self-update now avoids stale PyPI resolver indexes.
+
+- **Interactive dashboard upgrades can install the latest GitHub release
+  wheel directly.** `caliper dashboard` now checks the repository's latest
+  release asset before falling back to PyPI metadata, so a stale PyPI Simple
+  index cannot prevent users from moving to the newest published Caliper wheel.
+
 ## 0.0.91 - 2026-06-11
 
 Release verification fallback for PyPI read-side outages.

@@ -6,11 +6,13 @@ import re
 import subprocess  # nosec
 import sys
 from collections.abc import Callable, MutableMapping
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
 
-from caliper.network import BROWSER_USER_AGENT, CALIPER_USER_AGENT, fetch_text
+from caliper.network import BROWSER_USER_AGENT, CALIPER_USER_AGENT, fetch_text, resolve_url
 
+GITHUB_LATEST_RELEASE_URL = "https://github.com/rajdeepmondaldotcom/caliper/releases/latest"
 PYPI_PROJECT_URL = "https://pypi.org/pypi/caliper-ai/json"
 PYPI_SIMPLE_URL = "https://pypi.org/simple/caliper-ai/"
 AUTO_UPGRADE_ATTEMPTED_ENV = "CALIPER_DASHBOARD_UPGRADE_ATTEMPTED"
@@ -24,6 +26,12 @@ _CALIPER_FILENAME_VERSION_RE = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class AvailableRelease:
+    version: str
+    install_target: str
+
+
 def maybe_upgrade_dashboard(
     current_version: str,
     *,
@@ -32,7 +40,7 @@ def maybe_upgrade_dashboard(
     argv: list[str] | None = None,
     env: MutableMapping[str, str] | None = None,
     echo: Callable[[str], None] | None = None,
-    latest_version: Callable[[], str | None] = lambda: fetch_latest_version(),
+    latest_version: Callable[[], str | AvailableRelease | None] = lambda: fetch_latest_release(),
     runner: Callable[..., Any] = subprocess.run,
     execv: Callable[[str, list[str]], Any] = os.execv,
 ) -> str:
@@ -55,15 +63,15 @@ def maybe_upgrade_dashboard(
     if _is_local_version(current_version):
         return "local"
 
-    latest = latest_version()
-    if not latest:
+    release = _coerce_release(latest_version())
+    if not release:
         return "unavailable"
-    if _version_tuple(latest) <= _version_tuple(current_version):
+    if _version_tuple(release.version) <= _version_tuple(current_version):
         return "current"
 
-    echo(f"Caliper {latest} is available; upgrading before rendering the dashboard...")
+    echo(f"Caliper {release.version} is available; upgrading before rendering the dashboard...")
     completed = runner(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "caliper-ai"],
+        [sys.executable, "-m", "pip", "install", "--upgrade", release.install_target],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
@@ -76,13 +84,51 @@ def maybe_upgrade_dashboard(
     env[AUTO_UPGRADE_ATTEMPTED_ENV] = "1"
     if env is not os.environ:
         os.environ[AUTO_UPGRADE_ATTEMPTED_ENV] = "1"
-    echo(f"Caliper upgraded to {latest}; restarting dashboard...")
+    echo(f"Caliper upgraded to {release.version}; restarting dashboard...")
     execv(sys.executable, [sys.executable, "-m", "caliper", *argv[1:]])
     return "reexec"
 
 
+def fetch_latest_release(timeout: int = 2) -> AvailableRelease | None:
+    return _fetch_latest_from_github(timeout) or _release_from_version(
+        fetch_latest_version(timeout)
+    )
+
+
 def fetch_latest_version(timeout: int = 2) -> str | None:
-    return _fetch_latest_from_simple_index(timeout) or _fetch_latest_from_project_json(timeout)
+    versions = [
+        version
+        for version in (
+            _fetch_latest_from_simple_index(timeout),
+            _fetch_latest_from_project_json(timeout),
+        )
+        if version
+    ]
+    return max(versions, key=_version_tuple) if versions else None
+
+
+def _fetch_latest_from_github(timeout: int) -> AvailableRelease | None:
+    try:
+        resolved = resolve_url(
+            GITHUB_LATEST_RELEASE_URL,
+            allowed_schemes={"https"},
+            source_kind="GitHub latest release",
+            accept="text/html,*/*",
+            timeout=timeout,
+            user_agents=(CALIPER_USER_AGENT, BROWSER_USER_AGENT),
+        )
+    except (OSError, TimeoutError):
+        return None
+
+    match = re.search(r"/releases/tag/v(?P<version>\d+(?:\.\d+)+)", resolved)
+    if not match:
+        return None
+    version = match.group("version")
+    wheel_url = (
+        "https://github.com/rajdeepmondaldotcom/caliper/releases/download/"
+        f"v{version}/caliper_ai-{version}-py3-none-any.whl"
+    )
+    return AvailableRelease(version=version, install_target=wheel_url)
 
 
 def _fetch_latest_from_simple_index(timeout: int) -> str | None:
@@ -117,6 +163,18 @@ def _fetch_latest_from_project_json(timeout: int) -> str | None:
     info = payload.get("info") if isinstance(payload, dict) else None
     version = info.get("version") if isinstance(info, dict) else None
     return str(version) if version else None
+
+
+def _release_from_version(version: str | None) -> AvailableRelease | None:
+    if not version:
+        return None
+    return AvailableRelease(version=version, install_target=f"caliper-ai=={version}")
+
+
+def _coerce_release(value: str | AvailableRelease | None) -> AvailableRelease | None:
+    if isinstance(value, AvailableRelease):
+        return value
+    return _release_from_version(value)
 
 
 def _versions_from_simple_html(text: str) -> set[str]:
